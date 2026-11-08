@@ -1,0 +1,40 @@
+# OS metadata
+.DS_Store
+Thumbs.db
+AGENTS.md
+
+# Dependencies
+node_modules/
+
+# Build output
+target/
+/ssg/dist/
+/api/build/
+/release/bin/
+/release/dist/
+/artifacts/
+*.tsbuildinfo
+
+# Generated third-party license notices
+/ssg/public/licenses/
+
+# Test reports and coverage
+playwright-report/
+test-results/
+coverage/
+
+# Local screenshots and temporary files
+screenshot/
+temp/
+
+# Local configuration; keep example files in version control
+.env
+.env.*
+!.env.example
+!.env.json.example
+wrangler.jsonc
+.wrangler/
+
+# Logs and caches
+*.log
+__pycache__/

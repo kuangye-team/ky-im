@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#4b61ee" />
+    <meta
+      name="description"
+      content="蜂鸟，轻快连接，自在分享。无需注册，与身边的人聊天、分享照片和文件。"
+    />
+    <title>蜂鸟 · 轻快连接，自在分享</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="application-name" content="蜂鸟 · Hummingbird" />
+    <meta name="apple-mobile-web-app-title" content="蜂鸟 · Hummingbird" />
+    <script>
+      // Apply the saved palette before the first paint, including the loading screen.
+      (() => {
+        const config = __THEME_CONFIG__;
+        let selected = config.defaultTheme;
+        try {
+          selected = localStorage.getItem(config.storageKey) || selected;
+        } catch {}
+        const theme =
+          config.options.find((item) => item.id === selected) ||
+          config.options[0];
+        const root = document.documentElement;
+        root.dataset.theme = theme.id;
+        root.style.colorScheme = theme.scheme;
+        for (const [name, value] of Object.entries(theme.colors)) {
+          root.style.setProperty(name, value);
+        }
+        root.style.backgroundColor = "var(--page)";
+        document.querySelector('meta[name="theme-color"]').content =
+          theme.colors["--header-start"];
+        document.querySelector('link[rel="icon"]').href =
+          `/icons/${theme.id}/favicon.svg`;
+        root.style.setProperty("--brand-bird", `url("/icons/${theme.id}/bird.svg")`);
+      })();
+    </script>
+    <!-- 首屏 loading 完全内嵌，脚本/CSS 下载前即可显示，无外部素材依赖。 -->
+    <style>
+      #boot-loading {
+        /* __BOOT_THEME__ */
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        overflow: auto;
+        padding: 28px;
+        background:
+          radial-gradient(
+            ellipse at 15% 12%,
+            var(--boot-blue),
+            transparent 58%
+          ),
+          radial-gradient(ellipse at 90% 90%, var(--boot-sky), transparent 60%),
+          var(--boot-base);
+        color: var(--boot-ink);
+        font:
+          14px/1.6 system-ui,
+          -apple-system,
+          "Segoe UI",
+          sans-serif;
+        text-align: center;
+        isolation: isolate;
+      }
+      #boot-loading::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background-image: radial-gradient(
+          var(--boot-pattern) 0.8px,
+          transparent 0.8px
+        );
+        background-size: var(--boot-pattern-size) var(--boot-pattern-size);
+        mask-image: radial-gradient(
+          ellipse at center,
+          transparent 10%,
+          #000 80%
+        );
+      }
+      #boot-loading .boot-content {
+        box-sizing: border-box;
+        display: grid;
+        justify-items: center;
+        width: min(380px, calc(100vw - 48px));
+        padding: 42px 26px 32px;
+      }
+      #boot-loading .boot-symbol {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 90px;
+        height: 90px;
+        margin-bottom: 22px;
+        border: 1px solid var(--boot-orbit);
+        border-radius: 50%;
+        background: var(--surface);
+        box-shadow: 0 0 36px color-mix(in srgb, var(--primary) 6%, transparent);
+      }
+      #boot-loading .boot-orbit {
+        position: absolute;
+        inset: 7px;
+        box-sizing: border-box;
+        border: 2px solid var(--boot-orbit);
+        border-top-color: var(--boot-accent);
+        border-radius: 50%;
+        animation: boot-spin var(--boot-spin-duration) linear infinite;
+      }
+      #boot-loading .boot-symbol svg {
+        width: 40px;
+        height: 40px;
+        color: var(--boot-accent);
+      }
+      #boot-loading h1 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 650;
+        letter-spacing: -0.7px;
+      }
+      #boot-loading p {
+        margin: 0;
+      }
+      #boot-loading #boot-tagline {
+        margin-top: 6px;
+        color: var(--boot-muted);
+        font-size: 13px;
+      }
+      #boot-loading #boot-message {
+        max-width: 310px;
+        margin-top: 28px;
+        color: var(--boot-muted);
+        font-size: 12px;
+      }
+      #boot-loading [hidden] {
+        display: none;
+      }
+      #boot-reload {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 18px;
+        border: 1px solid var(--boot-orbit);
+        border-radius: 10px;
+        padding: 10px 20px;
+        background: var(--surface);
+        color: var(--boot-accent);
+        font: inherit;
+        cursor: pointer;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #boot-loading .boot-orbit {
+          animation: none;
+        }
+      }
+    </style>
+    <noscript
+      ><style>
+        #boot-loading {
+          display: none;
+        }
+      </style></noscript
+    >
+  </head>
+  <body>
+    <div id="root" aria-busy="true" inert></div>
+    <div id="boot-loading" role="status" aria-live="polite">
+      <div class="boot-content">
+        <div class="boot-symbol" aria-hidden="true">
+          <span class="boot-orbit"></span>
+          __BOOT_BIRD__
+        </div>
+        <h1 id="boot-brand"></h1>
+        <p id="boot-tagline"></p>
+        <p id="boot-message"></p>
+        <button id="boot-reload" type="button" hidden>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+            <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+            <path d="M8 16H3v5" />
+          </svg>
+          <span></span>
+        </button>
+      </div>
+    </div>
+    <noscript
+      >请启用 JavaScript 以打开蜂鸟。Please enable JavaScript to open
+      Hummingbird.</noscript
+    >
+    <script>
+      // 与应用的语言偏好保持一致；localStorage 不可用时仍能显示首屏。
+      (() => {
+        const config = __BOOT_CONFIG__;
+        let preference = config.language.defaultPreference;
+        try {
+          preference =
+            localStorage.getItem(config.language.storageKey) ||
+            config.language.defaultPreference;
+        } catch {}
+        const language = config.language.supported.includes(preference)
+          ? preference
+          : /^zh\b/i.test(
+                navigator.languages?.[0] ||
+                  navigator.language ||
+                  config.language.fallback,
+              )
+            ? "zh-CN"
+            : config.language.fallback;
+        const copy = config.copy[language];
+        document.documentElement.lang = language;
+        document.title = copy.title;
+        document.getElementById("boot-brand").textContent = copy.brand;
+        document.getElementById("boot-tagline").textContent = copy.tagline;
+        document.getElementById("boot-message").textContent = copy.message;
+        const reload = document.getElementById("boot-reload");
+        reload.querySelector("span").textContent = copy.reload;
+        reload.addEventListener("click", () => location.reload());
+        let ready = false;
+        let failed = false;
+        const styles = Array.from(
+          document.querySelectorAll("link[data-app-style]"),
+        );
+        const finish = () => {
+          if (!ready || failed || styles.some((link) => !link.sheet)) return;
+          styles.forEach((link) => {
+            link.media = "all";
+          });
+          document.getElementById("boot-loading")?.remove();
+          document.getElementById("root")?.removeAttribute("aria-busy");
+          document.getElementById("root")?.removeAttribute("inert");
+        };
+        const fail = () => {
+          const loading = document.getElementById("boot-loading");
+          if (!loading) return;
+          failed = true;
+          loading.querySelector(".boot-orbit").hidden = true;
+          document.getElementById("boot-message").textContent = copy.failed;
+          reload.hidden = false;
+        };
+        document.addEventListener("hummingbird:ready", () => {
+          ready = true;
+          finish();
+        });
+        styles.forEach((link) => {
+          link.addEventListener("load", () => {
+            link.media = "all";
+            // 非匹配媒体的样式表可能延迟创建 CSSOM，等本帧样式应用后再交接。
+            requestAnimationFrame(finish);
+          });
+        });
+        if (styles.some((link) => link.dataset.failed)) fail();
+        // 入口或样式下载失败时提供重试，不让 loading 一直停留。
+        window.addEventListener(
+          "error",
+          (event) => {
+            if (
+              !styles.includes(event.target) &&
+              (!(event.target instanceof HTMLScriptElement) ||
+                event.target.type !== "module")
+            )
+              return;
+            fail();
+          },
+          true,
+        );
+      })();
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

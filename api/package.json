@@ -1,0 +1,21 @@
+{
+  "name": "im-api",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env.local ../scripts/dev-api.mjs",
+    "build": "cargo build --release --locked",
+    "build:worker": "worker-build --no-panic-recovery --release --locked",
+    "deploy": "wrangler deploy",
+    "preview": "node --env-file-if-exists=.env.production ../scripts/dev-api.mjs --release",
+    "test": "cargo test --locked"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.158.0"
+  }
+}

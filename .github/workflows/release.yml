@@ -1,0 +1,149 @@
+name: Publish release archive
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  frontend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ssg/package-lock.json
+      - name: Build frontend with license notices
+        env:
+          VITE_ROOM: local
+          VITE_SIGNAL_URL: ''
+        run: |
+          npm --prefix ssg ci
+          node scripts/prepare-licenses.mjs
+          npm --prefix ssg run build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-dist
+          path: ssg/dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  native:
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            filename: server_darwin_amd64
+            source: server
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            filename: server_darwin_arm64
+            source: server
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            filename: server_linux_amd64
+            source: server
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            filename: server_linux_arm64
+            source: server
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            filename: server_windows_amd64.exe
+            source: server.exe
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+      # Include the MSVC runtime so Windows hosts do not need a separate install.
+      CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS: '-C target-feature=+crt-static'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install Rust toolchain
+        shell: bash
+        run: rustup toolchain install 1.91.0 --profile minimal --target '${{ matrix.target }}'
+      - name: Install musl linker
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - name: Build native server
+        shell: bash
+        run: |
+          cargo +1.91.0 build --manifest-path api/Cargo.toml --release --locked --bin server --target '${{ matrix.target }}'
+          mkdir -p release/bin
+          cp 'api/target/${{ matrix.target }}/release/${{ matrix.source }}' 'release/bin/${{ matrix.filename }}'
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-dist
+          path: release/dist/
+      - name: Verify native launcher and HTTP service
+        run: node scripts/test-release.mjs
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.filename }}
+          path: release/bin/${{ matrix.filename }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [frontend, native]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v8
+        with:
+          name: release-dist
+          path: release/dist/
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          merge-multiple: true
+          path: release/bin/
+      - name: Package release
+        env:
+          IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE || 'kyteam/ky-im' }}
+        run: node scripts/package-release.mjs "$GITHUB_REF_NAME"
+      - name: Verify extracted archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/ky-im-extracted"
+          tar -xzf "artifacts/ky-im-${GITHUB_REF_NAME#v}.tar.gz" -C "$RUNNER_TEMP/ky-im-extracted"
+          node scripts/test-release.mjs "$RUNNER_TEMP/ky-im-extracted/release"
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          archive="artifacts/ky-im-${GITHUB_REF_NAME#v}.tar.gz"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$archive" "$archive.sha256" \
+              --verify-tag --title "ky-im ${GITHUB_REF_NAME#v}" --generate-notes
+          fi

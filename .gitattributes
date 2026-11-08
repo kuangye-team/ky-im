@@ -1,0 +1,4 @@
+# Keep Unix launchers portable even when checked out on Windows.
+release/*.sh text eol=lf
+release/*.bat text eol=crlf
+release/.env.example text eol=lf

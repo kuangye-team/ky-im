@@ -1,0 +1,17 @@
+/* The offline hint is prose, so it must not inherit the number's wide tracking. */
+.own-number-hint {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  letter-spacing: normal;
+}
+.own-number output.own-number-placeholder,
+.own-number-compact output.own-number-placeholder {
+  min-width: 0;
+  padding-left: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  letter-spacing: normal;
+  overflow-wrap: anywhere;
+}

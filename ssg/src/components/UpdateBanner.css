@@ -1,0 +1,81 @@
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: 1680px;
+  margin: 0 auto 12px;
+  padding: 14px 20px;
+  border: 1px solid var(--primary-border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 4px 18px #00000008;
+}
+.update-banner-icon {
+  display: flex;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.update-banner-copy {
+  flex: 1;
+  min-width: 0;
+}
+.update-banner-copy strong {
+  font-size: 14px;
+}
+.update-banner-copy p {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.update-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.update-banner-actions button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+.update-banner-later {
+  padding: 8px 12px;
+  color: var(--muted);
+  border-radius: 9px;
+}
+.update-banner-later:hover {
+  background: var(--primary-soft);
+}
+.update-banner-spinner {
+  animation: update-banner-spin 1s linear infinite;
+}
+@keyframes update-banner-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-banner-spinner {
+    animation: none;
+  }
+}
+@media (max-width: 600px) {
+  .update-banner {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 13px 14px;
+    border-radius: 12px;
+  }
+  .update-banner-icon {
+    padding: 8px;
+  }
+  .update-banner-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .update-banner-actions button {
+    min-height: 42px;
+  }
+}

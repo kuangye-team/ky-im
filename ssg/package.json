@@ -1,0 +1,46 @@
+{
+  "name": "im-ssg",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc -b && vite build",
+    "deploy": "wrangler deploy",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "tsc --noEmit && vitest run",
+    "test:browser": "npm run build && playwright test"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.2.1",
+    "@zip.js/zip.js": "^2.24.0",
+    "i18next": "^26.5.8",
+    "idb": "^8.0.3",
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-i18next": "^17.1.6",
+    "react-router": "^7.18.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/html-minifier-terser": "^7.0.2",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.2.0",
+    "fake-indexeddb": "^6.2.4",
+    "html-minifier-terser": "^7.2.0",
+    "sharp": "^0.35.5",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.2",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^3.2.4",
+    "workbox-window": "^7.4.1",
+    "wrangler": "^4.158.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "send",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "init": "node scripts/init-env.mjs",
+    "prepare": "node scripts/prepare-licenses.mjs",
+    "compose": "npm run init && docker compose up --build -d",
+    "dev": "npm run init && concurrently --kill-others --names api,ssg \"npm --prefix api run dev\" \"npm --prefix ssg run dev\"",
+    "dev:api": "npm run init && npm --prefix api run dev",
+    "dev:ssg": "npm run init && npm --prefix ssg run dev",
+    "build": "npm run init && npm --prefix api run build && npm --prefix ssg run build",
+    "build:api": "npm run init && npm --prefix api run build",
+    "build:ssg": "npm run init && npm --prefix ssg run build",
+    "preview": "npm run init && concurrently --kill-others --names api,ssg \"npm --prefix api run preview\" \"npm --prefix ssg run preview\"",
+    "preview:api": "npm run init && npm --prefix api run preview",
+    "preview:ssg": "npm run init && npm --prefix ssg run preview",
+    "deploy": "npm run init && npm --prefix api run deploy && npm --prefix ssg run deploy",
+    "deploy:api": "npm run init && npm --prefix api run deploy",
+    "deploy:ssg": "npm run init && npm --prefix ssg run deploy"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.7",
+    "jsonc-parser": "^3.3.1"
+  }
+}

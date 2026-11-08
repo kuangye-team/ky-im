@@ -1,0 +1,42 @@
+# Dependencies and build output
+**/node_modules
+**/target
+**/dist
+/api/build
+**/*.tsbuildinfo
+
+# Test reports and caches
+**/test-results
+**/playwright-report
+**/coverage
+**/.cache
+**/.vite
+**/.wrangler
+**/__pycache__
+**/*.log
+
+# Repository, editor, and OS metadata
+.git
+.github
+.gitignore
+**/AGENTS.md
+**/.idea
+**/.vscode
+**/.DS_Store
+**/Thumbs.db
+
+# Deployment files and documentation are not image inputs
+/docker
+/release
+/artifacts
+/compose.yml
+/README*.md
+
+# Local configuration; only examples may enter the build context
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.json.example
+**/wrangler.jsonc
+
+# Keep ssg/build/ (build tooling) and ssg/public/licenses/ (generated notices).

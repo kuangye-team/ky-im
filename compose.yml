@@ -1,0 +1,17 @@
+name: ky
+
+services:
+  im:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+        VITE_ROOM: ${VITE_ROOM:-local}
+        VITE_SIGNAL_URL: ${VITE_SIGNAL_URL:-}
+    env_file:
+      - path: ./api/.env.compose
+        required: false
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    restart: unless-stopped
