@@ -749,10 +749,10 @@ impl Store {
                     let _ = fs::remove_dir_all(&dest);
                 }
                 result?;
-                if let Some(previous) = previous {
-                    if let Some(parent) = self.root.join(relative(&previous.path)?).parent() {
-                        let _ = fs::remove_dir_all(parent);
-                    }
+                if let Some(previous) = previous
+                    && let Some(parent) = self.root.join(relative(&previous.path)?).parent()
+                {
+                    let _ = fs::remove_dir_all(parent);
                 }
                 Ok(Value::Null)
             }

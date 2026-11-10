@@ -300,10 +300,20 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
   await dialog.getByLabel("访问密钥", { exact: true }).fill("Bearer wrong");
   await dialog.getByRole("button", { name: "添加", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await page.getByRole("button", { name: "测试服务器 2", exact: true }).click();
+  const server = page
+    .getByRole("list", { name: "服务器列表" })
+    .getByRole("listitem")
+    .filter({ has: page.getByText("我的私有服务器", { exact: true }) });
+  await server.getByRole("button", { name: "测试服务器 2", exact: true }).click();
+  // The same authorization error can also appear in the global notice.
   await expect(
-    page.getByText("访问密钥不正确或无权访问，请检查后重试", { exact: true }),
+    server.getByText("访问密钥不正确或无权访问，请检查后重试", { exact: true }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "../temp/screenshot/settings-unauthorized-server.png",
+    fullPage: true,
+    animations: "disabled",
+  });
   await expect(
     page.getByLabel("启用服务器 2 的中转", { exact: true }),
   ).toBeDisabled();
@@ -313,9 +323,9 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
     .fill("Bearer browser-test-secret");
   await dialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(dialog).toBeHidden();
-  await page.getByRole("button", { name: "测试服务器 2", exact: true }).click();
+  await server.getByRole("button", { name: "测试服务器 2", exact: true }).click();
   await expect(
-    page.getByText("连接成功 · 支持中转", { exact: true }),
+    server.getByText("连接成功 · 支持中转", { exact: true }),
   ).toBeVisible();
   await page.getByLabel("启用服务器 2 的中转", { exact: true }).check();
   await expect(page.getByRole("status")).toHaveText("设置已生效。");
