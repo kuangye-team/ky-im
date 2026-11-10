@@ -59,7 +59,7 @@ export class FolderReceiver {
       this.parents.add(packet.path);
       return undefined;
     }
-    return this.destination.createFile(packet.path);
+    return this.destination.createFile(packet.path, packet.size);
   }
   receive(bytes: number) {
     if (

@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { applyEdits, modify, parse, printParseErrorCode } from "jsonc-parser";
+import { createRequire } from "node:module";
 
 const ROOT = fileURLToPath(new URL("../", import.meta.url));
 const ENV_LINE = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
@@ -79,6 +79,8 @@ export function renderEnv(template, overrides, excluded = new Set()) {
 }
 
 export function renderWrangler(template, overrides) {
+  // Desktop-only commands and release manifest assembly do not need JSONC.
+  const { applyEdits, modify, parse, printParseErrorCode } = createRequire(import.meta.url)("jsonc-parser");
   const errors = [];
   const parsed = parse(template, errors, { allowTrailingComma: true });
   if (errors.length) {
@@ -101,13 +103,15 @@ export function renderWrangler(template, overrides) {
   return result;
 }
 
-export function initEnv(root = ROOT) {
+export function initEnv(root = ROOT, { desktopOnly = false } = {}) {
   const read = (path) => readFileSync(resolve(root, path), "utf8");
   let config;
   try {
     config = object(JSON.parse(read(".env.json")), ".env.json 顶层");
   } catch (error) {
     if (error.code === "ENOENT") {
+      // CI can supply desktop signing configuration entirely through process env.
+      if (desktopOnly) return [];
       throw new Error("缺少 .env.json，请先复制 .env.json.example 并按需修改。");
     }
     throw error;
@@ -118,21 +122,32 @@ export function initEnv(root = ROOT) {
     files.push([output, renderEnv(read(template), values, excluded)]);
   };
 
-  // Compose 的 build.args 从根目录 .env 取值；前端配置只在 compose.ssg 维护。
-  env(".env.example", ".env", {
-    ...section(config, "compose.root"),
-    ...section(config, "compose.ssg"),
-  }, DEV_ONLY);
-  for (const mode of ["local", "production", "compose"]) {
-    env("api/.env.example", `api/.env.${mode}`, section(config, `${mode}.api`));
-    env("ssg/.env.example", `ssg/.env.${mode}`, section(config, `${mode}.ssg`),
-      mode === "local" ? new Set() : DEV_ONLY);
+  // Preserve legacy app/.env files until desktop.app is explicitly configured.
+  if (config.desktop !== undefined) {
+    const desktop = section(config, "desktop");
+    if (Object.hasOwn(desktop, "app"))
+      env("app/.env.example", "app/.env", section(config, "desktop.app"));
+    if (Object.hasOwn(desktop, "ssg"))
+      env("ssg/.env.example", "ssg/.env.desktop", section(config, "desktop.ssg"), new Set(["WEB_PORT"]));
   }
-  for (const app of ["api", "ssg"]) {
-    files.push([
-      `${app}/wrangler.jsonc`,
-      renderWrangler(read(`${app}/wrangler.jsonc.example`), section(config, `wrangler.${app}`)),
-    ]);
+
+  if (!desktopOnly) {
+    // Compose 的 build.args 从根目录 .env 取值；前端配置只在 compose.ssg 维护。
+    env(".env.example", ".env", {
+      ...section(config, "compose.root"),
+      ...section(config, "compose.ssg"),
+    }, DEV_ONLY);
+    for (const mode of ["local", "production", "compose"]) {
+      env("api/.env.example", `api/.env.${mode}`, section(config, `${mode}.api`));
+      env("ssg/.env.example", `ssg/.env.${mode}`, section(config, `${mode}.ssg`),
+        mode === "local" ? new Set() : DEV_ONLY);
+    }
+    for (const app of ["api", "ssg"]) {
+      files.push([
+        `${app}/wrangler.jsonc`,
+        renderWrangler(read(`${app}/wrangler.jsonc.example`), section(config, `wrangler.${app}`)),
+      ]);
+    }
   }
   // 所有模板和配置检查通过后再写入，避免格式错误导致只更新了一部分文件。
   for (const [path, content] of files) writeFileSync(resolve(root, path), content, "utf8");

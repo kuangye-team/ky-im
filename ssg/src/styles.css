@@ -1645,7 +1645,6 @@ button:hover:not(:disabled) {
   height: 175px;
 }
 .storage-page {
-  max-width: 920px;
   margin: 0 auto;
 }
 .storage-overview {
@@ -2623,7 +2622,7 @@ textarea.form-input {
     height: 100%;
   }
   .main-nav > button {
-    width: 25%;
+    width: 20%;
     height: 100%;
     border-radius: 0;
     flex-direction: column;

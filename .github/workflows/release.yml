@@ -1,16 +1,25 @@
-name: Publish release archive
+name: Publish server and desktop releases
 
 on:
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag (for example v1.1.0)
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   frontend:
@@ -18,18 +27,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: ssg/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            ssg/package-lock.json
       - name: Build frontend with license notices
         env:
           VITE_ROOM: local
           VITE_SIGNAL_URL: ''
         run: |
+          npm ci --ignore-scripts
           npm --prefix ssg ci
+          npm --prefix ssg test
+          node --test scripts/desktop.test.mjs
           node scripts/prepare-licenses.mjs
           npm --prefix ssg run build
       - uses: actions/upload-artifact@v7
@@ -74,6 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -105,14 +121,94 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  desktop:
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - runner: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            ssg/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app -> target
+          key: ${{ matrix.target }}
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix ssg ci
+      - run: cargo test --manifest-path app/Cargo.toml --locked
+      - name: Import optional Apple signing certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$APPLE_CERTIFICATE" ]; then
+            certificate="$RUNNER_TEMP/signing.p12"
+            keychain="$RUNNER_TEMP/signing.keychain-db"
+            keychain_password="$(openssl rand -hex 24)"
+            printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate"
+            security create-keychain -p "$keychain_password" "$keychain"
+            security set-keychain-settings -lut 21600 "$keychain"
+            security unlock-keychain -p "$keychain_password" "$keychain"
+            security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+            security list-keychains -d user -s "$keychain" login.keychain-db
+            rm "$certificate"
+          fi
+      - name: Build desktop installers
+        run: npm run desktop:build -- --target ${{ matrix.target }} --ci -- --locked
+        env:
+          # Repository configuration must be passed explicitly to the Vite build.
+          VITE_SIGNAL_URL: ${{ secrets.VITE_SIGNAL_URL || vars.VITE_SIGNAL_URL }}
+          VITE_API_AUTH: ${{ secrets.VITE_API_AUTH || vars.VITE_API_AUTH }}
+          VITE_ROOM: ${{ secrets.VITE_ROOM || vars.VITE_ROOM || 'local' }}
+          VITE_STORAGE_CHUNK_SIZE: ${{ secrets.VITE_STORAGE_CHUNK_SIZE || vars.VITE_STORAGE_CHUNK_SIZE || '2097152' }}
+          RELEASE_VERSION: ${{ env.RELEASE_TAG }}
+          TAURI_UPDATER_URL: ${{ vars.TAURI_UPDATER_URL || format('https://github.com/{0}/releases/latest/download/latest.json', github.repository) }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: app/dist/
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
-    needs: [frontend, native]
+    needs: [frontend, native, desktop]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.tag || github.ref }}
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -126,24 +222,34 @@ jobs:
           pattern: native-*
           merge-multiple: true
           path: release/bin/
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: app/dist/
       - name: Package release
         env:
           IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE || 'kyteam/ky-im' }}
-        run: node scripts/package-release.mjs "$GITHUB_REF_NAME"
+        run: node scripts/package-release.mjs "$RELEASE_TAG"
+      - name: Assemble signed desktop update manifest
+        env:
+          RELEASE_VERSION: ${{ env.RELEASE_TAG }}
+          TAURI_RELEASE_BASE_URL: ${{ vars.TAURI_RELEASE_BASE_URL }}
+        run: node scripts/desktop-release.mjs
       - name: Verify extracted archive
         run: |
           mkdir -p "$RUNNER_TEMP/ky-im-extracted"
-          tar -xzf "artifacts/ky-im-${GITHUB_REF_NAME#v}.tar.gz" -C "$RUNNER_TEMP/ky-im-extracted"
+          tar -xzf "artifacts/ky-im-${RELEASE_TAG#v}-bin.tar.gz" -C "$RUNNER_TEMP/ky-im-extracted"
           node scripts/test-release.mjs "$RUNNER_TEMP/ky-im-extracted/release"
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          archive="artifacts/ky-im-${GITHUB_REF_NAME#v}.tar.gz"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$archive" "$archive.sha256" --clobber
+          archive="artifacts/ky-im-${RELEASE_TAG#v}-bin.tar.gz"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* --clobber
           else
-            gh release create "$GITHUB_REF_NAME" "$archive" "$archive.sha256" \
-              --verify-tag --title "ky-im ${GITHUB_REF_NAME#v}" --generate-notes
+            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* \
+              --verify-tag --title "ky-im ${RELEASE_TAG#v}" --generate-notes
           fi

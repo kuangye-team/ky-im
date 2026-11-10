@@ -1,0 +1,48 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Ky IM",
+  "version": "../package.json",
+  "identifier": "team.kuangye.im",
+  "build": {
+    "beforeDevCommand": "npm run desktop:frontend:dev",
+    "beforeBuildCommand": "npm run desktop:frontend:build",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../ssg/desktop-dist"
+  },
+  "app": {
+    "windows": [{
+      "label": "main",
+      "title": "Ky IM",
+      "hiddenTitle": true,
+      "titleBarStyle": "Transparent",
+      "backgroundColor": "#4565ed",
+      "width": 1200,
+      "height": 820,
+      "minWidth": 800,
+      "minHeight": 600,
+      "dragDropEnabled": false
+    }],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": false,
+    "category": "SocialNetworking",
+    "shortDescription": "Chat and share files on your local network",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "macOS": { "minimumSystemVersion": "11.0", "infoPlist": "Info.plist" },
+    "windows": { "nsis": {
+      "installMode": "currentUser",
+      "languages": ["English", "SimpChinese"],
+      "displayLanguageSelector": true
+    } }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [],
+      "windows": { "installMode": "passive" }
+    }
+  }
+}

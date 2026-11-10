@@ -38,7 +38,7 @@ export function HistoryPage({
         })),
       );
       const exportedAt = new Date().toISOString();
-      download(
+      await download(
         new Blob(
           [JSON.stringify({ exportedAt, conversations: records }, null, 2)],
           {
@@ -106,7 +106,9 @@ export function HistoryPage({
             <h3>{t("清空聊天记录")}</h3>
             <p>
               {t(
-                "删除此浏览器的全部聊天、附件和联系人备注，保留你的个人资料。",
+                engine.storage.getStorageInfo
+                  ? "删除此设备的全部聊天、附件和联系人备注，保留你的个人资料。"
+                  : "删除此浏览器的全部聊天、附件和联系人备注，保留你的个人资料。",
               )}
             </p>
           </span>

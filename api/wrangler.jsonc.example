@@ -10,7 +10,8 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SignalingHub"] }],
   "vars": {
-    "CORS_ORIGINS": "",
+    "RELAY_ENABLED": "false",
+    "CORS_ORIGINS": "tauri://localhost,http://tauri.localhost,https://tauri.localhost",
     "MAX_CONNECTIONS": "4096",
     "MAX_ROOMS": "256",
     "MAX_PEERS_PER_ROOM": "128",

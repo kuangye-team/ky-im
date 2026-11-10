@@ -7,3 +7,5 @@ export {
   type StorageAdapterFactory,
 } from "./storage";
 export { MAX_FILE_SIZE, MAX_TEXT_BYTES } from "./protocol";
+
+export * from "./network";

@@ -2,7 +2,7 @@ use crate::{AppState, Config, engine::process_message, hub, protocol};
 use axum::{
     Json, Router,
     extract::{
-        ConnectInfo, State, WebSocketUpgrade,
+        ConnectInfo, RawQuery, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
     http::{HeaderMap, HeaderValue, Method, StatusCode, header},
@@ -22,7 +22,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use tower_http::{
-    cors::CorsLayer,
+    cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
     set_header::SetResponseHeaderLayer,
 };
@@ -40,10 +40,11 @@ pub fn router(state: Arc<AppState>) -> Result<Router, String> {
                 .map_err(|_| "Invalid CORS_ORIGINS value".to_owned())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut app = Router::new()
+    let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/health/details", get(health_details))
         .route("/api/ws", any(websocket))
+        .route("/api/ws/ticket", get(websocket_ticket))
         .route("/api/{*path}", any(api_not_found))
         .route("/api", any(api_not_found))
         .fallback_service(static_files)
@@ -52,43 +53,55 @@ pub fn router(state: Arc<AppState>) -> Result<Router, String> {
             HeaderValue::from_static("nosniff"),
         ))
         .with_state(state);
-    if !origins.is_empty() {
-        app = app.layer(
-            CorsLayer::new()
-                .allow_origin(origins)
-                .allow_methods([Method::GET])
-                .allow_headers([header::CONTENT_TYPE]),
-        );
-    }
+    let app = app.layer(
+        CorsLayer::new()
+            .allow_origin(AllowOrigin::predicate(move |origin, _| {
+                origins.contains(origin)
+                    || origin.to_str().is_ok_and(crate::config::is_desktop_origin)
+            }))
+            .allow_methods([Method::GET])
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]),
+    );
     Ok(app)
 }
 
-async fn health() -> Json<serde_json::Value> {
+async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     Json(json!({
         "ok": true,
         "service": "im-api",
+        "relay": state.config.relay_enabled,
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
 
-async fn health_details(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-) -> Json<serde_json::Value> {
+async fn health_details(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !crate::auth::authorized(
+        &state.config.authorization,
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok()),
+    ) {
+        return unauthorized();
+    }
     let hub = state.hub.lock().expect("hub lock poisoned");
     Json(json!({
         "ok": true,
         "service": "im-api",
+        "relay": state.config.relay_enabled,
         "version": env!("CARGO_PKG_VERSION"),
         "rooms": hub.rooms.len(),
         "peers": hub.rooms.values().map(|peers| peers.len()).sum::<usize>(),
         "headers": headers_json(&headers),
     }))
+    .into_response()
 }
 
 fn headers_json(headers: &HeaderMap) -> Value {
     let mut result = Map::new();
     for name in headers.keys() {
+        if crate::auth::sensitive_header(name.as_str()) {
+            continue;
+        }
         let values = headers
             .get_all(name)
             .iter()
@@ -100,6 +113,31 @@ fn headers_json(headers: &HeaderMap) -> Value {
     Value::Object(result)
 }
 
+fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"error": "unauthorized"})),
+    )
+        .into_response()
+}
+
+async fn websocket_ticket(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
+    if !crate::auth::authorized(
+        &state.config.authorization,
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok()),
+    ) {
+        return unauthorized();
+    }
+    (
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(json!({"ticket": crate::auth::ticket(&state.config.authorization, hub::now_ms())})),
+    )
+        .into_response()
+}
+
 async fn api_not_found() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"})))
 }
@@ -108,10 +146,21 @@ async fn websocket(
     State(state): State<Arc<AppState>>,
     ConnectInfo(address): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
+    RawQuery(query): RawQuery,
     ws: WebSocketUpgrade,
 ) -> Response {
     if !origin_allowed(&state.config, &headers) {
         return (StatusCode::FORBIDDEN, "WebSocket origin is not allowed").into_response();
+    }
+    if !crate::auth::websocket_authorized(
+        &state.config.authorization,
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok()),
+        query.as_deref().unwrap_or_default(),
+        hub::now_ms(),
+    ) {
+        return unauthorized();
     }
     let Ok(permit) = Arc::clone(&state.connections).try_acquire_owned() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "Connection limit reached").into_response();
@@ -203,7 +252,9 @@ fn origin_allowed(config: &Config, headers: &HeaderMap) -> bool {
     let Ok(origin) = origin.to_str() else {
         return false;
     };
-    if config.cors_origins.iter().any(|allowed| allowed == origin) {
+    if crate::config::is_desktop_origin(origin)
+        || config.cors_origins.iter().any(|allowed| allowed == origin)
+    {
         return true;
     }
     let Some(host) = headers
@@ -249,8 +300,7 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr)
     let mut identity: Option<Identity> = None;
     let started = Instant::now();
     let mut last_seen = started;
-    let mut rate_window = started;
-    let mut messages_in_window = 0usize;
+    let mut rate = protocol::MessageRate::default();
     let mut heartbeat = tokio::time::interval(state.config.heartbeat_interval);
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
     heartbeat.tick().await;
@@ -282,20 +332,20 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr)
             incoming = socket.recv() => {
                 let Some(Ok(message)) = incoming else { break; };
                 last_seen = Instant::now();
-                if rate_window.elapsed() >= Duration::from_secs(10) {
-                    rate_window = Instant::now();
-                    messages_in_window = 0;
-                }
-                messages_in_window += 1;
-                if messages_in_window > 240 {
+                let parsed = match &message {
+                    Message::Text(text) => serde_json::from_str::<ClientMessage>(text).ok(),
+                    _ => None,
+                };
+                let relay = state.config.relay_enabled && matches!(parsed, Some(ClientMessage::Relay { .. }));
+                if !rate.allow(hub::now_ms(), relay, match &message { Message::Text(s) => s.len(), _ => 0 }) {
                     send_json(&mut socket, ServerMessage::error("rate_limited", "Too many messages; reconnect shortly")).await;
                     break;
                 }
                 match message {
-                    Message::Text(text) => {
-                        let result = match serde_json::from_str::<ClientMessage>(&text) {
-                            Ok(message) => process_message(&state, message, source_ip, &mut identity, &generation, &transport),
-                            Err(_) => Err(ServerMessage::error("invalid_message", "Expected a valid JSON protocol message")),
+                    Message::Text(_) => {
+                        let result = match parsed {
+                            Some(message) => process_message(&state, message, source_ip, &mut identity, &generation, &transport),
+                            None => Err(ServerMessage::error("invalid_message", "Expected a valid JSON protocol message")),
                         };
                         if let Err(message) = result
                             && !send_json(&mut socket, message).await { break; }
@@ -304,7 +354,7 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr)
                     Message::Pong(_) => {}
                     Message::Close(_) => break,
                     Message::Binary(_) => {
-                        if !send_json(&mut socket, ServerMessage::error("unsupported_message", "Send text JSON; files belong on the WebRTC data channel")).await { break; }
+                        if !send_json(&mut socket, ServerMessage::error("unsupported_message", "Send JSON protocol frames")).await { break; }
                     }
                 }
             }
@@ -346,7 +396,7 @@ mod tests {
         let (close, _) = watch::channel(None);
         let mut identity = None;
         let profile = serde_json::from_value(json!({
-            "id": id, "name": id, "numericId": preferred_number,
+            "id": id, "name": id, "numericId": preferred_number, "clientType": "web",
         }))
         .unwrap();
         process_message(

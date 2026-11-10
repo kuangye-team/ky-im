@@ -1,5 +1,44 @@
 /** 核心层继续保存稳定的原始错误；只在界面展示时翻译，历史错误也可随语言切换。 */
 export const errorEnglish: Record<string, string> = {
+  "访问密钥格式不正确，请重新填写":
+    "The access key format is invalid. Please enter it again.",
+  "访问密钥不正确或无权访问，请检查后重试":
+    "The access key is incorrect or access is denied. Please check and try again.",
+
+  "请先测试服务器，确认支持中转后再开启":
+    "Test the server to confirm relay support before enabling it.",
+  "发送内容过多，请稍后重试":
+    "Too much content is being sent. Try again later.",
+
+  "数据目录正被另一个客户端使用，请关闭其他实例后重试":
+    "Another client is using this data directory. Close the other instance and try again.",
+  "文件夹包含符号链接，请移除后重试":
+    "The folder contains symbolic links. Remove them and try again.",
+
+  请等待文件传输完成后再修改存储目录:
+    "Wait for file transfers to finish before changing the storage directory",
+  "正在迁移存储，请稍后重试":
+    "Storage is being moved. Please try again shortly.",
+  请选择当前存储目录之外的空文件夹:
+    "Choose an empty folder outside the current storage directory",
+  "请选择空文件夹，避免覆盖已有数据":
+    "Choose an empty folder to avoid overwriting existing data",
+  "存储迁移校验失败，原目录未改变":
+    "Storage verification failed. The original directory is unchanged.",
+  "数据存储目录不可用，请连接原存储磁盘后重试":
+    "The storage directory is unavailable. Reconnect the storage drive and try again.",
+  请选择数据存储目录之外的位置:
+    "Choose a location outside the data storage directory",
+  存储目录不能包含符号链接:
+    "The storage directory cannot contain symbolic links",
+  大文件请使用另存为或转发: "Use Save As or Forward for large files",
+
+  "局域网内的设备会自动出现，无需蜂鸟号":
+    "Local devices appear automatically. No Hummingbird number is needed.",
+  "传输缓冲区已满，请稍后重试":
+    "The transfer buffer is full. Try again shortly.",
+  文件已关闭: "The file has been closed.",
+  文件未能完整保存: "The file could not be saved completely.",
   "当前浏览器不支持保存文件夹，请使用电脑上的 Chrome 或 Edge 打开安全连接后重试":
     "This browser cannot save folders. Open a secure connection in Chrome or Edge on a computer and try again.",
   "文件夹名称无法使用，请重命名后重试":

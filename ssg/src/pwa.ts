@@ -67,7 +67,7 @@ function reloadIfAllowed() {
 }
 
 export function startAppUpdates() {
-  if (started || !("serviceWorker" in navigator)) return;
+  if (import.meta.env.VITE_DESKTOP || started || !("serviceWorker" in navigator)) return;
   started = true;
   const onActivated = () => {
     activatedUpdate = true;

@@ -10,11 +10,20 @@
     "deploy": "wrangler deploy",
     "preview": "vite preview --host 0.0.0.0",
     "test": "tsc --noEmit && vitest run",
-    "test:browser": "npm run build && playwright test"
+    "test:browser": "playwright test --config tests/config/playwright.browser.config.ts",
+    "test:pwa": "playwright test --config tests/config/playwright.pwa.config.ts",
+    "test:e2e": "npm run test:browser && npm run test:relay && npm run test:pwa",
+    "test:relay": "playwright test --config tests/config/playwright.relay.config.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.2.1",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
+    "@tauri-apps/plugin-fs": "^2.7.1",
+    "@tauri-apps/plugin-opener": "^2.7.2",
+    "@tauri-apps/plugin-process": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.14.1",
     "@zip.js/zip.js": "^2.24.0",
     "i18next": "^26.5.8",
     "idb": "^8.0.3",
@@ -27,6 +36,7 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/html-minifier-terser": "^7.0.2",
+    "@types/node": "^22.20.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^5.2.0",

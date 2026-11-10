@@ -11,6 +11,11 @@ import { CHUNK_SIZE, FOLDER_CONFIG, TRANSFER_CONFIG } from "../config";
 vi.mock("../config", async (original) => ({
   ...(await original<typeof import("../config")>()),
   MAX_FILE_SIZE: 64 * 1024,
+  CHUNK_SIZE: 16 * 1024, // Scale lifecycle windows; protocol/browser tests exercise real 128 KiB frames.
+  STORAGE_CONFIG: {
+    ...(await original<typeof import("../config")>()).STORAGE_CONFIG,
+    chunkBytes: 64 * 1024,
+  },
   TRANSFER_CONFIG: {
     ...(await original<typeof import("../config")>()).TRANSFER_CONFIG,
     streamWindowBytes: 32 * 1024,
@@ -18,6 +23,7 @@ vi.mock("../config", async (original) => ({
 }));
 
 class Channel extends EventTarget {
+  maxMessageSize?: number;
   readyState = "connecting";
   binaryType = "arraybuffer";
   bufferedAmount = 0;
@@ -114,6 +120,7 @@ const me: Profile = {
   color: "#597461",
   bio: "",
   device: "Mac",
+  clientType: "web" as const,
 };
 const peer: Profile = {
   ...me,
@@ -828,5 +835,370 @@ describe("direct folder transfers", () => {
       "对方暂不支持接收文件夹，请更新后重试",
     );
     expect(channel.sent.some((p) => p instanceof ArrayBuffer)).toBe(false);
+  });
+});
+
+describe("managed desktop transfers", () => {
+  it("respects a smaller negotiated WebRTC frame limit without changing file bytes", async () => {
+    const { engine, channel, pc } = await setup();
+    Object.assign(pc, { sctp: { maxMessageSize: 8192 + 44 } });
+    const bytes = Uint8Array.from({ length: 20_000 }, (_, i) => i % 251);
+    const sending = engine.sendFiles([new File([bytes], "limited.bin")]);
+    await vi.waitFor(() => expect(controls(channel).some((p) => p.type === "file-start")).toBe(true));
+    const id = engine.getSnapshot().messages[0].id;
+    channel.receive(JSON.stringify({ type: "file-accept", id }));
+    expect(await sending).toBe(true);
+    const frames = channel.sent.filter((p): p is ArrayBuffer => p instanceof ArrayBuffer);
+    expect(frames.map((p) => p.byteLength)).toEqual([8192 + 44, 8192 + 44, 3616 + 44]);
+    const received = new Uint8Array(bytes.length);
+    frames.forEach((frame, index) => received.set(decodeChunk(frame)!.data, index * 8192));
+    expect(received).toEqual(bytes);
+    channel.receive(JSON.stringify({ type: "ack", id }));
+  });
+  it("offers a 600 MiB desktop file without reading or caching it before refusal", async () => {
+    const { engine, storage, channel } = await setup();
+    const begin = vi.fn(async () => destination());
+    Object.assign(storage, { createFileDestination: begin });
+    const file = new File([], "600MiB.bin");
+    Object.defineProperty(file, "size", { value: 600 * 1024 ** 2 });
+    const read = vi.spyOn(file, "slice").mockImplementation(() => {
+      throw new Error("Must not read before consent");
+    });
+    const sending = engine.sendFiles([file]).catch((error) => error as Error);
+    await vi.waitFor(() => expect(controls(channel)).toContainEqual(
+      expect.objectContaining({ type: "file-start", size: 600 * 1024 ** 2 }),
+    ));
+    const id = engine.getSnapshot().messages[0].id;
+    expect(begin).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    channel.receive(JSON.stringify({ type: "transfer-error", id, message: "对方已拒绝接收此文件" }));
+    expect(await sending).toBeInstanceOf(Error);
+    expect(begin).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+    expect(channel.sent.some((p) => p instanceof ArrayBuffer)).toBe(false);
+  });
+
+  it.each(["cancel", "delete", "write-error", "close-error", "changed-source"])(
+    "discards the sender's incomplete local copy on %s", async (mode) => {
+      const { engine, storage, channel } = await setup();
+      const sink = destination();
+      Object.assign(storage, { createFileDestination: async () => sink });
+      if (mode === "write-error") sink.write.mockRejectedValueOnce(new Error("disk full"));
+      if (mode === "close-error") sink.close.mockRejectedValueOnce(new Error("disk full"));
+      const file = new File([new Uint8Array(MAX_FILE_SIZE + 17)], "partial.bin");
+      if (mode === "changed-source") vi.spyOn(file, "slice").mockReturnValue(new Blob(["short"]));
+      const sending = engine.sendFiles([file]).catch(() => false);
+      await vi.waitFor(() => expect(controls(channel).some((p) => p.type === "file-start")).toBe(true));
+      const id = engine.getSnapshot().messages[0].id;
+      channel.receive(JSON.stringify({ type: "file-accept", id }));
+      if (mode === "cancel" || mode === "delete" || mode === "close-error") {
+        await vi.waitFor(() => expect(channel.sent.filter((p) => p instanceof ArrayBuffer)).toHaveLength(2));
+        if (mode === "cancel") await engine.cancelTransfer(id);
+        else if (mode === "delete") await engine.deleteMessage(id);
+        else {
+          channel.receive(JSON.stringify({ type: "file-progress", id, received: TRANSFER_CONFIG.streamWindowBytes }));
+          await vi.waitFor(() => expect(channel.sent.filter((p) => p instanceof ArrayBuffer)).toHaveLength(4));
+          channel.receive(JSON.stringify({ type: "file-progress", id, received: 2 * TRANSFER_CONFIG.streamWindowBytes }));
+        }
+      }
+      expect(await sending).toBe(false);
+      expect(sink.abort).toHaveBeenCalledOnce();
+      expect(controls(channel).some((p) => p.type === "file-end")).toBe(false);
+      if (mode === "delete") expect(engine.getSnapshot().messages).toEqual([]);
+      else expect(engine.getSnapshot().messages[0].status).toBe("failed");
+    },
+  );
+
+  it("aborts a sender destination that opens after cancellation", async () => {
+    const { engine, storage, channel } = await setup();
+    const sink = destination();
+    let release!: (sink: ReturnType<typeof destination>) => void;
+    const begin = vi.fn(() => new Promise<ReturnType<typeof destination>>((resolve) => { release = resolve; }));
+    Object.assign(storage, { createFileDestination: begin });
+    const sending = engine.sendFiles([new File(["payload"], "late.bin")]).catch(() => false);
+    await vi.waitFor(() => expect(controls(channel).some((p) => p.type === "file-start")).toBe(true));
+    const id = engine.getSnapshot().messages[0].id;
+    channel.receive(JSON.stringify({ type: "file-accept", id }));
+    await vi.waitFor(() => expect(begin).toHaveBeenCalledOnce());
+    await engine.cancelTransfer(id);
+    release(sink);
+    expect(await sending).toBe(false);
+    expect(sink.abort).toHaveBeenCalledOnce();
+    expect(sink.write).not.toHaveBeenCalled();
+  });
+
+  it("persists a desktop sender's large file while still honoring wire streaming windows", async () => {
+    const { engine, storage, channel } = await setup();
+    const sink = destination();
+    let release!: () => void;
+    sink.write.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    Object.assign(storage, { createFileDestination: vi.fn(async () => sink) });
+    const save = vi.spyOn(storage, "saveAttachment");
+    const bytes = new Uint8Array(MAX_FILE_SIZE + 17).fill(42);
+    const file = new File([bytes], "native.bin");
+    const read = vi.spyOn(file, "slice");
+    const sending = engine.sendFiles([file]);
+    await vi.waitFor(() =>
+      expect(controls(channel).some((p) => p.type === "file-start")).toBe(true),
+    );
+    const id = engine.getSnapshot().messages[0].id;
+    expect(read).not.toHaveBeenCalled();
+    expect(sink.write).not.toHaveBeenCalled();
+    expect(sink.close).not.toHaveBeenCalled();
+    expect(engine.getSnapshot().messages[0].attachmentStorage).toBe("managed");
+    channel.receive(JSON.stringify({ type: "file-accept", id }));
+    const chunks = () => channel.sent.filter((p) => p instanceof ArrayBuffer);
+    await vi.waitFor(() => expect(chunks()).toHaveLength(2));
+    expect(sink.write).toHaveBeenCalledOnce();
+    expect(read).toHaveBeenCalledExactlyOnceWith(0, 64 * 1024);
+    expect(sink.close).not.toHaveBeenCalled();
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(chunks()).toHaveLength(2);
+    channel.receive(
+      JSON.stringify({
+        type: "file-progress",
+        id,
+        received: TRANSFER_CONFIG.streamWindowBytes,
+      }),
+    );
+    await vi.waitFor(() => expect(chunks()).toHaveLength(4));
+    channel.receive(
+      JSON.stringify({
+        type: "file-progress",
+        id,
+        received: 2 * TRANSFER_CONFIG.streamWindowBytes,
+      }),
+    );
+    expect(await sending).toBe(true);
+    expect(read.mock.calls).toEqual([[0, 64 * 1024], [64 * 1024, bytes.length]]);
+    expect(sink.write.mock.calls.map(([blob]) => blob.size)).toEqual([64 * 1024, 17]);
+    expect(sink.close).toHaveBeenCalledOnce();
+    expect(save).not.toHaveBeenCalled();
+    channel.receive(JSON.stringify({ type: "ack", id }));
+    await vi.waitFor(() =>
+      expect(engine.getSnapshot().messages[0].status).toBe("delivered"),
+    );
+  });
+
+  it("lets desktop receivers request bounded windows for small files sent by browsers", async () => {
+    const { engine, channel } = await setup();
+    const sending = engine.sendFiles([
+      new File([new Uint8Array(MAX_FILE_SIZE)], "small.bin"),
+    ]);
+    await vi.waitFor(() =>
+      expect(controls(channel).some((p) => p.type === "file-start")).toBe(true),
+    );
+    const id = engine.getSnapshot().messages[0].id;
+    channel.receive(
+      JSON.stringify({ type: "file-accept", id, streaming: true }),
+    );
+    const chunks = () => channel.sent.filter((p) => p instanceof ArrayBuffer);
+    await vi.waitFor(() => expect(chunks()).toHaveLength(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(chunks()).toHaveLength(2);
+    channel.receive(
+      JSON.stringify({
+        type: "file-progress",
+        id,
+        received: TRANSFER_CONFIG.streamWindowBytes,
+      }),
+    );
+    expect(await sending).toBe(true);
+    channel.receive(JSON.stringify({ type: "ack", id }));
+  });
+
+  it("sends even tiny desktop folders as entries without the browser ZIP policy", async () => {
+    const { engine, storage, channel } = await setup();
+    Object.assign(storage, { createFolderDestination: vi.fn() });
+    const sending = engine.sendFolder(
+      async () => ({
+        name: "folder",
+        entries: [{ kind: "directory", path: "empty" }],
+      }),
+      () => {},
+      new AbortController().signal,
+    );
+    const result = sending.catch(() => undefined);
+    await vi.waitFor(() =>
+      expect(controls(channel).some((p) => p.type === "folder-start")).toBe(
+        true,
+      ),
+    );
+    expect(controls(channel).some((p) => p.type === "file-start")).toBe(false);
+    await engine.cancelTransfer(engine.getSnapshot().messages[0].id);
+    await result;
+  });
+
+  it("automatically accepts files above the browser limit and cleans up on cancellation", async () => {
+    const { engine, storage, channel } = await setup();
+    const sink = destination();
+    const begin = vi.fn(async () => sink);
+    Object.assign(storage, { createFileDestination: begin });
+    await engine.updatePeerAutoAcceptFiles(peer.id, true);
+    const id = offer(channel);
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({
+        type: "file-accept",
+        id,
+        streaming: true,
+      }),
+    );
+    expect(begin).toHaveBeenCalledOnce();
+    expect(engine.getSnapshot().messages[0].attachmentStorage).toBe("managed");
+    expect(engine.getSnapshot().messages[0].status).toBe("sending");
+    await engine.cancelTransfer(id);
+    expect(sink.abort).toHaveBeenCalledOnce();
+    expect(sink.close).not.toHaveBeenCalled();
+  });
+
+  it("requires consent when auto receive is off and acknowledges only after the managed file commits", async () => {
+    const { engine, storage, channel } = await setup();
+    const sink = destination();
+    let finish!: () => void;
+    sink.close.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const begin = vi.fn(async () => sink);
+    Object.assign(storage, { createFileDestination: begin });
+    const save = vi.spyOn(storage, "saveAttachment");
+    const id = offer(channel, 3);
+    await pending(engine, id);
+    expect(begin).not.toHaveBeenCalled();
+    await engine.acceptFile(id);
+    channel.receive(encodeChunk(id, 0, new TextEncoder().encode("abc").buffer));
+    channel.receive(JSON.stringify({ type: "file-end", id }));
+    await vi.waitFor(() => expect(sink.close).toHaveBeenCalledOnce());
+    expect(controls(channel).some((p) => p.type === "ack")).toBe(false);
+    expect(save).not.toHaveBeenCalled();
+    finish();
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({ type: "ack", id }),
+    );
+    expect(await sink.write.mock.calls[0][0].text()).toBe("abc");
+  });
+
+  it("commits a whole managed folder after all entries, including an empty folder", async () => {
+    const { engine, storage, channel } = await setup();
+    const sink = destination();
+    const target = {
+      createDirectory: vi.fn(async (_path: string) => {}),
+      createFile: vi.fn(async (_path: string, _size?: number) => sink),
+      close: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+    };
+    Object.assign(storage, {
+      createFolderDestination: vi.fn(async () => target),
+    });
+    await engine.updatePeerAutoAcceptFiles(peer.id, true);
+    const id = offerFolder(channel, 3, 1, 1);
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({
+        type: "file-accept",
+        id,
+        streaming: true,
+      }),
+    );
+    channel.receive(
+      JSON.stringify({
+        type: "folder-entry",
+        id,
+        index: 0,
+        kind: "directory",
+        path: "empty",
+        size: 0,
+      }),
+    );
+    channel.receive(JSON.stringify({ type: "folder-entry-end", id, index: 0 }));
+    channel.receive(
+      JSON.stringify({
+        type: "folder-entry",
+        id,
+        index: 1,
+        kind: "file",
+        path: "a.txt",
+        size: 3,
+      }),
+    );
+    channel.receive(encodeChunk(id, 0, new TextEncoder().encode("abc").buffer));
+    channel.receive(JSON.stringify({ type: "folder-entry-end", id, index: 1 }));
+    await vi.waitFor(() => expect(sink.close).toHaveBeenCalledOnce());
+    expect(target.close).not.toHaveBeenCalled();
+    channel.receive(JSON.stringify({ type: "folder-end", id }));
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({ type: "ack", id }),
+    );
+    expect(target.createFile).toHaveBeenCalledWith("a.txt", 3);
+    expect(target.close).toHaveBeenCalledOnce();
+    expect(target.abort).not.toHaveBeenCalled();
+  });
+
+  it("removes the managed folder cache after a malformed entry", async () => {
+    const { engine, storage, channel } = await setup();
+    const target = {
+      createDirectory: vi.fn(),
+      createFile: vi.fn(),
+      close: vi.fn(),
+      abort: vi.fn(async () => {}),
+    };
+    Object.assign(storage, {
+      createFolderDestination: vi.fn(async () => target),
+    });
+    await engine.updatePeerAutoAcceptFiles(peer.id, true);
+    const id = offerFolder(channel, 1, 1, 0);
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({
+        type: "file-accept",
+        id,
+        streaming: true,
+      }),
+    );
+    channel.receive(
+      JSON.stringify({
+        type: "folder-entry",
+        id,
+        index: 0,
+        kind: "file",
+        path: "missing/a.txt",
+        size: 1,
+      }),
+    );
+    await vi.waitFor(() => expect(target.abort).toHaveBeenCalledOnce());
+    expect(target.close).not.toHaveBeenCalled();
+  });
+
+  it("rejects migration during transfers and defers new offers while migration is running", async () => {
+    const { engine, storage, channel } = await setup();
+    let finish!: () => void;
+    const move = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ directory: "new", usage: 0, cacheUsage: 0 });
+        }),
+    );
+    Object.assign(storage, { moveStorage: move });
+    const id = offer(channel, 1);
+    await pending(engine, id);
+    await expect(engine.moveStorage("new")).rejects.toThrow(
+      "请等待文件传输完成",
+    );
+    expect(move).not.toHaveBeenCalled();
+    await engine.cancelTransfer(id);
+    const migration = engine.moveStorage("new");
+    expect(engine.hasPendingTransfers()).toBe(true);
+    const denied = offer(channel, 1);
+    await vi.waitFor(() =>
+      expect(
+        controls(channel).some(
+          (p) => p.type === "transfer-error" && p.id === denied,
+        ),
+      ).toBe(true),
+    );
+    finish();
+    await migration;
+    expect(engine.hasPendingTransfers()).toBe(false);
   });
 });

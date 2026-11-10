@@ -40,8 +40,6 @@ try {
     "release/start_win.bat",
     "release/start_linux.sh",
     "release/start_mac.sh",
-    "release/README.md",
-    "release/README.zh.md",
     "LICENSE",
   ]) {
     await copyFile(join(root, path), join(staging, path));
@@ -69,7 +67,7 @@ try {
     .replace(/^IMAGE_TAG=.*$/m, `IMAGE_TAG=v${version}`));
 
   await mkdir(output, { recursive: true });
-  const filename = `ky-im-${version}.tar.gz`;
+  const filename = `ky-im-${version}-bin.tar.gz`;
   const archive = join(output, filename);
   execFileSync("tar", ["-czf", archive, "-C", staging, "docker", "release", "LICENSE"], {
     env: { ...process.env, COPYFILE_DISABLE: "1" },

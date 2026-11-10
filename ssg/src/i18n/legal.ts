@@ -1,4 +1,21 @@
 export const legalEnglish: Record<string, string> = {
+  "聊天直达对方，记录留在自己的设备。":
+    "Chats go directly to the recipient; history stays on your device.",
+  "客户端使用 SQLite 保存资料、联系人和聊天记录，附件保存在本地数据目录。语言、网络配置与在线状态也保存在当前设备。":
+    "The desktop app stores profiles, contacts, and history in SQLite, with attachments in the local data directory. Language, network settings, and online status also stay on this device.",
+  "这些内容不会自动同步到其他设备。可在“存储管理”中查看和迁移数据目录，请为重要文件保留备份。":
+    "This data does not sync automatically. View or move the data directory in Storage management, and keep backups of important files.",
+  "接收文件默认需要确认。为联系人开启自动接收后，文件和文件夹会直接写入数据目录。未完成内容暂存在缓存目录，接收完整后移入正式文件目录；中断缓存会被清理。":
+    "Receiving files requires consent by default. Enabling automatic receiving for a contact saves their files and folders to the data directory. Incomplete content stays in the cache and moves into file storage only after completion; interrupted caches are removed.",
+  "客户端直接传输文件夹并保留目录结构。已接收的文件、文件夹及发送时保存的文件副本由应用管理，删除对应聊天记录也会删除这些副本；另存为到其他位置的内容不受影响。":
+    "The desktop app transfers folders with their structure intact. The app manages received files and folders and saved copies of sent files. Deleting their chat records deletes these copies; exports saved elsewhere are unaffected.",
+  "清空聊天记录会删除本机存储中的消息、附件和联系人备注，保留个人资料。另存为的文件及对方的副本需分别管理。":
+    "Clearing history deletes local messages, attachments, and contact remarks, while retaining your profile. Exported files and copies on other devices are managed separately.",
+
+  "客户端可通过在线服务器或本地网络发现设备，优先直接传输；双方启用中转且直连失败时，由支持中转的服务器转送。快速直连目前不加密，请在可信网络中使用。":
+    "The app finds devices through online servers or the local network and tries direct transfers first. If both devices enable relay and direct connections fail, a supporting server forwards content. Direct TCP transfers are currently unencrypted; use a trusted network.",
+  "客户端在线时会在本地网络发布设备标识、昵称、头像、个性签名、设备名称和连接地址，帮助附近设备发现彼此。可发现你的设备也能看到这些公开资料。":
+    "While online, the app advertises its device ID, name, avatar, bio, device type and connection address on the local network. Nearby devices can see this public profile.",
   "小文件夹会在发送方设备上打包为 ZIP，按普通附件保存。直接接收的文件夹保存在你选择的位置，双方浏览器只保留名称、大小、文件数量和传输结果。中断后已完成的文件会保留，删除聊天记录不会删除它们。":
     "Small folders are packed into ZIP files on the sender's device and saved as regular attachments. Folders received directly are saved to your chosen location; both browsers keep only the name, size, file count and transfer result. Completed files remain after an interruption. Deleting chat history does not delete them.",
   "超过 {{limit}} MB 的文件需接收方确认，并直接保存到接收方选择的位置。双方浏览器仅保留文件名、大小、时间和传输结果，不保存文件内容。删除聊天记录不会删除已保存到设备上的文件。":
@@ -32,8 +49,8 @@ export const legalEnglish: Record<string, string> = {
     "How your profile, chats, and files are handled. Updated {{date}}.",
   "聊天直达对方，记录留在自己的浏览器。":
     "Chats go directly to your friends. History stays in your browser.",
-  "无需注册账号。文字、图片和文件在双方设备间加密传输，网站的连接服务不转发或保存聊天内容。":
-    "No account is needed. Messages, images, and files are encrypted in transit between devices. The website's connection service does not relay or store chat content.",
+  "无需注册账号。文字、图片和文件优先在设备间直传。双方启用中转且直连失败时，支持中转的服务器会转送内容，但不会保存。":
+    "No account is needed. Messages, images, and files use direct connections first. If both devices enable relay and direct connections fail, a supporting server forwards content without storing it.",
   "1. 保存在你设备上的内容": "1. What stays on your device",
   "你的昵称、头像、个性签名、设备标识、联系人备注、聊天记录和附件保存在当前浏览器中，用来展示资料、识别联系人和查看历史消息。语言与在线状态的选择也会保存在此浏览器。":
     "Your name, avatar, introduction, device identifier, contact nicknames, chat history, and attachments are stored in this browser to display profiles, identify contacts, and show past messages. Your language and online status preferences are also saved here.",
@@ -42,8 +59,8 @@ export const legalEnglish: Record<string, string> = {
   "2. 发现朋友与建立连接": "2. Finding friends and connecting",
   "打开网站并保持在线时，连接服务会处理你的网络地址、设备标识、蜂鸟号、昵称、头像、个性签名、设备名称和连接状态，帮助同一网络或通过蜂鸟号查找的设备发现彼此。可发现你的设备也能看到你的公开资料，请勿填写不想分享的信息。":
     "While you are online, the connection service processes your network address, device identifier, Hummingbird number, name, avatar, introduction, device name, and connection status. This helps devices find each other on the same network or by Hummingbird number. Devices that can discover you can also see your public profile, so only include information you want to share.",
-  "建立直连时，双方会交换必要的网络连接信息，对方可能获知你的网络地址。连接服务仅协助设备发现和连接，不承担文字、图片或文件的传输。":
-    "Devices exchange the network information needed to connect directly. The other person may learn your network address. The connection service only helps devices find and connect to each other; it does not transmit messages, images, or files.",
+  "建立直连时，双方会交换必要的网络连接信息，对方可能获知你的网络地址。使用中转时，服务器会接触传输内容，请选择你信任的服务器。安全服务器地址可保护设备与服务器之间的传输，但不向服务器隐藏内容。":
+    "Direct connections exchange necessary network information, which may reveal your network address to the other device. A relay server can access forwarded content, so choose one you trust. Secure server addresses protect traffic between devices and the server but do not hide content from the server.",
   "连接期间，服务会保留必要的在线资料和设备之间的连接关系；服务确认设备离线后，会移除相应的在线状态。云端部署可能暂存这些连接信息，以便服务恢复时继续工作。":
     "During a connection, the service keeps the necessary online profiles and connection relationships. It removes the corresponding online state after confirming a device is offline. Cloud deployments may temporarily store this connection information so the service can resume working.",
   "你可以在“我的状态”中切换为离线，停止发现和连接。已发送的内容可能已被对方保存，删除自己的记录不会删除对方的副本。":

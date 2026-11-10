@@ -1,6 +1,34 @@
 // Component copy is kept separate from the main page; Chinese sentences are keys.
 // Interpolation values contain user data and must remain unchanged.
 export const componentEnglish: Record<string, string> = {
+  "部分已删除文件仍被占用，关闭占用程序后刷新即可重试清理。":
+    "Some deleted files are still in use. Close the program using them and refresh to retry cleanup.",
+  "删除此设备的全部聊天、附件和联系人备注，保留你的个人资料。":
+    "Delete all chats, attachments, and contact remarks from this device while retaining your profile.",
+
+  数据存储目录: "Data storage directory",
+  修改目录: "Change directory",
+  迁移数据存储目录: "Move data storage",
+  "接收中的文件暂存在缓存目录，完成后自动移入文件目录。修改目录会迁移全部聊天记录和文件。":
+    "Incoming files stay in the cache until complete, then move into file storage. Changing the directory moves all chat history and files.",
+  缓存占用: "Cache usage",
+  本地数据与缓存: "Local data and cache",
+  "查看存储用量，整理保存在这台设备上的图片、文件和文件夹。":
+    "View storage usage and manage images, files, and folders saved on this device.",
+  "文件保存在数据存储目录。清理前请备份重要文件，对方保存的内容不受影响。":
+    "Files are saved in your data storage directory. Back up important files before cleaning up. Files saved by others are unaffected.",
+  "这会删除此设备中所选文件及对应聊天消息，无法恢复。对方的记录不受影响，联系人和备注会保留。":
+    "This permanently deletes the selected files and their messages from this device. Other devices, contacts, and remarks are unaffected.",
+  "请选择空文件夹。迁移完成后会切换到新目录并清理原目录；迁移期间请勿退出应用。":
+    "Choose an empty folder. Once migration succeeds, the app switches to the new directory and removes the old one. Keep the app open during migration.",
+  开始迁移: "Start migration",
+  "正在迁移…": "Moving data…",
+  数据存储目录已迁移: "Data storage moved",
+  "数据已迁移，原目录未能清理，可手动删除原目录。":
+    "Data moved successfully. The old directory could not be removed; you can delete it manually.",
+  请等待文件传输完成后再修改存储目录:
+    "Wait for file transfers to finish before changing the storage directory",
+
   仅保留传输记录: "Transfer record only",
   聊天操作: "Chat actions",
   导出文字记录: "Export text history",

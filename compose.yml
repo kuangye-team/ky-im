@@ -9,6 +9,8 @@ services:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
         VITE_ROOM: ${VITE_ROOM:-local}
         VITE_SIGNAL_URL: ${VITE_SIGNAL_URL:-}
+        VITE_API_AUTH: ${VITE_API_AUTH:-}
+        VITE_STORAGE_CHUNK_SIZE: ${VITE_STORAGE_CHUNK_SIZE:-2097152}
     env_file:
       - path: ./api/.env.compose
         required: false

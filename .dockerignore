@@ -6,6 +6,7 @@
 **/*.tsbuildinfo
 
 # Test reports and caches
+/temp
 **/test-results
 **/playwright-report
 **/coverage

@@ -3,6 +3,8 @@ import { Check, Palette } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { THEME_CONFIG, readThemePreference } from "../theme-config";
 import { Modal } from "./Modal";
+import { syncDesktopTheme } from "../desktop-window";
+import { themeIcons } from "virtual:app-icons";
 
 export function ThemeSelector() {
   const { t } = useTranslation();
@@ -14,6 +16,7 @@ export function ThemeSelector() {
   useLayoutEffect(() => {
     const root = document.documentElement;
     root.dataset.theme = current.id;
+    syncDesktopTheme(current);
     root.style.colorScheme = current.scheme;
     for (const [name, value] of Object.entries(current.colors)) {
       root.style.setProperty(name, value);
@@ -23,8 +26,8 @@ export function ThemeSelector() {
       ?.setAttribute("content", current.colors["--header-start"]);
     document
       .querySelector('link[rel="icon"]')
-      ?.setAttribute("href", `/icons/${current.id}/favicon.svg`);
-    root.style.setProperty("--brand-bird", `url("/icons/${current.id}/bird.svg")`);
+      ?.setAttribute("href", themeIcons[current.id].favicon);
+    root.style.setProperty("--brand-bird", `url("${themeIcons[current.id].bird}")`);
     try {
       localStorage.setItem(THEME_CONFIG.storageKey, current.id);
     } catch {

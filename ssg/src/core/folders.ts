@@ -1,3 +1,4 @@
+import type { AttachmentSource } from "./types";
 import {
   CHUNK_SIZE,
   FOLDER_CONFIG,
@@ -7,7 +8,7 @@ import {
 
 export type FolderEntry =
   | { kind: "directory"; path: string }
-  | { kind: "file"; path: string; file: File };
+  | { kind: "file"; path: string; file: AttachmentSource };
 export type FolderSelection = { name: string; entries: FolderEntry[] };
 export type FolderProgress = {
   phase: "scanning" | "compressing";
@@ -105,9 +106,13 @@ export async function compressFolder(
     await writer.add(`${folder.name}/`, undefined, { directory: true, signal });
     for (const entry of folder.entries) {
       signal.throwIfAborted();
+      if (entry.kind === "file" && !(entry.file instanceof Blob))
+        throw new Error("此文件夹需要直接传输");
       await writer.add(
         `${folder.name}/${entry.path}${entry.kind === "directory" ? "/" : ""}`,
-        entry.kind === "file" ? new BlobReader(entry.file) : undefined,
+        entry.kind === "file" && entry.file instanceof Blob
+          ? new BlobReader(entry.file)
+          : undefined,
         { directory: entry.kind === "directory", signal },
       );
     }

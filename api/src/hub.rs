@@ -1,6 +1,8 @@
 use crate::{
     AppState,
-    protocol::{Profile, ServerMessage, valid_identifier, valid_numeric_id, valid_signal},
+    protocol::{
+        Profile, RelayPacket, ServerMessage, valid_identifier, valid_numeric_id, valid_signal,
+    },
 };
 use serde_json::Value;
 use std::{
@@ -228,6 +230,7 @@ impl AppState {
     pub(crate) fn join(&self, room: String, mut peer: Peer) -> Result<Identity, ServerMessage> {
         // Nonblocking sends under this lock preserve presence-before-signal ordering.
         let mut hub = self.hub.lock().expect("hub lock poisoned");
+        peer.profile.relay &= self.config.relay_enabled;
         let id = peer.profile.id.clone();
         let removes_old_room = hub.peer_rooms.get(&id).is_some_and(|old_room| {
             old_room != &room
@@ -270,6 +273,7 @@ impl AppState {
             .insert(id.clone(), peer.clone());
         let observers = hub.observers(&id);
         peer.send(ServerMessage::Welcome {
+            relay: self.config.relay_enabled,
             id: id.clone(),
             room: identity.room.clone(),
             numeric_id: number,
@@ -293,6 +297,7 @@ impl AppState {
     ) -> Result<(), ServerMessage> {
         let mut hub = self.hub.lock().expect("hub lock poisoned");
         let current = hub.current(identity)?;
+        profile.relay &= self.config.relay_enabled;
         profile.id.clone_from(&identity.id);
         profile.numeric_id.clone_from(&current.profile.numeric_id);
         profile
@@ -453,6 +458,48 @@ impl AppState {
             target.send(ServerMessage::PeerJoined {
                 peer: Box::new(requester.profile),
             });
+        }
+        Ok(())
+    }
+
+    pub(crate) fn relay(
+        &self,
+        identity: &Identity,
+        to: &str,
+        session: &str,
+        data: RelayPacket,
+    ) -> Result<(), ServerMessage> {
+        if !self.config.relay_enabled {
+            return Err(ServerMessage::error(
+                "relay_disabled",
+                "This server does not relay content",
+            ));
+        }
+        let hub = self.hub.lock().expect("hub lock poisoned");
+        let sender = hub.current(identity)?;
+        if !valid_identifier(session) || !data.valid() || to == identity.id {
+            return Err(ServerMessage::error("invalid_relay", "Invalid relay frame"));
+        }
+        let target = hub
+            .peer(to)
+            .filter(|_| hub.observers(&identity.id).contains(to))
+            .ok_or_else(|| ServerMessage::error("peer_unavailable", "Peer is not available"))?;
+        if !sender.profile.relay || !target.profile.relay {
+            return Err(ServerMessage::error(
+                "relay_not_allowed",
+                "Both devices must enable relay",
+            ));
+        }
+        if !target.transport.send(ServerMessage::Relay {
+            from: identity.id.clone(),
+            session: session.into(),
+            data,
+        }) {
+            target.transport.close(CloseReason::SlowConsumer);
+            return Err(ServerMessage::error(
+                "slow_consumer",
+                "Relay recipient cannot keep up",
+            ));
         }
         Ok(())
     }

@@ -43,6 +43,28 @@ pub(crate) fn process_message(
     transport: &Arc<dyn Transport>,
 ) -> Result<(), ServerMessage> {
     match message {
+        ClientMessage::Capabilities => {
+            transport.send(ServerMessage::Capabilities {
+                relay: state.config.relay_enabled,
+            });
+            Ok(())
+        }
+        ClientMessage::Relay { to, session, data } => {
+            let result = require_identity(identity)
+                .and_then(|identity| state.relay(identity, &to, &session, data));
+            result.map_err(|error| {
+                let (code, message) = match error {
+                    ServerMessage::Error { code, message } => (code, message),
+                    _ => ("relay_failed".into(), "Relay unavailable".into()),
+                };
+                ServerMessage::RelayError {
+                    to,
+                    session,
+                    code,
+                    message,
+                }
+            })
+        }
         ClientMessage::Join { room, profile } => {
             if identity.is_some() {
                 return Err(ServerMessage::error(

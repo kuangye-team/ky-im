@@ -2,7 +2,7 @@ use crate::{
     AppState, Config,
     engine::process_message,
     hub::{CloseReason, StoredPeer, Transport, now_ms},
-    protocol::{ClientMessage, MAX_MESSAGE_BYTES, ServerMessage},
+    protocol::{ClientMessage, MAX_MESSAGE_BYTES, MessageRate, ServerMessage},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -27,20 +27,50 @@ pub async fn fetch(request: Request, env: Env, _ctx: Context) -> Result<Response
     let config = config(&env)?;
     let origin = request.headers().get("Origin")?;
     if origin.as_ref().is_some_and(|origin| {
-        *origin != url.origin().ascii_serialization() && !config.cors_origins.contains(origin)
+        *origin != url.origin().ascii_serialization()
+            && !config.cors_origins.contains(origin)
+            && !crate::config::is_desktop_origin(origin)
     }) {
         return Response::error("Origin is not allowed", 403);
+    }
+    if request.method() == Method::Options {
+        let mut response = Response::empty()?.with_status(204);
+        if let Some(origin) = origin {
+            response
+                .headers_mut()
+                .set("Access-Control-Allow-Origin", &origin)?;
+            response.headers_mut().set("Vary", "Origin")?;
+        }
+        response
+            .headers_mut()
+            .set("Access-Control-Allow-Methods", "GET, OPTIONS")?;
+        response.headers_mut().set(
+            "Access-Control-Allow-Headers",
+            "Authorization, Content-Type",
+        )?;
+        return Ok(response);
     }
     if request.method() != Method::Get {
         return Response::error("Method not allowed", 405);
     }
     if !matches!(
         url.path(),
-        "/api/health" | "/api/health/details" | "/api/ws"
+        "/api/health" | "/api/health/details" | "/api/ws" | "/api/ws/ticket"
     ) {
         return Ok(Response::from_json(&json!({"error": "not_found"}))?.with_status(404));
     }
-    if url.path() == "/api/ws" {
+    let authorization = request.headers().get("Authorization")?;
+    let authorized = if url.path() == "/api/ws" {
+        crate::auth::websocket_authorized(
+            &config.authorization,
+            authorization.as_deref(),
+            url.query().unwrap_or_default(),
+            now_ms(),
+        )
+    } else {
+        crate::auth::authorized(&config.authorization, authorization.as_deref())
+    };
+    if url.path() == "/api/ws" && authorized {
         if !request
             .headers()
             .get("Upgrade")?
@@ -58,9 +88,15 @@ pub async fn fetch(request: Request, env: Env, _ctx: Context) -> Result<Response
             return Response::error("Client address is unavailable", 400);
         }
     }
-    let mut response = if url.path() == "/api/health" {
+    let mut response = if url.path() != "/api/health" && !authorized {
+        Response::from_json(&json!({"error": "unauthorized"}))?.with_status(401)
+    } else if url.path() == "/api/ws/ticket" {
         Response::from_json(
-            &json!({"ok": true, "service": "im-api", "version": env!("CARGO_PKG_VERSION")}),
+            &json!({"ticket": crate::auth::ticket(&config.authorization, now_ms())}),
+        )?
+    } else if url.path() == "/api/health" {
+        Response::from_json(
+            &json!({"ok": true, "service": "im-api", "version": env!("CARGO_PKG_VERSION"), "relay": config.relay_enabled}),
         )?
     } else {
         env.durable_object("SIGNALING")?
@@ -93,8 +129,7 @@ struct Attachment {
     ip: String,
     connected_at: u64,
     joined: bool,
-    rate_at: u64,
-    rate_count: u32,
+    rate: MessageRate,
     lookup_at: u64,
     lookup_count: u8,
 }
@@ -108,6 +143,9 @@ fn attachment(socket: &WebSocket) -> Result<Attachment> {
 fn headers_json(headers: &Headers) -> Value {
     let mut result = Map::new();
     for (name, value) in headers.entries() {
+        if crate::auth::sensitive_header(&name) {
+            continue;
+        }
         let entry = result
             .entry(name)
             .or_insert_with(|| Value::Array(Vec::new()));
@@ -323,32 +361,15 @@ impl SignalingHub {
             return Ok(());
         }
         let now = now_ms();
-        let error = if !a.joined && now.saturating_sub(a.connected_at) >= JOIN_TIMEOUT_MS {
-            Some(("join_timeout", "请重新连接后再试", 1000))
-        } else {
-            if now.saturating_sub(a.rate_at) >= 10_000 {
-                a.rate_at = now;
-                a.rate_count = 0;
-            }
-            a.rate_count += 1;
-            if a.rate_count > 240 {
-                Some(("rate_limited", "操作过于频繁，请稍后重试", 1000))
-            } else {
-                None
-            }
-        };
         let len = match &raw {
             WebSocketIncomingMessage::String(s) => s.len(),
             WebSocketIncomingMessage::Binary(b) => b.len(),
         };
-        let error = error.or_else(|| {
-            (len > MAX_MESSAGE_BYTES).then_some(("message_too_large", "请求过大", 1009))
-        });
-        if let Some((code, message, close_code)) = error {
+        if len > MAX_MESSAGE_BYTES {
             self.disconnect(
                 &a.sid,
-                Some(ServerMessage::error(code, message)),
-                close_code,
+                Some(ServerMessage::error("message_too_large", "请求过大")),
+                1009,
             );
             self.flush(true)?;
             return self.schedule_join_timeout().await;
@@ -358,14 +379,34 @@ impl SignalingHub {
                 .map_err(|_| ServerMessage::error("invalid_message", "请求格式不正确")),
             WebSocketIncomingMessage::Binary(_) => Err(ServerMessage::error(
                 "unsupported_message",
-                "此连接仅用于发现设备",
+                "请求格式不正确",
             )),
         };
+        let relay =
+            self.app.config.relay_enabled && matches!(message, Ok(ClientMessage::Relay { .. }));
+        let error = if !a.joined && now.saturating_sub(a.connected_at) >= JOIN_TIMEOUT_MS {
+            Some(("join_timeout", "请重新连接后再试"))
+        } else if !a.rate.allow(now, relay, len) {
+            Some(("rate_limited", "操作过于频繁，请稍后重试"))
+        } else {
+            None
+        };
+        if let Some((code, message)) = error {
+            self.disconnect(&a.sid, Some(ServerMessage::error(code, message)), 1000);
+            self.flush(true)?;
+            return self.schedule_join_timeout().await;
+        }
         let mut changed = false;
         let mut join = false;
         let result = match message {
             Ok(message) => {
-                changed = !matches!(message, ClientMessage::Signal { .. } | ClientMessage::Ping);
+                changed = !matches!(
+                    message,
+                    ClientMessage::Signal { .. }
+                        | ClientMessage::Ping
+                        | ClientMessage::Capabilities
+                        | ClientMessage::Relay { .. }
+                );
                 join = matches!(message, ClientMessage::Join { .. });
                 let mut identity = self.app.hub.lock().unwrap().identity_for_session(&a.sid);
                 let result = process_message(
@@ -408,6 +449,7 @@ impl DurableObject for SignalingHub {
             let hub = self.app.hub.lock().unwrap();
             return Response::from_json(
                 &json!({"ok": true, "service": "im-api", "version": env!("CARGO_PKG_VERSION"),
+                "relay": self.app.config.relay_enabled,
                 "rooms": hub.rooms.len(),
                 "peers": hub.rooms.values().map(HashMap::len).sum::<usize>(),
                 "headers": headers_json(request.headers()),
@@ -433,8 +475,7 @@ impl DurableObject for SignalingHub {
             ip: ip.to_canonical().to_string(),
             connected_at: now,
             joined: false,
-            rate_at: now,
-            rate_count: 0,
+            rate: MessageRate::default(),
             lookup_at: now,
             lookup_count: 0,
         };

@@ -1,4 +1,9 @@
-import type { FileDestination, FolderDestination } from "../core/types";
+import type {
+  FileDestination,
+  FolderDestination,
+  StorageAdapter,
+  Message,
+} from "../core/types";
 import { validFolderName, validPath } from "../core/folders";
 import type { DirectoryPickerWindow } from "./folderSelection";
 
@@ -9,11 +14,15 @@ type SavePickerWindow = Window & {
 };
 
 export function canSaveLargeFiles() {
-  return typeof (window as SavePickerWindow).showSaveFilePicker === "function";
+  return (
+    import.meta.env.VITE_DESKTOP ||
+    typeof (window as SavePickerWindow).showSaveFilePicker === "function"
+  );
 }
 
 export function canSaveFolders() {
   return (
+    import.meta.env.VITE_DESKTOP ||
     typeof (window as DirectoryPickerWindow).showDirectoryPicker === "function"
   );
 }
@@ -35,6 +44,8 @@ async function exists(directory: FileSystemDirectoryHandle, name: string) {
 export async function chooseFolderDestination(
   name: string,
 ): Promise<FolderDestination> {
+  if (import.meta.env.VITE_DESKTOP)
+    return (await import("./desktopFiles")).chooseDesktopFolder(name);
   const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
   if (!picker)
     throw new Error(
@@ -83,6 +94,8 @@ export async function chooseFolderDestination(
 export async function chooseFileDestination(
   fileName: string,
 ): Promise<FileDestination> {
+  if (import.meta.env.VITE_DESKTOP)
+    return (await import("./desktopFiles")).chooseDesktopFile(fileName);
   const picker = (window as SavePickerWindow).showSaveFilePicker;
   if (!picker)
     throw new Error(
@@ -99,7 +112,29 @@ export function readableSize(size = 0) {
   return `${(size / 1024 ** 3).toFixed(1)} GB`;
 }
 
-export function download(blob: Blob, fileName: string) {
+/** Desktop exports stay on disk, including files too large to materialize as a Blob. */
+export async function downloadAttachment(
+  storage: StorageAdapter,
+  message: Message,
+) {
+  if (storage.exportAttachment) return storage.exportAttachment(message);
+  const blob = await storage.getAttachment(message.id);
+  if (!blob) throw new Error("附件尚未接收完成或已被清除");
+  return download(blob, message.fileName || "attachment");
+}
+
+export async function download(blob: Blob, fileName: string) {
+  if (import.meta.env.VITE_DESKTOP) {
+    const file = await chooseFileDestination(fileName);
+    try {
+      await file.write(blob);
+      await file.close();
+    } catch (error) {
+      await file.abort().catch(() => {});
+      throw error;
+    }
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
