@@ -60,8 +60,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: [macos-15-intel, windows-2025]
+    # Set the repository variable MACOS_SELF_HOSTED=true to use your own Mac.
+    runs-on: ${{ startsWith(matrix.os, 'macos-') && vars.MACOS_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:

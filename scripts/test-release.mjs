@@ -1,4 +1,4 @@
-// Exercise the shipped launcher on each native CI runner, including paths with spaces.
+// Exercise the shipped launcher, including x64 via Rosetta and paths with spaces.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
@@ -9,7 +9,14 @@ import { fileURLToPath } from "node:url";
 
 const source = resolve(process.argv[2] || fileURLToPath(new URL("../release", import.meta.url)));
 const platform = process.platform;
-const arch = { x64: "amd64", arm64: "arm64" }[process.arch];
+const testArch = process.env.RELEASE_TEST_ARCH || process.arch;
+const arch = { x64: "amd64", arm64: "arm64" }[testArch];
+const useRosetta = platform === "darwin" && process.arch === "arm64" && testArch === "x64";
+assert(testArch === process.arch || useRosetta, `Cannot test ${testArch} on ${platform}/${process.arch}`);
+if (useRosetta) {
+  const probe = spawnSync("/usr/bin/arch", ["-x86_64", "/bin/sh", "-c", "uname -m"], { encoding: "utf8", timeout: 5000 });
+  assert(probe.status === 0 && probe.stdout.trim() === "x86_64", "Install Rosetta on the Apple Silicon runner before testing the x64 release");
+}
 const launcher = { darwin: "start_mac.sh", linux: "start_linux.sh", win32: "start_win.bat" }[platform];
 assert(arch && launcher, "Unsupported test host");
 const binary = platform === "win32" ? "server_windows_amd64.exe" : `server_${platform}_${arch}`;
@@ -39,7 +46,9 @@ try {
     const script = join(directory, launcher);
     const child = platform === "win32"
       ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", "call", script], { cwd: temporary })
-      : spawn("sh", [script], { cwd: temporary });
+      : useRosetta
+        ? spawn("/usr/bin/arch", ["-x86_64", "/bin/sh", script], { cwd: temporary })
+        : spawn("sh", [script], { cwd: temporary });
     let output = "";
     child.stdout.on("data", (chunk) => { output += chunk; });
     child.stderr.on("data", (chunk) => { output += chunk; });

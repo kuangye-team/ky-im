@@ -61,10 +61,11 @@ jobs:
       matrix:
         include:
           - runner: macos-15-intel
+            test-arch: x64
             target: x86_64-apple-darwin
             filename: server_darwin_amd64
             source: server
-          - runner: macos-15
+          - runner: macos-15-intel
             target: aarch64-apple-darwin
             filename: server_darwin_arm64
             source: server
@@ -80,7 +81,8 @@ jobs:
             target: x86_64-pc-windows-msvc
             filename: server_windows_amd64.exe
             source: server.exe
-    runs-on: ${{ matrix.runner }}
+    # Either Mac architecture can build both targets; x64 tests use Rosetta on Apple Silicon.
+    runs-on: ${{ startsWith(matrix.runner, 'macos-') && vars.MACOS_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS"]') || matrix.runner }}
     env:
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
@@ -109,11 +111,16 @@ jobs:
           mkdir -p release/bin
           cp 'api/target/${{ matrix.target }}/release/${{ matrix.source }}' 'release/bin/${{ matrix.filename }}'
       - uses: actions/download-artifact@v8
+        if: matrix.target != 'aarch64-apple-darwin'
         with:
           name: release-dist
           path: release/dist/
+      # macOS ARM64 is cross-compiled on Intel and uploaded without running it.
       - name: Verify native launcher and HTTP service
+        if: matrix.target != 'aarch64-apple-darwin'
         run: node scripts/test-release.mjs
+        env:
+          RELEASE_TEST_ARCH: ${{ matrix.test-arch }}
       - uses: actions/upload-artifact@v7
         with:
           name: native-${{ matrix.filename }}
@@ -127,13 +134,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-latest
+          - runner: macos-15-intel
             target: universal-apple-darwin
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
             rust-targets: x86_64-pc-windows-msvc
-    runs-on: ${{ matrix.runner }}
+    # Share the macOS runner switch with CI and native server builds.
+    runs-on: ${{ startsWith(matrix.runner, 'macos-') && vars.MACOS_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS"]') || matrix.runner }}
     steps:
       - uses: actions/checkout@v7
         with:
