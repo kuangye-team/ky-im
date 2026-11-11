@@ -10,6 +10,7 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SignalingHub"] }],
   "vars": {
+    "LATEST_JSON_URL": "https://github.com/kuangye-team/ky-im/releases/latest/download/latest.json",
     "RELAY_ENABLED": "false",
     "CORS_ORIGINS": "tauri://localhost,http://tauri.localhost,https://tauri.localhost",
     "MAX_CONNECTIONS": "4096",

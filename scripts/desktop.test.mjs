@@ -197,6 +197,10 @@ test("publishes the macOS DMG directly, preserves signed update bytes and assemb
     assert.equal(manifest.platforms["windows-x86_64"].url, `https://github.com/example/hummingbird/releases/download/v1.2.3/${exe}`);
     assert.equal(manifest.platforms["darwin-aarch64"].signature, signature);
     assert.equal(manifest.platforms["darwin-aarch64"].url, manifest.platforms["darwin-x86_64"].url);
+    assert.deepEqual(manifest.downloads, {
+      macos: "https://github.com/example/hummingbird/releases/download/v1.2.3/ky-im-1.2.3-macos-universal.dmg",
+      windows: `https://github.com/example/hummingbird/releases/download/v1.2.3/${exe}`,
+    });
     assert.equal(manifest.notes, "Ky IM 1.2.3");
     assert.deepEqual(JSON.parse(readFileSync(join(directory, "latest.json"), "utf8")), manifest);
     rmSync(join(directory, names[0]));

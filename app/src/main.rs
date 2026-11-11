@@ -10,6 +10,7 @@ use tauri::{
     Manager, State,
     ipc::{Channel, InvokeResponseBody, Request},
 };
+use tauri_plugin_deep_link::DeepLinkExt;
 use tokio::sync::Mutex;
 
 #[derive(Default)]
@@ -171,8 +172,36 @@ async fn tcp_close(
     Ok(())
 }
 
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+    }
+}
+
 fn main() {
     tauri::Builder::default()
+        // Register first so opening a deep link reuses the running app.
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            show_main_window(app)
+        }))
+        .plugin(tauri_plugin_deep_link::init())
+        .setup(|app| {
+            #[cfg(all(debug_assertions, windows))]
+            app.deep_link().register_all()?;
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                if event
+                    .urls()
+                    .iter()
+                    .any(|url| url.scheme() == "ky-im" && url.host_str() == Some("open"))
+                {
+                    show_main_window(&handle);
+                }
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

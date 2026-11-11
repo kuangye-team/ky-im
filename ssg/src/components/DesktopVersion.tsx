@@ -4,7 +4,8 @@ import { ArrowUpRight, LoaderCircle, RefreshCw } from "lucide-react";
 import type { ChatEngine } from "../core";
 import { isDesktop } from "../core/network/settings";
 import { beforeAppUpdate } from "../app-updates";
-import { siteInfo } from "../site-info";
+import { openExternalUrl } from "../external-links";
+import { CLIENT_CONFIG } from "../config";
 import {
   applyAppUpdate, checkDesktopUpdate, desktopUpdaterEnabled,
   getAppUpdate, loadDesktopVersion, subscribeAppUpdate,
@@ -27,12 +28,11 @@ function Version({ engine }: { engine: ChatEngine }) {
     : update.updating ? "正在更新…"
     : update.checking ? "正在检查更新…"
     : update.checkError || (update.available ? "有新版本可更新" : update.checked ? "已是最新版本" : "尚未检查更新");
-  const releases = `${siteInfo.repository}/releases/latest`;
+  const releases = CLIENT_CONFIG.downloadUrl;
   const error = update.error === "内容传输中，请完成后再更新。" && !busy ? "" : update.error;
   const openReleases = async () => {
     try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(releases);
+      await openExternalUrl(releases);
     } catch {
       // Keep a user-visible error in the version panel; never navigate the WebView.
       setLinkError(t("链接暂时无法打开，请稍后重试。"));

@@ -38,3 +38,11 @@ it.each(["", "wss://separate-api.example/api/ws"])(
     expect(getInviteUrl("https://chat.example")).toBe("https://chat.example");
   },
 );
+
+it("uses the public Web environment setting for desktop invitation fallback", async () => {
+  vi.stubEnv("VITE_DESKTOP", "true");
+  vi.stubEnv("VITE_SIGNAL_URL", "");
+  vi.stubEnv("VITE_WEB_URL", "https://chat.example/team/");
+  const { getInviteUrl } = await import("./invite-url");
+  expect(getInviteUrl("tauri://localhost")).toBe("https://chat.example/team/");
+});

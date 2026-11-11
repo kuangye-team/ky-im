@@ -1,5 +1,7 @@
 import { deviceLabel } from "./core/profile";
 import { getInviteUrl } from "./invite-url";
+import { ClientAccess } from "./components/ClientAccess";
+import { handleExternalLinkClick } from "./external-links";
 import { DesktopVersion } from "./components/DesktopVersion";
 import {
   PROFILE_AVATARS as EMOJI,
@@ -285,7 +287,9 @@ export function App({ engine }: { engine: ChatEngine }) {
     document.title = `${t(pageNames[view])} · ${t("蜂鸟")}`;
   }, [t, view]);
   return (
-    <div className="app-shell">
+    <div className="app-shell"
+      onClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}
+      onAuxClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}>
       <header className="topbar">
         <Link className="brand" to="/" aria-label={t("蜂鸟首页")}>
           <span className="brand-mark">
@@ -298,6 +302,7 @@ export function App({ engine }: { engine: ChatEngine }) {
           <ThemeSelector />
           <LanguageSelector />
           <MyStatus snap={snap} engine={engine} />
+          <ClientAccess onNotice={notify} />
           <button
             className="icon-button about-trigger"
             aria-label={t("关于本站")}

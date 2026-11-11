@@ -1,5 +1,17 @@
 /** English UI copy. Chinese source phrases are the fallback keys. */
 export const appEnglish: Record<string, string> = {
+  打开客户端: "Open desktop app",
+  打开WEB端: "Open Web app",
+  下载蜂鸟客户端: "Download Hummingbird",
+  "让聊天与分享，随时在身边。": "Keep your conversations close.",
+  "正在获取下载地址…": "Getting downloads…",
+  "下载地址暂时无法获取，请稍后重试。": "Downloads are unavailable. Please try again.",
+  "Apple 芯片与 Intel": "Apple silicon & Intel",
+  适合此设备: "For this device",
+  "客户端支持 macOS 和 Windows。": "The desktop app is available for macOS and Windows.",
+  "若未打开，请先下载并安装客户端。": "If the app didn’t open, download and install it first.",
+  "已安装？点击上方按钮即可打开。": "Already installed? Use the button above to open it.",
+  查看所有下载: "All downloads",
   访问密钥: "Access key",
   显示密钥: "Show key",
   隐藏密钥: "Hide key",

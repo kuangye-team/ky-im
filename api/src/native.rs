@@ -41,6 +41,7 @@ pub fn router(state: Arc<AppState>) -> Result<Router, String> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     let app = Router::new()
+        .route("/api/latest", get(crate::native_release::latest))
         .route("/api/health", get(health))
         .route("/api/health/details", get(health_details))
         .route("/api/ws", any(websocket))

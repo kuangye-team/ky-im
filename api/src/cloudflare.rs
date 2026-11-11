@@ -55,7 +55,7 @@ pub async fn fetch(request: Request, env: Env, _ctx: Context) -> Result<Response
     }
     if !matches!(
         url.path(),
-        "/api/health" | "/api/health/details" | "/api/ws" | "/api/ws/ticket"
+        "/api/health" | "/api/health/details" | "/api/ws" | "/api/ws/ticket" | "/api/latest"
     ) {
         return Ok(Response::from_json(&json!({"error": "not_found"}))?.with_status(404));
     }
@@ -88,7 +88,10 @@ pub async fn fetch(request: Request, env: Env, _ctx: Context) -> Result<Response
             return Response::error("Client address is unavailable", 400);
         }
     }
-    let mut response = if url.path() != "/api/health" && !authorized {
+    let mut response = if url.path() == "/api/latest" {
+        crate::cloudflare_release::latest(&config.latest_json_url).await
+            .or_else(|_| Response::error("Release unavailable", 502))?
+    } else if url.path() != "/api/health" && !authorized {
         Response::from_json(&json!({"error": "unauthorized"}))?.with_status(401)
     } else if url.path() == "/api/ws/ticket" {
         Response::from_json(
@@ -111,7 +114,9 @@ pub async fn fetch(request: Request, env: Env, _ctx: Context) -> Result<Response
         response
             .headers_mut()
             .set("X-Content-Type-Options", "nosniff")?;
-        response.headers_mut().set("Cache-Control", "no-store")?;
+        if url.path() != "/api/latest" || response.status_code() != 200 {
+            response.headers_mut().set("Cache-Control", "no-store")?;
+        }
         if let Some(origin) = origin {
             response
                 .headers_mut()

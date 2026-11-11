@@ -40,6 +40,8 @@ jobs:
         env:
           VITE_ROOM: local
           VITE_SIGNAL_URL: ''
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+          VITE_CLIENT_DOWNLOAD_URL: ${{ vars.VITE_CLIENT_DOWNLOAD_URL }}
         run: |
           npm ci --ignore-scripts
           npm --prefix ssg ci
@@ -207,6 +209,8 @@ jobs:
           VITE_SIGNAL_URL: ${{ secrets.VITE_SIGNAL_URL || vars.VITE_SIGNAL_URL }}
           VITE_API_AUTH: ${{ secrets.VITE_API_AUTH || vars.VITE_API_AUTH }}
           VITE_ROOM: ${{ secrets.VITE_ROOM || vars.VITE_ROOM || 'local' }}
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+          VITE_CLIENT_DOWNLOAD_URL: ${{ vars.VITE_CLIENT_DOWNLOAD_URL }}
           VITE_STORAGE_CHUNK_SIZE: ${{ secrets.VITE_STORAGE_CHUNK_SIZE || vars.VITE_STORAGE_CHUNK_SIZE || '2097152' }}
           RELEASE_VERSION: ${{ env.RELEASE_TAG }}
           TAURI_UPDATER_URL: ${{ vars.TAURI_UPDATER_URL || format('https://github.com/{0}/releases/latest/download/latest.json', github.repository) }}

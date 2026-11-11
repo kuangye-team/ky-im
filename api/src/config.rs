@@ -4,6 +4,7 @@ use std::{path::PathBuf, time::Duration};
 pub struct Config {
     pub bind_addr: String,
     pub static_dir: PathBuf,
+    pub latest_json_url: url::Url,
     pub cors_origins: Vec<String>,
     pub trust_proxy_headers: bool,
     pub relay_enabled: bool,
@@ -21,6 +22,8 @@ impl Default for Config {
         Self {
             bind_addr: "0.0.0.0:8080".into(),
             static_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../ssg/dist"),
+            latest_json_url: url::Url::parse(crate::client_release::DEFAULT_URL)
+                .expect("valid default release URL"),
             cors_origins: Vec::new(),
             trust_proxy_headers: true,
             relay_enabled: false,
@@ -87,7 +90,15 @@ impl Config {
         if authorization.len() > 4096 || !authorization.bytes().all(|b| (32..=126).contains(&b)) {
             return Err("API_AUTH must contain at most 4096 printable ASCII characters".into());
         }
+        let latest_json_url = value("LATEST_JSON_URL").unwrap_or_default();
+        let latest_json_url = crate::client_release::source(if latest_json_url.trim().is_empty() {
+            crate::client_release::DEFAULT_URL
+        } else {
+            latest_json_url.trim()
+        })
+        .ok_or("LATEST_JSON_URL must be an HTTP(S) URL without credentials or a fragment")?;
         Ok(Self {
+            latest_json_url,
             authorization,
             bind_addr: value("BIND_ADDR").unwrap_or(defaults.bind_addr),
             static_dir: value("STATIC_DIR")
@@ -115,6 +126,37 @@ pub fn is_desktop_origin(origin: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn latest_json_url_defaults_and_accepts_an_operator_configured_upstream() {
+        for value in [None, Some(""), Some(" ")] {
+            let config = Config::from_values(|key| {
+                (key == "LATEST_JSON_URL")
+                    .then_some(value)
+                    .flatten()
+                    .map(str::to_owned)
+            })
+            .unwrap();
+            assert_eq!(
+                config.latest_json_url.as_str(),
+                crate::client_release::DEFAULT_URL
+            );
+        }
+        let config = Config::from_values(|key| {
+            (key == "LATEST_JSON_URL").then(|| "http://localhost:8081/custom.json".into())
+        })
+        .unwrap();
+        assert_eq!(
+            config.latest_json_url.as_str(),
+            "http://localhost:8081/custom.json"
+        );
+        assert!(
+            Config::from_values(|key| {
+                (key == "LATEST_JSON_URL").then(|| "file:///latest.json".into())
+            })
+            .is_err()
+        );
+    }
 
     #[test]
     fn authorization_is_optional_and_validates_header_values() {

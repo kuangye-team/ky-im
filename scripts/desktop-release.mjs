@@ -95,6 +95,7 @@ export function writeManifest(directory, version, env, complete = true, target) 
   if (new URL(base).search) throw new Error("TAURI_RELEASE_BASE_URL must be a directory URL without a query");
   const targets = complete ? ["universal-apple-darwin", "x86_64-pc-windows-msvc"] : [target];
   const platforms = {};
+  const downloads = {};
   for (const target of targets) {
     const { platform, arch } = targetInfo(target);
     const prefix = `ky-im-${version}-${platform}-${arch}`;
@@ -108,11 +109,12 @@ export function writeManifest(directory, version, env, complete = true, target) 
     const signature = readFileSync(resolve(directory, `${name}.sig`), "utf8").trim();
     if (!Buffer.from(signature, "base64").toString("utf8").startsWith("untrusted comment:"))
       throw new Error(`Invalid updater signature: ${name}.sig`);
+    downloads[platform] = `${base.replace(/\/$/, "")}/${installer}`;
     const entry = { signature, url: `${base.replace(/\/$/, "")}/${name}` };
     const keys = mac ? (arch === "universal" ? ["darwin-aarch64", "darwin-x86_64"] : [arch === "aarch64" ? "darwin-aarch64" : "darwin-x86_64"]) : ["windows-x86_64"];
     for (const key of keys) platforms[key] = entry;
   }
-  const manifest = { version, notes: env.RELEASE_NOTES || `${productName} ${version}`, pub_date: new Date().toISOString(), platforms };
+  const manifest = { version, notes: env.RELEASE_NOTES || `${productName} ${version}`, pub_date: new Date().toISOString(), platforms, downloads };
   writeFileSync(resolve(directory, "latest.json"), JSON.stringify(manifest, null, 2) + "\n");
   return manifest;
 }

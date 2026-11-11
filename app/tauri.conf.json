@@ -39,6 +39,7 @@
     } }
   },
   "plugins": {
+    "deep-link": { "desktop": { "schemes": ["ky-im"] } },
     "updater": {
       "pubkey": "",
       "endpoints": [],

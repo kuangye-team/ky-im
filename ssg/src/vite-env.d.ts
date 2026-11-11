@@ -16,6 +16,10 @@ declare module "virtual:app-icons" {
 
 /** 构建时写入前端资源的公开配置。 */
 interface ImportMetaEnv {
+  /** Public Web app URL, also used as the desktop invitation fallback. */
+  readonly VITE_WEB_URL?: string;
+  /** Public download page, used by download and manual update links. */
+  readonly VITE_CLIENT_DOWNLOAD_URL?: string;
   readonly VITE_DESKTOP?: boolean;
   readonly VITE_DESKTOP_UPDATER_ENABLED?: string;
   /** 自动发现命名空间，默认 local。 */

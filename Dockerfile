@@ -25,16 +25,21 @@ COPY ssg/ ./
 ARG VITE_ROOM=local
 ARG VITE_SIGNAL_URL=
 ARG VITE_API_AUTH=
+ARG VITE_WEB_URL=https://im.kuangye.team/
+ARG VITE_CLIENT_DOWNLOAD_URL=https://github.com/kuangye-team/ky-im/releases/latest
+ENV VITE_WEB_URL=$VITE_WEB_URL VITE_CLIENT_DOWNLOAD_URL=$VITE_CLIENT_DOWNLOAD_URL
 ARG VITE_STORAGE_CHUNK_SIZE=2097152
 ENV VITE_ROOM=$VITE_ROOM VITE_SIGNAL_URL=$VITE_SIGNAL_URL VITE_API_AUTH=$VITE_API_AUTH VITE_STORAGE_CHUNK_SIZE=$VITE_STORAGE_CHUNK_SIZE
 RUN npm run build
 
 FROM debian:bookworm-slim
-RUN groupadd --system send && useradd --system --gid send send
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=backend /build/server /app/server
 COPY --from=frontend /build/ssg/dist /app/static
 ENV BIND_ADDR=0.0.0.0:8080 STATIC_DIR=/app/static
-USER send
+RUN chown -R 1000:1000 /app
+USER 1000:1000
 EXPOSE 8080
 CMD ["/app/server"]

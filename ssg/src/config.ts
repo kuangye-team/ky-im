@@ -24,9 +24,17 @@ export const SIGNALING_CONFIG = {
   maxMessageChars: 512 * 1024, // 信令 JSON 的客户端接收字符上限。
 } as const;
 
+/** Web 与桌面互通的公开入口，随前端构建生效。 */
+export const CLIENT_CONFIG = {
+  webUrl: import.meta.env?.VITE_WEB_URL?.trim() || "https://im.kuangye.team/",
+  downloadUrl: import.meta.env?.VITE_CLIENT_DOWNLOAD_URL?.trim() || "https://github.com/kuangye-team/ky-im/releases/latest",
+  // Keep the scheme in sync with app/tauri.conf.json.
+  launchUrl: "ky-im://open",
+} as const;
+
 /** 桌面客户端未配置有效信令地址时，邀请朋友使用的公开网页。 */
 export const INVITE_CONFIG = {
-  fallbackUrl: "https://im.kuangye.team/",
+  fallbackUrl: CLIENT_CONFIG.webUrl,
 } as const;
 
 /** 直连与中转共用的连接时限和本机缓冲。 */
