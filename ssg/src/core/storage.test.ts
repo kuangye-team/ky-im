@@ -16,6 +16,7 @@ const profile = (id = newId()): Profile => ({
   color: "#597461",
   bio: "你好",
   device: "浏览器",
+  clientType: "web" as const,
 });
 const adapters: IndexedDBStorageAdapter[] = [];
 function adapter(name = `send-test-${newId()}`) {

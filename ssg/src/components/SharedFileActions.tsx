@@ -8,6 +8,7 @@ export function SharedFileActions({
   fileName,
   transferring,
   recordOnly = false,
+  canForward = true,
   onDownload,
   onForward,
   onDelete,
@@ -15,6 +16,7 @@ export function SharedFileActions({
   fileName: string;
   transferring: boolean;
   recordOnly?: boolean;
+  canForward?: boolean;
   onDownload: () => void;
   onForward: () => void;
   onDelete: () => void;
@@ -71,7 +73,7 @@ export function SharedFileActions({
             <DropdownMenu.Item
               className="shared-file-menu-item"
               aria-label={t("转发")}
-              disabled={transferring || recordOnly}
+              disabled={transferring || recordOnly || !canForward}
               onSelect={() => {
                 openingDialog.current = true;
                 onForward();

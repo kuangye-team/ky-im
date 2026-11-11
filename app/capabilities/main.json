@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "Local discovery, transfers, and saving to user-selected destinations",
+  "windows": ["main"],
+  "permissions": [
+    "core:default", "core:window:allow-set-background-color", "core:window:allow-set-theme",
+    "updater:default", "process:allow-restart",
+    { "identifier": "opener:allow-open-url", "allow": [{ "url": "https://*" }, { "url": "http://*" }, { "url": "mailto:*" }] },
+    "dialog:allow-save", "dialog:allow-open",
+    "fs:allow-read-dir", "fs:allow-stat", "fs:allow-read", "fs:allow-seek",
+    "fs:allow-open", "fs:allow-write", "fs:allow-mkdir", "fs:allow-exists"
+  ]
+}

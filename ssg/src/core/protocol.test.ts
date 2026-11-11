@@ -24,6 +24,13 @@ const file = {
 };
 
 describe("RTC wire protocol", () => {
+  it("round trips the full 128 KiB network block", () => {
+    expect(CHUNK_SIZE).toBe(128 * 1024);
+    const bytes = Uint8Array.from({ length: CHUNK_SIZE }, (_, i) => i % 256);
+    const encoded = encodeChunk(id, 1, bytes.buffer);
+    expect(encoded.byteLength).toBe(128 * 1024 + 44);
+    expect(decodeChunk(encoded)?.data).toEqual(bytes);
+  });
   it("round trips a binary chunk with its sequence and payload", () => {
     const bytes = new Uint8Array([0, 1, 254, 255]);
     const encoded = encodeChunk(id, 12, bytes.buffer);
@@ -96,8 +103,12 @@ describe("RTC wire protocol", () => {
       color: "#597461",
       avatar: "🌿",
       device: "Mac",
+      clientType: "web" as const,
     };
     expect(isProfile(profile)).toBe(true);
+    expect(isProfile({ ...profile, clientType: "app" })).toBe(true);
+    expect(isProfile({ ...profile, clientType: "unknown" })).toBe(false);
+    expect(isProfile({ ...profile, clientType: undefined })).toBe(false);
     expect(isProfile({ ...profile, color: "url(javascript:alert(1))" })).toBe(
       false,
     );

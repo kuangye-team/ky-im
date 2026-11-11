@@ -15,9 +15,9 @@ import {
 } from "lucide-react";
 import type { ChatEngine } from "../core";
 import { LARGE_FILE_BYTES } from "../core/storage";
-import type { ChatSnapshot, Message } from "../core/types";
+import type { ChatSnapshot, Message, StorageInfo } from "../core/types";
 import { Modal } from "./Modal";
-import { download, readableSize } from "./fileDownloads";
+import { downloadAttachment, readableSize } from "./fileDownloads";
 import "./StoragePage.css";
 
 export function StoragePage({
@@ -34,6 +34,11 @@ export function StoragePage({
     /\.0 (?=\w)/,
     " ",
   );
+  const desktop = !!engine.storage.getStorageInfo;
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const [moving, setMoving] = useState(false);
+  const [directoryError, setDirectoryError] = useState("");
+  const [pendingDirectory, setPendingDirectory] = useState<string | null>(null);
   const [usage, setUsage] = useState<StorageEstimate | null>(null);
   const [files, setFiles] = useState<Message[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -68,14 +73,30 @@ export function StoragePage({
       .finally(() => {
         if (current) setLoading(false);
       });
-    void navigator.storage
-      ?.estimate?.()
-      .then((estimate) => {
-        if (current) setUsage(estimate);
-      })
-      .catch(() => {
-        if (current) setUsage(null);
-      });
+    if (engine.storage.getStorageInfo) {
+      void engine.storage
+        .getStorageInfo()
+        .then((info) => {
+          if (current) {
+            setStorageInfo(info);
+            setUsage({ usage: info.usage });
+          }
+        })
+        .catch((error) => {
+          if (current)
+            setDirectoryError(
+              error instanceof Error ? error.message : String(error),
+            );
+        });
+    } else
+      void navigator.storage
+        ?.estimate?.()
+        .then((estimate) => {
+          if (current) setUsage(estimate);
+        })
+        .catch(() => {
+          if (current) setUsage(null);
+        });
     return () => {
       current = false;
     };
@@ -85,15 +106,7 @@ export function StoragePage({
     if (downloading) return;
     setDownloading(file.id);
     try {
-      const blob = await engine.storage.getAttachment(file.id);
-      if (!blob) {
-        setRefreshVersion((value) => value + 1);
-        throw new Error(t("文件已不在本地，无法下载，请让对方重新发送。"));
-      }
-      download(
-        blob,
-        file.fileName || (file.kind === "image" ? t("图片") : t("未命名文件")),
-      );
+      await downloadAttachment(engine.storage, file);
     } catch (error) {
       onNotice(
         error instanceof Error
@@ -133,7 +146,7 @@ export function StoragePage({
   const totalSize = files.reduce((total, file) => total + (file.size || 0), 0);
   const allSelected =
     visibleFiles.length > 0 && selectedFiles.length === visibleFiles.length;
-  const busy = loading || deleting || !!downloading || !!loadError;
+  const busy = loading || deleting || moving || !!downloading || !!loadError;
   const confirmDeletion = (targets: Message[]) => {
     setDeleteError("");
     setPendingDeletion(targets);
@@ -161,13 +174,99 @@ export function StoragePage({
     }
   };
 
+  const chooseDirectory = async () => {
+    setDirectoryError("");
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const directory = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: storageInfo?.directory,
+      });
+      if (directory && directory !== storageInfo?.directory)
+        setPendingDirectory(directory);
+    } catch (error) {
+      setDirectoryError(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const migrate = async () => {
+    if (!pendingDirectory || moving) return;
+    setMoving(true);
+    setDirectoryError("");
+    try {
+      const info = await engine.moveStorage(pendingDirectory);
+      setStorageInfo(info);
+      setUsage({ usage: info.usage });
+      setPendingDirectory(null);
+      onNotice(
+        t(
+          info.cleanupWarning
+            ? "数据已迁移，原目录未能清理，可手动删除原目录。"
+            : "数据存储目录已迁移",
+        ),
+      );
+      setRefreshVersion((value) => value + 1);
+    } catch (error) {
+      setDirectoryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setMoving(false);
+    }
+  };
+
   return (
     <section className="full-page storage-page storage-manager">
       <div className="page-heading">
         <h1>{t("存储管理")}</h1>
-        <p>{t("查看存储用量，整理保存在这个浏览器里的图片和文件。")}</p>
+        <p>
+          {t(
+            desktop
+              ? "查看存储用量，整理保存在这台设备上的图片、文件和文件夹。"
+              : "查看存储用量，整理保存在这个浏览器里的图片和文件。",
+          )}
+        </p>
       </div>
-      <div className="storage-metrics" aria-label={t("存储统计")}>
+      {desktop && (
+        <section className="storage-directory" aria-busy={moving}>
+          <div className="storage-directory-heading">
+            <h2>
+              <FolderOpen size={20} />
+              {t("数据存储目录")}
+            </h2>
+            <button
+              className="secondary-button"
+              disabled={busy || engine.hasPendingTransfers() || !storageInfo}
+              onClick={() => void chooseDirectory()}
+            >
+              {t("修改目录")}
+            </button>
+          </div>
+          <p className="storage-directory-path">
+            {storageInfo?.directory || t("正在读取文件…")}
+          </p>
+          <p>
+            {t(
+              "接收中的文件暂存在缓存目录，完成后自动移入文件目录。修改目录会迁移全部聊天记录和文件。",
+            )}
+          </p>
+          {storageInfo?.cleanupPending && (
+            <p role="status">
+              {t("部分已删除文件仍被占用，关闭占用程序后刷新即可重试清理。")}
+            </p>
+          )}
+          {engine.hasPendingTransfers() && !moving && (
+            <p>{t("请等待文件传输完成后再修改存储目录")}</p>
+          )}
+          {directoryError && !pendingDirectory && (
+            <p className="large-files-error" role="alert">
+              {translateError(directoryError)}
+            </p>
+          )}
+        </section>
+      )}
+      <div
+        className={`storage-metrics${desktop ? " storage-metrics-with-cache" : ""}`}
+        aria-label={t("存储统计")}
+      >
         <div>
           <span>{t("已用空间")}</span>
           <strong>
@@ -175,8 +274,20 @@ export function StoragePage({
               ? readableSize(usage.usage)
               : t("暂不可用")}
           </strong>
-          <small className="metric-detail">{t("当前浏览器估算")}</small>
+          <small className="metric-detail">
+            {t(desktop ? "本地数据与缓存" : "当前浏览器估算")}
+          </small>
         </div>
+        {desktop && (
+          <div>
+            <span>{t("缓存占用")}</span>
+            <strong>
+              {storageInfo
+                ? readableSize(storageInfo.cacheUsage)
+                : t("暂不可用")}
+            </strong>
+          </div>
+        )}
         <div>
           <span>{t("文件数")}</span>
           <strong>
@@ -419,10 +530,49 @@ export function StoragePage({
       <p className="storage-footnote">
         <Info size={14} />
         {t(
-          "文件只保存在当前浏览器。清理前请下载重要文件，对方保存的内容不受影响。",
+          desktop
+            ? "文件保存在数据存储目录。清理前请备份重要文件，对方保存的内容不受影响。"
+            : "文件只保存在当前浏览器。清理前请下载重要文件，对方保存的内容不受影响。",
         )}
       </p>
 
+      <Modal
+        open={!!pendingDirectory}
+        onClose={() => {
+          if (!moving) {
+            setPendingDirectory(null);
+            setDirectoryError("");
+          }
+        }}
+        title={t("迁移数据存储目录")}
+        description={t(
+          "请选择空文件夹。迁移完成后会切换到新目录并清理原目录；迁移期间请勿退出应用。",
+        )}
+      >
+        <p className="storage-directory-path">{pendingDirectory}</p>
+        {directoryError && (
+          <p className="large-files-error" role="alert">
+            {translateError(directoryError)}
+          </p>
+        )}
+        <div className="modal-actions">
+          <button
+            className="secondary-button"
+            disabled={moving}
+            onClick={() => setPendingDirectory(null)}
+          >
+            {t("取消")}
+          </button>
+          <button
+            className="primary-button"
+            disabled={moving || engine.hasPendingTransfers()}
+            onClick={() => void migrate()}
+          >
+            {moving && <LoaderCircle size={15} className="history-spinner" />}
+            {t(moving ? "正在迁移…" : "开始迁移")}
+          </button>
+        </div>
+      </Modal>
       <Modal
         open={!!pendingDeletion}
         onClose={() => {
@@ -432,7 +582,9 @@ export function StoragePage({
           count: pendingDeletion?.length || 0,
         })}
         description={t(
-          "这会删除此浏览器中所选文件及对应聊天消息，无法恢复。对方的记录不受影响，联系人和备注会保留。",
+          desktop
+            ? "这会删除此设备中所选文件及对应聊天消息，无法恢复。对方的记录不受影响，联系人和备注会保留。"
+            : "这会删除此浏览器中所选文件及对应聊天消息，无法恢复。对方的记录不受影响，联系人和备注会保留。",
         )}
       >
         <p className="large-files-confirm-size">

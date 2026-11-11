@@ -18,6 +18,7 @@ const peer = (): Profile => ({
   avatar: "🌙",
   color: "#597461",
   device: "Mac",
+  clientType: "web" as const,
 });
 
 describe("local automatic file receiving", () => {
@@ -355,7 +356,7 @@ describe("chat engine persistence and offline behavior", () => {
       onopen?: () => void;
       onmessage?: (event: { data: string }) => void;
       onclose?: () => void;
-      onerror?: () => void;
+      onerror?: (event: Event) => void;
       sent: string[] = [];
       constructor(_url: string) {
         Socket.instances.push(this);
@@ -375,6 +376,10 @@ describe("chat engine persistence and offline behavior", () => {
     vi.useFakeTimers();
     engine.start();
     const socket = Socket.instances[0]!;
+    socket.onerror?.(Object.assign(new Event("error"), {
+      message: "访问密钥不正确或无权访问，请检查后重试",
+    }));
+    expect(engine.getSnapshot().error).toBe("访问密钥不正确或无权访问，请检查后重试");
     socket.onopen?.();
     expect(JSON.parse(socket.sent[0]!)).toMatchObject({
       type: "join",

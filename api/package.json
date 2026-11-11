@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local ../scripts/dev-api.mjs",
-    "build": "cargo build --release --locked",
+    "build": "node ../scripts/rust.mjs build --release --locked",
     "build:worker": "worker-build --no-panic-recovery --release --locked",
     "deploy": "wrangler deploy",
     "preview": "node --env-file-if-exists=.env.production ../scripts/dev-api.mjs --release",
-    "test": "cargo test --locked"
+    "test": "node ../scripts/rust.mjs test --locked"
   },
   "engines": {
     "node": ">=22.12.0"

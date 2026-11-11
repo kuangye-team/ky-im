@@ -1,0 +1,28 @@
+.about-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  margin-bottom: 24px;
+  background: var(--surface-soft);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  font-size: 13px;
+}
+.about-version-info, .about-version-actions, .about-current-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.about-version-info { flex: 1 1 240px; color: var(--text-secondary); }
+.about-current-version strong { color: var(--text); font-size: 15px; }
+.about-update-status { padding: 5px 8px; border-radius: 8px; }
+.about-update-status.has-update { color: var(--primary); background: var(--surface); }
+.about-version-actions button { white-space: nowrap; }
+.about-version-error { flex-basis: 100%; margin: 0; color: var(--text-secondary); }
+@media (max-width: 600px) {
+  .about-version-actions { width: 100%; }
+  .about-version-actions button { flex: 1; }
+}

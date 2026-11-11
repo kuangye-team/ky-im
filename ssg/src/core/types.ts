@@ -8,6 +8,7 @@ export type Profile = {
   color: string;
   avatar: string;
   device: string;
+  clientType: "web" | "app";
 };
 export type Message = {
   id: string;
@@ -20,8 +21,8 @@ export type Message = {
   size?: number;
   createdAt: number;
   status: "awaiting-acceptance" | "sending" | "sent" | "delivered" | "failed";
-  /** Large transfers retain metadata only on both devices. */
-  attachmentStorage?: "external";
+  /** External destinations retain metadata only; managed payloads belong to the desktop store. */
+  attachmentStorage?: "external" | "managed";
   /** Present only for a folder streamed directly to the recipient's disk. */
   folder?: { fileCount: number; directoryCount: number };
   error?: string;
@@ -33,13 +34,29 @@ export interface FileDestination {
 }
 export interface FolderDestination {
   createDirectory(path: string): Promise<void>;
-  createFile(path: string): Promise<FileDestination>;
+  createFile(path: string, size?: number): Promise<FileDestination>;
+  close?(): Promise<void>;
+  abort?(): Promise<void>;
 }
+/** A file that can be read in bounded chunks, including native files accessed over IPC. */
+export interface AttachmentSource {
+  name: string;
+  type: string;
+  size: number;
+  slice(start: number, end: number): { arrayBuffer(): Promise<ArrayBuffer> };
+}
+export type StorageInfo = {
+  directory: string;
+  usage: number;
+  cacheUsage: number;
+  cleanupWarning?: boolean;
+  cleanupPending?: boolean;
+};
 export type Conversation = {
   peer: Profile;
   /** A local display name; never included in a peer's shared profile. */
   remark?: string;
-  /** Local permission for this contact's browser-stored attachments; off when absent. */
+  /** Local permission for automatic receiving into this device's managed storage; off when absent. */
   autoAcceptFiles?: boolean;
   updatedAt: number;
   unread: number;
@@ -54,6 +71,12 @@ export interface StorageAdapter {
   saveMessage(message: Message): Promise<void>;
   getAttachment(id: string): Promise<Blob | undefined>;
   saveAttachment(id: string, blob: Blob): Promise<void>;
+  createFileDestination?(message: Message): Promise<FileDestination>;
+  createFolderDestination?(message: Message): Promise<FolderDestination>;
+  getAttachmentSource?(id: string): Promise<AttachmentSource | undefined>;
+  exportAttachment?(message: Message): Promise<void>;
+  getStorageInfo?(): Promise<StorageInfo>;
+  moveStorage?(directory: string): Promise<StorageInfo>;
   /** Saved attachments at or above the size limit, largest first. */
   getFiles(minSize?: number): Promise<Message[]>;
   /** Deletes local messages together with their attachment payloads. */

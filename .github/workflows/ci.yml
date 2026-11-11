@@ -1,0 +1,82 @@
+name: Check web and desktop
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'feature-*', 'release-*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: ssg/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: api -> target
+          cache-on-failure: true
+      - run: npm ci --ignore-scripts
+      - run: npm --prefix ssg ci
+      - run: node --test scripts/desktop.test.mjs
+      - run: npm run test:rust-cache
+      - run: npm --prefix ssg test
+      - run: node scripts/prepare-licenses.mjs
+      - run: npm --prefix ssg run build
+      - run: npm run desktop:frontend:build
+      - name: Install browser for real WebRTC regression tests
+        working-directory: ssg
+        run: npx playwright install --with-deps chromium
+      - name: Verify discovery, negotiation and file transfers
+        run: npm --prefix ssg run test:browser -- chat.spec.ts on-demand.spec.ts settings.spec.ts hybrid-network.spec.ts --project=desktop
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+      - name: Verify optional relay fallback and consent
+        run: npm --prefix ssg run test:relay
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: browser-failures
+          path: |
+            temp/test-results/browser/
+            temp/artifacts/relay-browser/
+          if-no-files-found: ignore
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15-intel, windows-2025]
+    # Set the repository variable MACOS_SELF_HOSTED=true to use your own Mac.
+    runs-on: ${{ startsWith(matrix.os, 'macos-') && vars.MACOS_SELF_HOSTED == 'true' && fromJSON('["self-hosted", "macOS"]') || matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app -> target
+          shared-key: desktop-check
+          cache-on-failure: true
+      - run: cargo fmt --manifest-path app/Cargo.toml --check
+      - run: cargo clippy --manifest-path app/Cargo.toml --locked --all-targets -- -D warnings
+      - run: cargo test --manifest-path app/Cargo.toml --locked

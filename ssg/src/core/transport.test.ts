@@ -103,6 +103,7 @@ const me: Profile = {
   color: "#597461",
   bio: "",
   device: "Mac",
+  clientType: "web" as const,
 };
 const peer: Profile = {
   ...me,
@@ -1706,19 +1707,23 @@ describe("forwarding saved messages", () => {
     const result = engine
       .forwardMessage(original, recipient.id)
       .catch((error) => error as Error);
+    await vi.waitFor(() => expect(controls(targetChannel).some((p) => p.type === "file-start")).toBe(true));
+    const offer = controls(targetChannel).find((p) => p.type === "file-start")!;
+    expect(saving).toBe(false);
+    targetChannel.receive(JSON.stringify({ type: "file-accept", id: offer.id }));
     await vi.waitFor(() => expect(saving).toBe(true));
     socket.receive({ type: "peer_left", id: recipient.id });
     release();
 
     expect(await result).toMatchObject({
-      message: expect.stringContaining("转发未完成"),
+      message: expect.stringMatching(/已取消|已离线|已关闭/),
     });
     await vi.waitFor(async () =>
       expect((await storage.getMessages(recipient.id))[0]?.status).toBe(
         "failed",
       ),
     );
-    expect(targetChannel.sent).toEqual([]);
+    expect(controls(targetChannel).some((p) => p.type === "file-end")).toBe(false);
     expect(await storage.getMessages(peer.id)).toEqual([original]);
     expect(await storage.getAttachment(original.id)).toBeDefined();
   });

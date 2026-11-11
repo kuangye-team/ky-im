@@ -15,7 +15,7 @@ type DirectoryHandle = FileSystemDirectoryHandle & {
   values(): AsyncIterableIterator<FileSystemHandle>;
 };
 
-function collector(
+export function createFolderCollector(
   signal: AbortSignal,
   report: (progress: FolderProgress) => void,
 ) {
@@ -54,7 +54,7 @@ export async function readDirectory(
   signal: AbortSignal,
   report: (progress: FolderProgress) => void,
 ): Promise<FolderSelection> {
-  const result = collector(signal, report);
+  const result = createFolderCollector(signal, report);
   async function visit(directory: FileSystemDirectoryHandle, parent: string) {
     for await (const child of (directory as DirectoryHandle).values()) {
       signal.throwIfAborted();
@@ -80,7 +80,7 @@ export async function readDroppedDirectory(
   signal: AbortSignal,
   report: (progress: FolderProgress) => void,
 ): Promise<FolderSelection> {
-  const result = collector(signal, report);
+  const result = createFolderCollector(signal, report);
   async function visit(directory: FileSystemDirectoryEntry, parent: string) {
     const reader = directory.createReader();
     for (;;) {
@@ -116,7 +116,7 @@ export async function readDirectoryFiles(
 ): Promise<FolderSelection> {
   if (!files.length) throw new Error("没有读取到文件，请尝试拖入文件夹");
   const name = files[0].webkitRelativePath.split("/")[0];
-  const result = collector(signal, report);
+  const result = createFolderCollector(signal, report);
   const directories = new Set<string>();
   for (const file of files) {
     if (result.entries.length % 128 === 0)

@@ -2,16 +2,18 @@
  * 前端配置入口。在根目录 .env.json 中修改对应环境，再运行 npm run init。
  * local 用于开发，production 用于正式构建，compose 用于 Docker 构建。
  * 下列源码配置随前端构建生效；字节上限和协议行为应在通信双方保持一致。
- * 开发端口、代理和构建选项见 vite.config.ts；测试选项见 playwright.config.ts。
+ * 开发端口、代理和构建选项见 vite.config.ts；测试选项见 tests/config/。
  */
 
-/** 设备发现与信令：只交换在线资料、SDP/ICE，不能传输聊天内容。 */
+/** 设备发现与信令；中转协议由独立传输适配器处理，默认不启用。 */
 export const SIGNALING_CONFIG = {
   // 发现命名空间；仍在 join 消息中使用，1–64 位字母、数字、下划线或连字符。
   // 相同命名空间和服务端可见 IP 的设备自动发现。此值不提供访问控制。
   room: import.meta.env?.VITE_ROOM || "local",
   // 留空时跟随页面协议/域名连接 /api/ws；HTTPS 页面必须使用 wss://。
   url: import.meta.env?.VITE_SIGNAL_URL || "",
+  // 默认服务器的构建时访问密钥；也适用于留空地址时的同源服务器。
+  authorization: (import.meta.env?.VITE_API_AUTH || "").trim(),
   heartbeatIntervalMs: 20_000, // 发送心跳的间隔。
   heartbeatTimeoutMs: 55_000, // 超过此时间没有 pong 则断开并重连。
   heartbeatResumeGraceMs: 10_000, // 页面恢复后先探测，给对端回复的宽限时间。
@@ -22,7 +24,20 @@ export const SIGNALING_CONFIG = {
   maxMessageChars: 512 * 1024, // 信令 JSON 的客户端接收字符上限。
 } as const;
 
-/** WebRTC 连接和本机缓冲；均不改变信令服务的职责。 */
+/** Web 与桌面互通的公开入口，随前端构建生效。 */
+export const CLIENT_CONFIG = {
+  webUrl: import.meta.env?.VITE_WEB_URL?.trim() || "https://im.kuangye.team/",
+  downloadUrl: import.meta.env?.VITE_CLIENT_DOWNLOAD_URL?.trim() || "https://github.com/kuangye-team/ky-im/releases/latest",
+  // Keep the scheme in sync with app/tauri.conf.json.
+  launchUrl: "ky-im://open",
+} as const;
+
+/** 桌面客户端未配置有效信令地址时，邀请朋友使用的公开网页。 */
+export const INVITE_CONFIG = {
+  fallbackUrl: CLIENT_CONFIG.webUrl,
+} as const;
+
+/** 直连与中转共用的连接时限和本机缓冲。 */
 export const CONNECTION_CONFIG = {
   rtc: { iceServers: [] } satisfies RTCConfiguration, // 默认仅使用本机 ICE 候选。
   readyTimeoutMs: 15_000, // 等待设备 DataChannel 就绪的时限。
@@ -35,7 +50,7 @@ export const CONNECTION_CONFIG = {
   maxTotalReceiveQueuePackets: 2048, // 所有设备异步接收队列的总包数上限。
 } as const;
 
-/** 内容限制：通过 DataChannel 传输，修改时要兼顾对端版本和界面提示。 */
+/** 内容限制：各传输通道共用，修改时要兼顾对端版本和界面提示。 */
 export const MAX_FILE_SIZE = 256 * 1024 ** 2; // 浏览器附件保存上限：256 MiB；自动接收需联系人授权，更大文件需确认并直接保存到磁盘。
 export const FOLDER_CONFIG = {
   maxCompressedFiles: 256,
@@ -45,7 +60,7 @@ export const FOLDER_CONFIG = {
   maxMetadataBytes: 16 * 1024 * 1024,
   supportTimeoutMs: 10_000,
 } as const;
-export const CHUNK_SIZE = 16 * 1024; // 单个文件数据块 16 KiB，不含协议头。
+export const CHUNK_SIZE = 128 * 1024; // 单个文件数据块 128 KiB，不含协议头；WebRTC 可按对端上限缩小。
 export const MAX_TRANSFER_SIZE = CHUNK_SIZE * 2 ** 32; // 32 位数据块序号的协议上限。
 export const MAX_TEXT_BYTES = 32 * 1024; // 单条文字的 UTF-8 字节上限。
 export const MAX_CONTROL_BYTES = 48 * 1024; // DataChannel 控制 JSON 的字节上限。
@@ -59,9 +74,15 @@ export const TRANSFER_CONFIG = {
   maxFutureTimestampMs: 60_000, // 对端消息时间最多允许领先本机一分钟。
 } as const;
 
+const storageChunkBytes = Number(import.meta.env?.VITE_STORAGE_CHUNK_SIZE || 2 * 1024 * 1024);
+if (!Number.isSafeInteger(storageChunkBytes) || storageChunkBytes < CHUNK_SIZE ||
+    storageChunkBytes > 16 * 1024 * 1024 || storageChunkBytes % CHUNK_SIZE !== 0)
+  throw new Error("VITE_STORAGE_CHUNK_SIZE must be a multiple of 131072 bytes between 131072 and 16777216");
+
 /** 本地存储：更改 databaseName 会切换资料库，不会迁移既有聊天记录。 */
 export const STORAGE_CONFIG = {
   databaseName: "send-chat",
+  chunkBytes: storageChunkBytes, // 本地文件读取和 IPC 写入，默认 2 MiB；独立于网络分块。
   availabilityKey: "hummingbird.availability", // localStorage 中保存上线意图。
 } as const;
 export const LARGE_FILE_BYTES = 10 * 1024 * 1024; // 清理页面的大附件阈值，10 MiB。
@@ -118,14 +139,15 @@ export type LanguagePreference =
 export const LOADING_CONFIG = {
   // 首屏沿用当前主题；在应用样式下载前也能显示正确配色。
   theme: {
-    base: "var(--surface)",
-    blue: "color-mix(in srgb, var(--primary) 14%, var(--surface))",
-    sky: "var(--page)",
-    pattern: "color-mix(in srgb, var(--primary) 15%, transparent)",
-    ink: "var(--text)",
-    muted: "var(--muted)",
-    accent: "var(--primary)",
-    orbit: "var(--border)",
+    base: "var(--header-start)",
+    blue: "var(--header-start)",
+    sky: "var(--header-end)",
+    pattern: "#ffffff14",
+    ink: "#ffffff",
+    muted: "#ffffffe6",
+    accent: "#ffffff",
+    orbit: "#ffffff40",
+    surface: "#ffffff14",
     "pattern-size": "26px",
     "spin-duration": "1.2s",
   },

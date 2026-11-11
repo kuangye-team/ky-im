@@ -2,13 +2,14 @@ import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import { LoaderCircle, RefreshCw } from "lucide-react";
 import type { ChatEngine } from "../core";
-import { saveChatDrafts } from "../drafts";
+import { beforeAppUpdate } from "../app-updates";
+import { isDesktop } from "../core/network/settings";
 import {
   applyAppUpdate,
   dismissAppUpdate,
   getAppUpdate,
   subscribeAppUpdate,
-} from "../pwa";
+} from "../app-updates";
 import "./UpdateBanner.css";
 
 export function UpdateBanner({ engine }: { engine: ChatEngine }) {
@@ -37,21 +38,16 @@ export function UpdateBanner({ engine }: { engine: ChatEngine }) {
     };
   }, [visible]);
   if (!visible) return null;
-  const beforeReload = () => {
-    if (engine.hasPendingTransfers()) return busyMessage;
-    if (!saveChatDrafts())
-      return "未发送的文字暂时无法保存，请发送或复制后再更新。";
-    return null;
-  };
+  const beforeReload = () => beforeAppUpdate(engine);
   return (
-    <section ref={banner} className="update-banner" aria-label={t("网站更新")}>
+    <section ref={banner} className="update-banner" aria-label={t(isDesktop() ? "应用更新" : "网站更新")}>
       <span className="update-banner-icon" aria-hidden="true">
         <RefreshCw size={20} />
       </span>
       <div className="update-banner-copy" role="status" aria-atomic="true">
         <strong>{t("蜂鸟有新版本了")}</strong>
         <p>
-          {t(busy ? busyMessage : error || "更新后即可使用，页面将重新加载。")}
+          {t(busy ? busyMessage : error || (isDesktop() ? "更新完成后，蜂鸟将自动重启。" : "更新后即可使用，页面将重新加载。"))}
         </p>
       </div>
       <div className="update-banner-actions">
@@ -74,7 +70,7 @@ export function UpdateBanner({ engine }: { engine: ChatEngine }) {
               aria-hidden="true"
             />
           )}
-          {t(update.updating ? "正在更新…" : "更新并刷新")}
+          {t(update.updating ? "正在更新…" : isDesktop() ? "更新并重启" : "更新并刷新")}
         </button>
       </div>
     </section>

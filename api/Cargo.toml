@@ -16,14 +16,21 @@ path = "src/main.rs"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 url = "2"
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+subtle = "2.6"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal", "sync", "time"] }
 tower-http = { version = "0.6", features = ["cors", "fs", "set-header"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 worker = "=0.8.7"
+futures-util = "0.3"
 js-sys = "0.3"
 wasm-bindgen = "0.2"
 

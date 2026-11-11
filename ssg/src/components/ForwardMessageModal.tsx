@@ -1,3 +1,4 @@
+import { deviceLabel } from "../core/profile";
 import { translateError } from "../localizeError";
 import { useTranslation } from "react-i18next";
 import { useRef, useState, type CSSProperties } from "react";
@@ -50,7 +51,7 @@ export function ForwardMessageModal({
       online: onlineIds.has(peer.id) && snap.availability === "online",
     }));
   const visibleContacts = contacts.filter((peer) =>
-    `${peer.displayName} ${peer.name} ${peer.device} ${peer.numericId || ""}`
+    `${peer.displayName} ${peer.name} ${deviceLabel(peer)} ${peer.numericId || ""}`
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
@@ -144,7 +145,7 @@ export function ForwardMessageModal({
             <span className="forward-contact-copy">
               <strong>{peer.displayName}</strong>
               <small>
-                {peer.online ? peer.device : t("离线 · 暂不可转发")}
+                {peer.online ? deviceLabel(peer) : t("离线 · 暂不可转发")}
               </small>
             </span>
             <span className="forward-contact-check" aria-hidden="true">

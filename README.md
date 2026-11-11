@@ -1,52 +1,71 @@
 # Hummingbird
 
-English | [简体中文](README.zh.md)
-
-[GitHub](https://github.com/kuangye-team/ky-im)
+English | [简体中文](README.zh.md) · [GitHub](https://github.com/kuangye-team/ky-im)
 
 Connect easily. Share freely.
 
-Hummingbird is a local-network chat and file-sharing app. No account is required: open the website to discover devices on the same network and share text, images, and files. Chat content travels between devices over WebRTC, and each browser stores its own history.
+Hummingbird is a local-network chat and file-sharing app for browsers, PWAs, and macOS / Windows desktop clients (Ky IM). No account is required. Text, images, files, and folders travel directly between devices whenever possible, and each device keeps its own history.
 
-**The signaling service handles device discovery, presence, and connection negotiation. It does not transmit or store chat content.**
+By default, the server handles device discovery and connection negotiation without storing chat content. Desktop clients also discover devices locally, enabling LAN communication without a central server.
 
-[Features](#features) · [Quick start](#quick-start) · [Configuration](#configuration) · [Deployment](#deployment) · [How it works](#how-it-works) · [Development and testing](#development-and-testing) · [Contributing](#contributing) · [License](#license)
+[Features](#features) · [Architecture](#architecture) · [Quick start](#quick-start) · [Configuration](#configuration) · [Installation and deployment](#installation-and-deployment) · [Contributing](#contributing) · [Copyright and license](#copyright-and-license)
 
 ## Features
 
-- **Ready to use**: automatically creates a local identity, with a display name, avatar, bio, and online status.
-- **Device discovery**: finds online devices in the same group. A six-digit Hummingbird number lets you look up other groups.
-- **Chat and sharing**: supports private chats, images, files, forwarding, and attachment downloads. Files up to 256 MiB are received automatically and stored in the browser. Larger files require the recipient to confirm and choose a save location; they are streamed to disk, and both browsers keep only the transfer record. Receiving large files requires a browser with a save-file picker, such as desktop Chrome or Edge over a secure connection. Interrupted transfers must be sent again.
-- **Folder sharing**: choose or drag in a folder. Folders up to 256 MiB with up to 256 files are packed locally into ZIP files. Above either limit, the recipient chooses a location and receives the folder directly, with no attachment contents saved in either browser. Direct folder reception requires directory access support. Existing folders are preserved by choosing a new name; completed files remain after an interruption. Dragging folders or using the directory picker preserves empty directories; the compatibility file picker includes only directories containing files.
-- **Local history**: stores contacts, contact nicknames, messages, and attachments in the browser, with export, deletion, and large-file cleanup.
-- **Desktop and mobile**: responsive layouts, English and Chinese interfaces, and four themes.
-- **Installable app**: supports PWA installation, offline access to saved history, and updates applied with the user's consent.
+| Capability | Browser / PWA | Desktop app |
+| --- | --- | --- |
+| Device discovery | Signaling service discovers devices in the same group and supports cross-group lookup | Signaling and local mDNS discovery, with duplicate devices merged |
+| Content transfer | Peer-to-peer text, images, files, and folders over WebRTC | TCP first, then WebRTC on failure; interoperates with browsers |
+| Optional relay | Server fallback after direct connection failure, requiring server support and both devices to opt in | Same as browser; disabled by default |
+| Local storage | IndexedDB, subject to browser storage quotas | SQLite for history and the local filesystem for attachments |
+| Large files and folders | Chunked transfers; direct saves depend on browser filesystem support | Native file access and streaming to disk, preserving directory structure |
+| Access | Desktop and mobile browsers, PWA installation, offline access to local history | macOS / Windows, including LAN communication without Internet access |
+| Languages | English and Chinese | English and Chinese |
 
-### Limitations
+## Architecture
 
-- Automatic discovery uses the same `VITE_ROOM` and the source IP observed by the server; it does not scan the local network. A Hummingbird number identifies an online group, not an account or password. The number is released when the last device in the group goes offline.
-- No STUN/TURN servers are configured by default; only local ICE candidates are used. Finding a device by number does not guarantee that a direct connection across networks will succeed.
-- Both devices must be online to send or receive content. The server does not hold offline messages, and history does not automatically sync between browsers or devices.
-- Exports contain chat text and attachment metadata, **not the original images or files**. Download important attachments separately. Clearing the site's browser data removes the local identity and history.
+```mermaid
+flowchart LR
+    A["Device A<br/>Browser / desktop<br/>Local history and files"]
+    B["Device B<br/>Browser / desktop<br/>Local history and files"]
+    A <-->|WebSocket| S["Signaling service<br/>Discovery, presence, negotiation"]
+    S <-->|WebSocket| B
+    A <-->|WebRTC / TCP| B
+    A <-.->|Fallback; both opt in| R["Optional server relay<br/>No content persistence"]
+    R <-.-> B
+```
+
+Discovery, transport, and storage are separate adapters around a shared `ChatEngine`, which handles messages, file transfers, and persistence. Devices use a persistent local UUID to merge results from multiple discovery sources. Files are transferred in chunks with support for streaming reads and writes.
+
+The Rust backend shares its core logic across two runtimes: the native service uses Axum / Tokio with in-memory presence, while the Cloudflare version uses Workers / Durable Objects to store presence data. Optional relay forwards only the active transfer; neither backend stores chat history or relay content.
+
+| Module | Technology and responsibility | Source |
+| --- | --- | --- |
+| Web and shared logic | React, TypeScript, Vite; UI, chat engine, network and storage adapters | [`ssg/src/`](ssg/src) |
+| Desktop app | Tauri 2, Rust; mDNS / TCP, SQLite, local filesystem | [`app/src/`](app/src) |
+| Signaling and relay | Rust; native and Cloudflare runtimes | [`api/src/`](api/src) |
+| Shared protocol | Network types shared by the server and desktop app | [`shared/`](shared) |
+| Build and release | Configuration generation, license notices, desktop and server packaging | [`scripts/`](scripts) |
+
+### Scope and limitations
+
+- **Discovery and connectivity:** browser groups use `VITE_ROOM` and the source IP observed by the server, without scanning the LAN. Desktop discovery requires reachable IPv4 addresses, UDP 5353 multicast, and dynamic TCP ports. WebRTC has no STUN/TURN servers configured by default, so cross-network direct connections depend on reachability.
+- **Availability and storage:** both devices must be online to transfer content. The server does not hold offline messages, and history does not automatically sync between devices. PWA offline caching provides app assets and access to local history; clearing site data removes the browser's local identity and history.
+- **Identity and privacy:** group numbers, UUIDs, and server access keys do not authenticate contacts. Device identifiers can currently be impersonated; use the app between trusted devices. WebRTC encrypts transport, but desktop TCP is currently unencrypted. Relay is not end-to-end encrypted, so the relay server can access content. Public device profiles are sent to enabled discovery services.
+- **Browser support:** receiving large files and original folders depends on filesystem APIs, storage quotas, and available space. Use HTTPS for production websites to support PWA and protected browser capabilities.
 
 ## Quick start
 
-The commands below are for macOS or Linux. Run them from the repository root unless stated otherwise.
-
-To run without development tools, download a [release archive](#download-and-run) or use the [published Docker image](#docker-published-image).
-
-### Requirements
+To run the app or host a service, choose a package or image under [Installation and deployment](#installation-and-deployment). Source development requires the following tools.
 
 | Tool | Requirement | Purpose |
 | --- | --- | --- |
-| Node.js / npm | Node.js ≥ 22.12.0 | Configuration generation, frontend development, and builds |
-| Rust / Cargo | Rust ≥ 1.91 | Native signaling service |
-| Browser | WebRTC and IndexedDB support | Using the app |
-| Docker / Docker Compose | An existing, configured Docker environment; needed only for container deployment | Building and running containers |
+| Node.js / npm | Node.js ≥ 22.12 | Configuration, frontend development, and builds |
+| Rust / Cargo | Rust ≥ 1.91 | Native server and desktop app |
+| Desktop platform dependencies | [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) | Desktop development and packaging only |
+| Docker / Compose | A working container runtime | Container deployment only; no host Rust installation needed |
 
-### 1. Install dependencies and initialize configuration
-
-Clone the repository and initialize the project:
+Start with a fresh clone below. Keep any existing `.env.json` instead of replacing it.
 
 ```sh
 git clone https://github.com/kuangye-team/ky-im.git
@@ -57,88 +76,65 @@ npm --prefix ssg ci
 cp .env.json.example .env.json
 npm run init
 npm run prepare
-```
-
-Keep your existing `.env.json` if you already have one. The default frontend port is `5173`, and the signaling service uses `8080`. `npm run prepare` generates frontend license notices manually; dependency installation, development, and builds do not generate them automatically.
-
-### 2. Start development
-
-Start the signaling service and frontend together:
-
-```sh
 npm run dev
 ```
 
-This generates configuration once and starts both services. The Rust service loads `api/.env.local`; existing process environment variables take precedence. Press Ctrl+C to stop both services. You can also run `npm run dev:api` and `npm run dev:ssg` in separate terminals.
+Open <http://localhost:5173>. The frontend development server proxies `/api` to local port `8080`; `npm run dev` starts both the frontend and API.
 
-Open <http://localhost:5173>. The development server proxies `/api` requests and WebSocket connections to the local signaling service.
-
-Use two separate browsers or browser profiles to try chatting without sharing a local identity. Other devices can connect through the development machine's LAN address if its firewall allows access. App installation and offline caching require HTTPS; `localhost` is suitable for local development.
-
-### 3. Preview a production build
-
-```sh
-npm run build
-npm run preview
-```
-
-`build` builds both the native API and frontend. `preview` starts the release API with `api/.env.production` and serves `ssg/dist` through Vite at <http://localhost:4173>. The preview server proxies `/api` requests and WebSocket connections using `local.ssg.API_HOST`; keep it aligned with `production.api.BIND_ADDR`. Rebuild after frontend changes. Preview is intended for local verification; see [Deployment](#deployment) for production hosting.
-
-Use `npm run preview:api` or `npm run preview:ssg` to start either service separately. Both combined startup commands stop the other service if one exits.
+| Scenario | Command from the repository root | Result |
+| --- | --- | --- |
+| Web development | `npm run dev` | Runs the website and native API together |
+| Desktop development | `npm run desktop:dev` | Starts Ky IM; local discovery needs no API, while online discovery needs a separately started or hosted signaling service |
+| Build and local preview | `npm run build`, then `npm run preview` | Builds the API and website; previews at `http://localhost:4173` |
 
 ## Configuration
 
-Edit the root `.env.json`, using [`.env.json.example`](.env.json.example) as a reference, then run:
+For source development and builds, edit root `.env.json`, created from the [example](.env.json.example), then run `npm run init`. Generated environment files and `wrangler.jsonc` are overwritten; keep persistent changes in `.env.json` or the corresponding `.example` templates.
 
-```sh
-npm run init
-```
-
-The initialization script uses the example files as templates to generate the files below. **Manual edits to generated files are overwritten the next time initialization runs.**
-
-| Configuration section | Generated files | Purpose |
+| Configuration section | Purpose | Generated files |
 | --- | --- | --- |
-| `local.api` / `local.ssg` | `api/.env.local` / `ssg/.env.local` | Local development |
-| `production.api` / `production.ssg` | `api/.env.production` / `ssg/.env.production` | Native deployment / production frontend build |
-| `compose.root` + `compose.ssg` | Root `.env` | Docker port, npm registry, and frontend build arguments |
-| `compose.api` / `compose.ssg` | `api/.env.compose` / `ssg/.env.compose` | Docker service configuration / frontend configuration copy |
-| `wrangler.api` / `wrangler.ssg` | `api/wrangler.jsonc` / `ssg/wrangler.jsonc` | Cloudflare runtime `vars` |
+| `local.api` / `local.ssg` | Local development | `api/.env.local`, `ssg/.env.local` |
+| `production.api` / `production.ssg` | Native deployment and production web builds | `api/.env.production`, `ssg/.env.production` |
+| `compose.root` / `compose.api` / `compose.ssg` | Docker ports, runtime settings, and frontend build arguments | Root `.env`, `api/.env.compose`, `ssg/.env.compose` |
+| `desktop.app` / `desktop.ssg` | Desktop signing, release, and frontend settings | `app/.env`, `ssg/.env.desktop` |
+| `wrangler.api` / `wrangler.ssg` | Cloudflare runtime variables | `api/wrangler.jsonc`, `ssg/wrangler.jsonc` |
 
-### Common settings
+Prebuilt images use a separately maintained `docker/.env`; server packages use `release/.env`. Neither is generated by initialization. Cloudflare frontend build settings still belong in `production.ssg`; `wrangler.*` only supplies runtime variables.
 
-| Setting | Description |
+### Main settings
+
+| Setting | Purpose and guidance |
 | --- | --- |
-| `WEB_PORT` | Local frontend port, set only in `local.ssg`; example: `5173` |
-| `API_HOST` | Development proxy target, set only in `local.ssg`; example: `http://127.0.0.1:8080` |
-| `VITE_SIGNAL_URL` | Signaling WebSocket URL; leave empty to use `/api/ws` on the page's origin, or set a complete `wss://…/api/ws` URL for separate deployments |
-| `VITE_ROOM` | Device discovery namespace, defaulting to `local`; accepts 1–64 ASCII letters, digits, underscores, or hyphens; not an access-control mechanism |
-| `BIND_ADDR` | Native service listening address; local example: `127.0.0.1:8080`; container example: `0.0.0.0:8080` |
-| `STATIC_DIR` | Frontend directory served by the native backend; relative paths use the service's working directory; containers use `/app/static` |
-| `CORS_ORIGINS` | Allowed frontend origins, comma-separated, without paths or trailing slashes; leave empty for same-origin browser connections only |
-| `TRUST_PROXY_HEADERS` | Whether the native service trusts forwarded client IP headers; enabled by default; set to `false` when exposing the service directly without a proxy under your control |
-| `MAX_CONNECTIONS` | Maximum connections per signaling instance; range: `2–4096`; example: `4096` |
-| `MAX_ROOMS` | Maximum automatic discovery groups; range: `1–256`; example: `256` |
-| `MAX_PEERS_PER_ROOM` | Maximum online devices per group; range: `2–512`; example: `128` |
-| `SERVER_PORT` | Docker host port in `compose.root`; takes effect when port mapping is enabled |
-| `NPM_REGISTRY` | npm registry used for Docker builds, set in `compose.root` |
+| `VITE_SIGNAL_URL` | Signaling WebSocket URL; empty uses same-origin `/api/ws` on the web. Separate hosting requires a full `wss://…/api/ws` URL. Packaged desktop apps default to `ws://127.0.0.1:8080/api/ws` when empty |
+| `VITE_ROOM` | Discovery namespace, default `local`; not access control |
+| `API_AUTH` / `VITE_API_AUTH` | Server access key / frontend preset for the default server; use the same complete value. Empty `API_AUTH` disables authentication |
+| `RELAY_ENABLED` | Server relay switch, default `false`; both devices must also opt in on the same server |
+| `BIND_ADDR` / `STATIC_DIR` | Native listening address and static asset directory; relative paths resolve from the server's working directory |
+| `CORS_ORIGINS` | Comma-separated frontend origins; add the website origin for separate hosting and retain required Tauri origins |
+| `TRUST_PROXY_HEADERS` | Trust forwarded client IP headers; set to `false` for direct exposure and enable only behind a controlled reverse proxy |
+| `MAX_CONNECTIONS` / `MAX_ROOMS` / `MAX_PEERS_PER_ROOM` | Limits for connections, discovery groups, and devices per group |
+| `WEB_PORT` / `API_HOST` | Local web port and development proxy target; examples use `5173` and `http://127.0.0.1:8080` |
+| `SERVER_PORT` / `NPM_REGISTRY` | Docker host port and build-time npm registry |
+| `TAURI_UPDATER_URL` / `TAURI_UPDATER_PUBLIC_KEY` / `TAURI_SIGNING_PRIVATE_KEY` | HTTPS update manifest URL, public key, and signing private key required for desktop release builds |
 
-`VITE_*` values are embedded in the frontend at build time, so changes require a rebuild. Production builds read `ssg/.env.production`, whose values override matching entries in `.env.local`; process environment variables take precedence. Docker injects `compose.ssg` values through `build.args`, and environment files are not copied into the image.
+`VITE_*` values are embedded in frontend assets and require rebuilding after changes. Accordingly, `VITE_API_AUTH` is not a server-only secret. The example access key is for demonstration; replace or clear it for deployment. With `API_AUTH` enabled, WebSocket access and health details require authentication; basic `/api/health` and static pages remain public.
 
-Connection timeouts, file limits, and transfer buffers are configured in [`ssg/src/config.ts`](ssg/src/config.ts). Theme settings are in [`ssg/src/theme-config.ts`](ssg/src/theme-config.ts).
+For the full settings and defaults, see the [API template](api/.env.example), [frontend template](ssg/.env.example), [desktop template](app/.env.example), and [combined example](.env.json.example). Keep private keys and other sensitive configuration out of version control. Desktop builds also accept configuration through process environment variables.
 
-## Deployment
+## Installation and deployment
 
-### Download and run
+| Option | Suitable for | Artifact / entry point |
+| --- | --- | --- |
+| macOS desktop installer | Standalone app for Apple Silicon and Intel Macs | [GitHub Releases](https://github.com/kuangye-team/ky-im/releases): `ky-im-<version>-macos-universal.dmg` |
+| Windows desktop installer | Standalone Windows x64 app | [GitHub Releases](https://github.com/kuangye-team/ky-im/releases): `ky-im-<version>-windows-x64-setup.exe` |
+| Server package | Running the website and API without development tools | `ky-im-<version>-bin.tar.gz`: Windows x64, Linux / macOS x64 and ARM64 |
+| Docker | Containerized website and API | [Prebuilt image configuration](docker/compose.yml) or [source build configuration](compose.yml) |
+| Native source build | Self-hosted Rust service and static website | `api/target/release/server`, `ssg/dist/` |
+| Cloudflare Workers | Hosted frontend and signaling | Workers Static Assets + Workers / Durable Objects |
 
-Download and extract `ky-im-<version>.tar.gz` from GitHub Releases. It includes the frontend, native servers for Windows x64, Linux x64/ARM64, and macOS Intel/Apple Silicon, plus Docker configuration. Native startup requires no Node.js, Rust, or Docker.
+### Docker
 
-Run `sh release/start_linux.sh`, `sh release/start_mac.sh`, or `release\start_win.bat`, then open <http://localhost:8080>. The launcher creates `release/.env` on first use and preserves it thereafter. See the [release guide](release/README.md) for configuration and updates; a `.sha256` file is provided for verification.
-
-### Docker: published image
-
-[`docker/compose.yml`](docker/compose.yml) starts the website and signaling service using `kyteam/ky-im` from Docker Hub by default. Only Docker and Docker Compose are needed; Node.js and Rust are not required.
-
-After cloning the repository, run from its root:
+Prebuilt images require no Node.js or Rust. From the repository root, retaining any existing `docker/.env`:
 
 ```sh
 cd docker
@@ -147,63 +143,23 @@ docker compose pull
 docker compose up -d
 ```
 
-Open <http://localhost:8080>. Keep an existing `docker/.env` instead of overwriting it. Set `SERVER_PORT` there to change the host port, `IMAGE_NAME` to use a custom repository, or `IMAGE_TAG` to select `latest`, an exact release such as `v1.0.0`, or a minor release series such as `v1.0`. You can also copy just the `docker/` directory to your server. This configuration is independent of the root `.env.json` and `npm run init`.
+Open <http://localhost:8080>. Configure the image version and port in `docker/.env` ([example](docker/.env.example)). The prebuilt frontend uses same-origin signaling; changing frontend build settings requires a custom image.
 
-To update, run `docker compose pull && docker compose up -d` in `docker/`. Use `docker compose logs -f im` for logs and `docker compose down` to stop. The example disables `TRUST_PROXY_HEADERS` for direct access; enable it when using a trusted reverse proxy. Other backend settings can be added to `docker/.env`. The published frontend uses `VITE_ROOM=local` and same-origin signaling; changing `VITE_*` requires building your own image.
-
-### Docker: build from source
-
-Use your existing Docker and Docker Compose environment. Complete dependency installation, configuration initialization, and license notice generation from the quick start first. Rust does not need to be installed on the host for Docker-only deployment.
-
-Port mapping is commented out in [`compose.yml`](compose.yml). To access the app through a host port, enable this under `services.im`:
-
-```yaml
-ports:
-  - "${SERVER_PORT:-8080}:8080"
-```
-
-Then run from the repository root:
+For a source build, install dependencies, initialize configuration, and generate license notices first, then run from the repository root:
 
 ```sh
 npm run init
 docker compose up -d --build
 ```
 
-The container serves both the website and signaling endpoints. With the default port mapping, open <http://localhost:8080>. Use `docker compose logs -f im` for logs and `docker compose down` to stop. Repeat the commands above after changing frontend build settings.
+The root Compose file already maps the host port, defaulting to `8080`. For local OrbStack use, add `--context orbstack` to Docker commands.
 
-### Publishing images and archives with GitHub Actions
+### Native service
 
-The [Docker publishing workflow](.github/workflows/docker-publish.yml) builds and pushes the repository configured in `DOCKERHUB_IMAGE`, defaulting to `kyteam/ky-im` when unset. In the GitHub repository's **Settings → Secrets and variables → Actions**, configure these repository secrets:
-
-| Secret | Value |
-| --- | --- |
-| `DOCKERHUB_USERNAME` | Docker Hub username with write access to the selected repository |
-| `DOCKERHUB_TOKEN` | Docker Hub access token with write permission |
-| `DOCKERHUB_IMAGE` | Optional repository name, such as `your-team/ky-im`; defaults to `kyteam/ky-im` |
-
-| Trigger | Published image tags | Downloadable archive |
-| --- | --- | --- |
-| Push to `main`, including a merged pull request | `latest` | None |
-| Push a three-part version tag such as `v0.2.20` | `v0.2.20`, `v0.2` | `ky-im-0.2.20.tar.gz` on GitHub Releases |
-
-Version tags keep the `v` prefix and do not update `latest`. Two-part tags and prerelease tags such as `v1.0.0-rc.1` do not trigger publishing. To publish a release:
-
-```sh
-git tag v0.2.20
-git push origin v0.2.20
-```
-
-The independent [release workflow](.github/workflows/release.yml) builds the frontend and five native servers, verifies each platform's launcher, and uploads the archive and checksum to GitHub Releases. Both workflows generate license notices before building. Archive publishing uses `GITHUB_TOKEN` and needs no Docker credentials.
-
-The archive pins its Docker configuration to the release tag; wait for the Docker workflow to finish before using that image. See the [release guide](release/README.md) for local packaging.
-
-### Native deployment
-
-After installing dependencies as described in the quick start, update the `production` section in `.env.json` for your deployment, especially `CORS_ORIGINS` and `TRUST_PROXY_HEADERS`, then run:
+After source setup and configuring `production`, run in a macOS / Linux shell:
 
 ```sh
 npm run build
-
 cd api
 set -a
 . ./.env.production
@@ -211,11 +167,13 @@ set +a
 ./target/release/server
 ```
 
-The default configuration serves the frontend from `../ssg/dist`. For a public deployment, use a reverse proxy to provide HTTPS and forward WebSocket connections to `/api/ws`. If the frontend is hosted separately, configure `VITE_SIGNAL_URL` and `CORS_ORIGINS` accordingly.
+The default configuration serves the website from `../ssg/dist`. For production, provide HTTPS/WSS through a reverse proxy and forward `/api`, including WebSocket `/api/ws` and the authentication endpoint `/api/ws/ticket`. Use `/api/health` for health checks. Separate frontend hosting requires both `VITE_SIGNAL_URL` and `CORS_ORIGINS`.
+
+When enabling `TRUST_PROXY_HEADERS`, restrict origin access and have the proxy strip or overwrite all trusted forwarding headers, including `Forwarded`, so grouping uses the real client IP.
 
 ### Cloudflare Workers
 
-The API runs on Workers with a `SignalingHub` Durable Object; the frontend uses [Workers Static Assets](https://developers.cloudflare.com/workers/static-assets/). After the quick-start dependency installation, install the [Rust Workers build tools](https://developers.cloudflare.com/workers/languages/rust/) and sign in:
+After source setup, install the build tool matching the repository dependency and log in:
 
 ```sh
 rustup target add wasm32-unknown-unknown
@@ -223,123 +181,42 @@ cargo install worker-build --version 0.8.7 --locked
 (cd api && npx wrangler login)
 ```
 
-Set Worker names and any custom domains in `api/wrangler.jsonc.example` and `ssg/wrangler.jsonc.example`. In `.env.json`, set:
-
-- `wrangler.api.CORS_ORIGINS` to the frontend origin, such as `https://ky-im-ssg.<subdomain>.workers.dev`.
-- `production.ssg.VITE_SIGNAL_URL` to the API's full WebSocket URL, such as `wss://ky-im-api.<subdomain>.workers.dev/api/ws`.
-
-Then deploy both services from the repository root:
+Set Worker names and domains in the [API template](api/wrangler.jsonc.example) and [frontend template](ssg/wrangler.jsonc.example). Configure `wrangler.api.CORS_ORIGINS` and `production.ssg.VITE_SIGNAL_URL` in `.env.json`, then run:
 
 ```sh
 npm run deploy
 ```
 
-Use `npm run deploy:api` or `npm run deploy:ssg` to deploy one service. Each command regenerates configuration; Wrangler builds the selected service before uploading it. The API uses `build:worker` to produce `api/build/`, while native `build` commands retain their existing behavior.
+Use `npm run deploy:api` or `npm run deploy:ssg` to deploy separately. Server keys can be managed with Wrangler Secrets; remove the matching variable from `wrangler.api` when using an `API_AUTH` Secret.
 
-`wrangler.*` values populate runtime `vars`; they do not set Vite build variables. Keep frontend settings in `production.ssg`. Generated `wrangler.jsonc` files are ignored by Git and overwritten by `init`; keep persistent changes in the templates or `.env.json`. To build only the Worker, run `npm --prefix api run build:worker`.
+### Desktop packaging
 
-## How it works
-
-```mermaid
-flowchart LR
-    A[Device A browser] <-->|Discovery, presence, connection negotiation| S[Signaling service]
-    B[Device B browser] <-->|Discovery, presence, connection negotiation| S
-    A <-->|WebRTC DataChannel: text, images, files| B
-    A --- LA[(Local IndexedDB)]
-    B --- LB[(Local IndexedDB)]
-```
-
-The frontend uses React, TypeScript, and Vite. It stores local data through `IndexedDBStorageAdapter` by default, with the storage interface defined by `StorageAdapter`. Each local identity has a UUID; changing an IP address, Hummingbird number, or display name does not merge histories belonging to different identities.
-
-The Rust backend shares its core logic between two runtimes: the native service uses Axum / Tokio with in-memory presence, while the Cloudflare backend uses Workers / Durable Objects. WebSocket messages handle discovery and control operations. The `signal` payload accepts only structured SDP / ICE negotiation data; there are no chat-message or attachment-upload endpoints.
-
-### Service endpoints
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /api/health` | Basic health check |
-| `GET /api/health/details` | Online device and group status; accesses and wakes the Durable Object in the Cloudflare backend |
-| `WS /api/ws` | Device joins, group lookup, presence updates, and WebRTC connection negotiation |
-
-Incoming signaling messages are limited to 256 KiB. Connection capacity and message rates are also limited. See [`api/src/protocol.rs`](api/src/protocol.rs) for the protocol definitions.
-
-## Development and testing
-
-### Project structure
-
-```text
-.
-├── api/                    # Rust signaling service: native and Cloudflare backends
-│   ├── src/                # Shared logic and runtime implementations
-│   └── tests/              # Native signaling integration tests
-├── ssg/                    # React / Vite frontend
-│   ├── src/core/           # WebRTC, protocol, and local storage
-│   ├── src/components/     # UI components
-│   ├── public/             # Icons and other static assets
-│   └── tests/              # Playwright browser tests
-├── scripts/                # Configuration, service startup, and manual license generation
-├── docker/                 # Run a published Docker Hub image
-├── release/                # Native launchers, environment example, and release guide
-├── .github/workflows/      # Publish Docker images and downloadable release archives
-├── .env.json.example       # Shared configuration example
-├── compose.yml             # Build and run the image from source
-└── Dockerfile              # Combined frontend and backend image
-```
-
-### Common commands
-
-Run these commands from the repository root:
-
-| Command | Purpose |
-| --- | --- |
-| `npm run init` | Generate environment files and Wrangler configuration from `.env.json` and templates |
-| `npm run prepare` | Generate frontend license notices after installing or updating dependencies |
-| `npm run dev` / `dev:api` / `dev:ssg` | Start both development services or one service |
-| `npm run build` / `build:api` / `build:ssg` | Build the native service and frontend, or either one |
-| `npm run preview` / `preview:api` / `preview:ssg` | Preview production builds locally |
-| `npm run deploy` / `deploy:api` / `deploy:ssg` | Build and deploy both services or one service to Cloudflare |
-
-The development, build, preview, and deploy commands above run `init` first. Before invoking subdirectory commands directly, run `npm run init`; build the frontend before previewing it.
-
-Run checks relevant to your changes:
+Install platform dependencies and configure the update URL and signing keys in `desktop.app` or process environment variables before running `npm run desktop:build`. A macOS universal build requires both Rust targets:
 
 ```sh
-# Frontend type checks and unit tests
-npm --prefix ssg test
-
-# Rust unit and signaling integration tests
-npm --prefix api test
-
-# Browser tests: build the frontend, then test desktop, mobile, and PWA behavior
-npm --prefix ssg run test:browser
-
-# PWA installation, offline behavior, and updates only
-npm --prefix ssg run test:browser -- --project=pwa
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run desktop:build
 ```
 
-Browser tests use installed Chrome by default. To use Chromium, run `npx playwright install chromium` in `ssg/` and set `PLAYWRIGHT_CHANNEL=chromium`. Tests start local services on ports `4310` and `4311`; PWA tests use temporary ports. Reports go to `ssg/test-results/`.
+On Windows, run `npm run desktop:build` directly to generate an x64 installer. Outputs in `app/dist/` include installers, signed update artifacts, checksums, and an update manifest. Update signing and operating-system code signing are configured separately; see the [desktop template](app/.env.example) and [release workflow](.github/workflows/release.yml).
 
-### App installation and updates
+For GitHub Actions desktop releases, configure repository-level entries under **Settings → Secrets and variables → Actions**. The desktop build reads the following names from Secrets first, then Variables:
 
-With HTTPS in production, install the app through a supported browser's menu. On iPhone / iPad, use **Add to Home Screen**; in macOS Safari, use **Add to Dock**.
+| Name | Suggested location | Default when unset |
+| --- | --- | --- |
+| `VITE_SIGNAL_URL` | Variables | Empty; the packaged app connects to `ws://127.0.0.1:8080/api/ws` |
+| `VITE_API_AUTH` | Secrets | Empty; no preset access key |
+| `VITE_ROOM` | Variables | `local` |
+| `VITE_STORAGE_CHUNK_SIZE` | Variables | `2097152` (2 MiB) |
 
-[`ssg/public/favicon.svg`](ssg/public/favicon.svg) is the source app icon. Builds generate theme icons, installation icons, and Apple icons. The service worker caches static app assets only; signaling endpoints are not cached. The development server does not register a service worker.
-
-When a new version is ready, the app shows an update notice. The user chooses **Update and reload** to apply it. Updates pause during transfers, unsent text stays in the current tab, and updating one tab does not force other tabs to refresh.
+These values are embedded during the desktop frontend build; rebuild the installers after changing them. The workflow does not read your local `.env.json` or generated `.env` files. `VITE_API_AUTH` remains readable in the distributed app even when configured as an Actions Secret.
 
 ## Contributing
 
-[Issues](https://github.com/kuangye-team/ky-im/issues) and [pull requests](https://github.com/kuangye-team/ky-im/pulls) are welcome.
+Contributions are welcome through [Issues](https://github.com/kuangye-team/ky-im/issues) and [Pull Requests](https://github.com/kuangye-team/ky-im/pulls). Verify affected features and update relevant configuration and documentation. [CI](.github/workflows/ci.yml) covers frontend type checking, unit tests, real-browser communication tests, and desktop Rust checks. The [image](.github/workflows/docker-publish.yml) and [application release](.github/workflows/release.yml) workflows build and distribute artifacts.
 
-1. Describe the problem, steps to reproduce it, and your browser and network environment. Include screenshots for UI issues when useful.
-2. Create a separate branch and keep each change focused on one problem or feature.
-3. Run tests for the affected functionality first, and describe the changes and validation in your pull request.
-4. Update documentation when configuration, commands, or usage changes. Keep test screenshots and reports in `ssg/test-results/`, and do not commit generated artifacts.
+## Copyright and license
 
-Preserve the architecture boundary: **text, images, and files must travel through WebRTC data channels, never through the signaling service for relay or storage.**
+Copyright (c) 2026 旷野团队. This project is licensed under the [MIT License](LICENSE). Third-party dependencies and assets retain their own licenses.
 
-## License
-
-This project is licensed under the [MIT License](LICENSE). Third-party components remain subject to their own licenses.
-
-After installing or updating frontend dependencies, run `npm run prepare` to generate notices in `ssg/public/licenses/`, shown on the app's **Open-source licenses** page. Installation, development, and builds do not generate them automatically. Generate them before releasing; GitHub Actions does this explicitly for Docker images and archives.
+After installing or updating frontend dependencies, run `npm run prepare` to generate third-party notices in `ssg/public/licenses/` and distribute them with the frontend. Desktop release builds and GitHub Actions include this step; generate the notices before building the website or Docker image yourself.

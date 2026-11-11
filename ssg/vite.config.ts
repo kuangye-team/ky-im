@@ -10,59 +10,26 @@ import { appIcons, brandSvg } from "./build/app-icons";
 export default defineConfig(({ mode }) => {
   // 始终读取 ssg/.env*；进程变量优先。空前缀仅供构建配置读取，
   // 浏览器端仍只会获得 Vite 默认公开的 VITE_* 变量。
+  const desktop = mode === "desktop";
   const root = fileURLToPath(new URL(".", import.meta.url));
   const env = loadEnv(mode, root, "");
-  const port = Number(env.WEB_PORT || 5173);
+  const port = desktop ? 1420 : Number(env.WEB_PORT || 5173);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("WEB_PORT 必须是 1–65535 之间的整数");
 
   return {
     root,
+    define: { "import.meta.env.VITE_DESKTOP": JSON.stringify(desktop) },
     plugins: [
       react(),
       appIcons(),
       VitePWA({
+        disable: desktop,
         // The app prompts before activating an update or reloading an open window.
         registerType: "prompt",
         injectRegister: "auto",
-        manifest: {
-          id: "/",
-          name: "蜂鸟 · Hummingbird",
-          short_name: "蜂鸟",
-          description: "轻快连接，自在分享。与身边的人聊天、分享照片和文件。",
-          lang: "zh-CN",
-          start_url: "/",
-          scope: "/",
-          display: "standalone",
-          theme_color: THEME_CONFIG.options[0].colors["--header-start"],
-          background_color: THEME_CONFIG.options[0].colors["--page"],
-          icons: [
-            {
-              src: "/favicon.svg",
-              sizes: "any",
-              type: "image/svg+xml",
-              purpose: "any",
-            },
-            {
-              src: "/icons/app-192.png",
-              sizes: "192x192",
-              type: "image/png",
-              purpose: "any",
-            },
-            {
-              src: "/icons/app-512.png",
-              sizes: "512x512",
-              type: "image/png",
-              purpose: "any",
-            },
-            {
-              src: "/icons/app-maskable-512.png",
-              sizes: "512x512",
-              type: "image/png",
-              purpose: "maskable",
-            },
-          ],
-        },
+        // The entry bundle supplies the manifest and its Data URL icons.
+        manifest: false,
         workbox: {
           // Control first-time visits too, while updated workers still wait for consent.
           clientsClaim: true,
@@ -127,7 +94,7 @@ export default defineConfig(({ mode }) => {
       // 开发服务器：监听局域网，端口占用时直接报错，避免悄悄切换来源。
       port,
       strictPort: true,
-      host: "0.0.0.0",
+      host: desktop ? "localhost" : "0.0.0.0",
       proxy: {
         "/api": {
           // 仅开发代理使用；生产信令地址由 VITE_SIGNAL_URL 决定。
@@ -137,6 +104,12 @@ export default defineConfig(({ mode }) => {
       },
     },
     // 静态产物可由 Rust 服务、反向代理或 Cloudflare Workers Static Assets 托管。
-    build: { outDir: "dist" },
+    build: {
+      outDir: desktop ? "desktop-dist" : "dist",
+      rollupOptions: {
+        // 将动态导入合并到入口，网页和桌面构建的 assets 均只输出一个 JS。
+        output: { inlineDynamicImports: true },
+      },
+    },
   };
 });

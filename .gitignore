@@ -1,6 +1,9 @@
 # OS metadata
 .DS_Store
 Thumbs.db
+
+# IDE
+.idea
 AGENTS.md
 
 # Dependencies
@@ -20,12 +23,10 @@ target/
 
 # Test reports and coverage
 playwright-report/
-test-results/
 coverage/
 
-# Local screenshots and temporary files
-screenshot/
-temp/
+# Local screenshots, test results, and temporary files
+/temp/
 
 # Local configuration; keep example files in version control
 .env
@@ -38,3 +39,8 @@ wrangler.jsonc
 # Logs and caches
 *.log
 __pycache__/
+
+# Desktop generated output
+/ssg/desktop-dist/
+/app/dist/
+/app/gen/

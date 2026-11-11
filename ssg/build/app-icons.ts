@@ -3,68 +3,63 @@ import sharp from "sharp";
 import type { Plugin } from "vite";
 import { THEME_CONFIG } from "../src/theme-config";
 
-const sourceUrl = new URL("../public/favicon.svg", import.meta.url);
-export const brandSvg = readFileSync(sourceUrl, "utf8");
+const sourceUrl = new URL("../src/assets/favicon.svg", import.meta.url);
+export const brandSvg = readFileSync(sourceUrl, "utf8").trim();
+const svgDataUrl = (svg: string) =>
+  `data:image/svg+xml,${encodeURIComponent(svg)}`;
+const themeIcons = Object.fromEntries(
+  THEME_CONFIG.options.map((theme) => {
+    const svg = brandSvg.replace(
+      /color="[^"]+"/,
+      `color="${theme.colors["--primary"]}"`,
+    );
+    return [theme.id, {
+      favicon: svgDataUrl(svg),
+      bird: svgDataUrl(svg.replace(/\s*<rect[^>]+\/>/, "")),
+    }];
+  }),
+);
 
-/** One editable SVG supplies the favicon, page artwork and installation icons. */
+/** One editable SVG supplies inline artwork and installation icons, without asset requests. */
 export function appIcons(): Plugin {
-  const assets = new Map<string, string | Buffer>();
-  const ready = (async () => {
-    for (const theme of THEME_CONFIG.options) {
-      const svg = brandSvg.replace(
-        /color="[^"]+"/,
-        `color="${theme.colors["--primary"]}"`,
-      );
-      assets.set(`icons/${theme.id}/favicon.svg`, svg);
-      assets.set(
-        `icons/${theme.id}/bird.svg`,
-        svg.replace(/\s*<rect[^>]+\/>/, ""),
-      );
-    }
-    for (const size of [192, 512]) {
-      assets.set(
-        `icons/app-${size}.png`,
-        await sharp(Buffer.from(brandSvg)).resize(size, size).png().toBuffer(),
-      );
-    }
-    // The OS supplies its own corner shape; keep the bird inside the safe circle.
-    const maskable = brandSvg
-      .replace('rx="15"', 'rx="0"')
-      .replace(
-        '<g id="bird">',
-        '<g id="bird" transform="translate(4.8 4.8) scale(.8)">',
-      );
-    assets.set(
-      "icons/app-maskable-512.png",
-      await sharp(Buffer.from(maskable)).resize(512, 512).png().toBuffer(),
+  const moduleId = "virtual:app-icons";
+  const resolvedId = `\0${moduleId}`;
+  const png = async (svg: string, size: number) => {
+    const buffer = await sharp(Buffer.from(svg)).resize(size, size).png().toBuffer();
+    return `data:image/png;base64,${buffer.toString("base64")}`;
+  };
+  // The OS supplies its own corner shape; keep the bird inside the safe circle.
+  const maskable = brandSvg
+    .replace('rx="15"', 'rx="0"')
+    .replace(
+      '<g id="bird">',
+      '<g id="bird" transform="translate(4.8 4.8) scale(.8)">',
     );
-    assets.set(
-      "icons/apple-touch-icon.png",
-      await sharp(Buffer.from(maskable)).resize(180, 180).png().toBuffer(),
-    );
-  })();
+  const ready = Promise.all([
+    png(brandSvg, 192),
+    png(brandSvg, 512),
+    png(maskable, 512),
+    png(maskable, 180),
+  ]).then(([app192, app512, appMaskable512, appleTouch]) => ({
+    app192, app512, appMaskable512, appleTouch,
+  }));
+
   return {
     name: "hummingbird-app-icons",
-    async buildStart() {
-      await ready;
+    resolveId(id) {
+      if (id === moduleId) return resolvedId;
     },
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        await ready;
-        const path = req.url?.split("?")[0].slice(1) || "";
-        const asset = assets.get(path);
-        if (!asset) return next();
-        res.setHeader(
-          "Content-Type",
-          path.endsWith(".svg") ? "image/svg+xml" : "image/png",
-        );
-        res.end(asset);
-      });
+    async load(id) {
+      if (id !== resolvedId) return;
+      return `export const themeIcons = ${JSON.stringify(themeIcons)};
+export const pngIcons = ${JSON.stringify(await ready)};`;
     },
-    generateBundle() {
-      for (const [fileName, source] of assets) {
-        this.emitFile({ type: "asset", fileName, source });
-      }
+    transformIndexHtml: {
+      order: "pre",
+      // Keep the saved theme's favicon available even while the entry JS is downloading.
+      handler: (html) => html
+        .replace("__FAVICON__", () => themeIcons[THEME_CONFIG.defaultTheme].favicon)
+        .replace("__THEME_ICONS__", () => JSON.stringify(themeIcons)),
     },
   };
 }

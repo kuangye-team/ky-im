@@ -152,6 +152,10 @@ export type StorageAdapterFactory = (
 ) => StorageAdapter | Promise<StorageAdapter>;
 const adapters = new Map<string, StorageAdapterFactory>([
   [
+    "desktop",
+    async () => (await import("./storage/desktop")).createDesktopStorage(),
+  ],
+  [
     "browser",
     (options) =>
       new IndexedDBStorageAdapter(
@@ -162,7 +166,7 @@ const adapters = new Map<string, StorageAdapterFactory>([
   ],
 ]);
 
-/** A future HTTP/SQL adapter can register here without changing the chat UI. */
+/** Additional storage backends can register here without changing the chat UI. */
 export function registerStorageAdapter(
   type: string,
   factory: StorageAdapterFactory,
@@ -172,7 +176,7 @@ export function registerStorageAdapter(
 }
 
 export async function createStorageAdapter(
-  type = "browser",
+  type = import.meta.env.VITE_DESKTOP ? "desktop" : "browser",
   options?: Record<string, unknown>,
 ): Promise<StorageAdapter> {
   const factory = adapters.get(type);

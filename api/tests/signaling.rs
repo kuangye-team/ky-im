@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use im_api::{AppState, Config, router};
 use serde_json::{Value, json};
@@ -54,7 +55,7 @@ impl Drop for Server {
 }
 
 fn profile(id: &str) -> Value {
-    json!({"id":id, "name":format!("User {id}"), "bio":"Hello", "color":"#9266dd", "avatar":"🐱", "device":"Browser"})
+    json!({"id":id, "name":format!("User {id}"), "bio":"Hello", "color":"#9266dd", "avatar":"🐱", "device":"Browser", "clientType":"web"})
 }
 
 fn numbered_profile(id: &str, welcome: &Value) -> Value {
@@ -85,6 +86,24 @@ async fn receive(socket: &mut Socket) -> Value {
     })
     .await
     .expect("timed out waiting for protocol message")
+}
+
+#[tokio::test]
+async fn discovery_preserves_web_and_app_client_types() {
+    let server = Server::start(Config::default()).await;
+    let (mut web, _) = server.join("web", "local").await;
+    let mut app = server.connect().await;
+    let mut app_profile = profile("app");
+    app_profile["clientType"] = json!("app");
+    send(&mut app, json!({"type":"join", "profile":app_profile})).await;
+    assert_eq!(receive(&mut app).await["peers"][0]["clientType"], "web");
+    assert_eq!(receive(&mut web).await["peer"]["clientType"], "app");
+    app_profile["clientType"] = json!("web");
+    send(&mut app, json!({"type":"profile", "profile":app_profile})).await;
+    assert_eq!(receive(&mut web).await["peer"]["clientType"], "web");
+    app_profile["clientType"] = json!("other");
+    send(&mut app, json!({"type":"profile", "profile":app_profile})).await;
+    assert_eq!(receive(&mut app).await["type"], "error");
 }
 
 #[tokio::test]
@@ -1006,4 +1025,276 @@ async fn trusted_proxy_headers_define_automatic_discovery_group() {
     assert_eq!(bob_welcome["numericId"], alice_welcome["numericId"]);
     assert_eq!(bob_welcome["peers"][0]["id"], "alice");
     assert_eq!(receive(&mut alice).await["peer"]["id"], "bob");
+}
+
+#[tokio::test]
+async fn accepts_packaged_desktop_origins_but_not_similar_foreign_origins() {
+    let server = Server::start(Config::default()).await;
+    for origin in [
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ] {
+        let mut request = server.url.clone().into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert("Origin", HeaderValue::from_str(origin).unwrap());
+        let (mut socket, _) = connect_async(request).await.unwrap();
+        socket.close(None).await.unwrap();
+    }
+    for origin in [
+        "http://tauri.localhost.evil.example",
+        "tauri://other",
+        "https://evil.example",
+    ] {
+        let mut request = server.url.clone().into_client_request().unwrap();
+        request
+            .headers_mut()
+            .insert("Origin", HeaderValue::from_str(origin).unwrap());
+        assert!(connect_async(request).await.is_err());
+    }
+}
+
+#[tokio::test]
+async fn forwards_only_valid_tcp_connection_addresses_between_discovered_devices() {
+    let server = Server::start(Config::default()).await;
+    let (mut alice, _) = server.join("alice", "local").await;
+    let (mut bob, _) = server.join("bob", "local").await;
+    receive(&mut alice).await;
+    let endpoint = json!({"tcp":{"instance":"10000000-0000-4000-8000-000000000000","port":1234,"addresses":["192.168.1.2"]}});
+    send(
+        &mut alice,
+        json!({"type":"signal", "to":"bob", "data":endpoint}),
+    )
+    .await;
+    assert_eq!(
+        receive(&mut bob).await,
+        json!({"type":"signal", "from":"alice", "data":endpoint})
+    );
+    let mut invalid = endpoint;
+    invalid["tcp"]["text"] = json!("chat content");
+    send(
+        &mut alice,
+        json!({"type":"signal", "to":"bob", "data":invalid}),
+    )
+    .await;
+    assert_eq!(receive(&mut alice).await["code"], "invalid_signal");
+}
+
+#[tokio::test]
+async fn relay_requires_server_and_both_devices_to_opt_in() {
+    for enabled in [false, true] {
+        let server = Server::start(Config {
+            relay_enabled: enabled,
+            ..Config::default()
+        })
+        .await;
+        let mut probe = server.connect().await;
+        send(&mut probe, json!({"type":"capabilities"})).await;
+        assert_eq!(
+            receive(&mut probe).await,
+            json!({"type":"capabilities","relay":enabled})
+        );
+        probe.close(None).await.unwrap();
+        for (a, b) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut alice = server.connect().await;
+            let mut bob = server.connect().await;
+            let mut ap = profile("relay-alice");
+            ap["relay"] = json!(a);
+            let mut bp = profile("relay-bob");
+            bp["relay"] = json!(b);
+            send(&mut alice, json!({"type":"join","profile":ap})).await;
+            assert_eq!(receive(&mut alice).await["relay"], enabled);
+            send(&mut bob, json!({"type":"join","profile":bp})).await;
+            let welcome = receive(&mut bob).await;
+            assert_eq!(
+                welcome["peers"][0]["relay"].as_bool().unwrap_or(false),
+                enabled && a
+            );
+            receive(&mut alice).await;
+            let data = json!({"kind":"data","binary":false,"payload":"aGVsbG8="});
+            send(
+                &mut alice,
+                json!({"type":"relay","to":"relay-bob","session":"session-1","data":data}),
+            )
+            .await;
+            if enabled && a && b {
+                assert_eq!(
+                    receive(&mut bob).await,
+                    json!({"type":"relay","from":"relay-alice","session":"session-1","data":data})
+                );
+            } else {
+                let error = receive(&mut alice).await;
+                assert_eq!(error["type"], "relay_error");
+                assert_eq!(error["session"], "session-1");
+                assert!(
+                    tokio::time::timeout(Duration::from_millis(20), bob.next())
+                        .await
+                        .is_err()
+                );
+            }
+            alice.close(None).await.unwrap();
+            bob.close(None).await.unwrap();
+            // Await server cleanup before reusing the identities in the next case.
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn relay_is_bounded_scoped_and_does_not_use_the_signaling_rate_budget() {
+    let server = Server::start(Config {
+        relay_enabled: true,
+        ..Config::default()
+    })
+    .await;
+    let mut alice = server.connect().await;
+    let mut bob = server.connect().await;
+    let mut outsider = server.connect().await;
+    for (socket, id, room) in [
+        (&mut alice, "alice", "local"),
+        (&mut bob, "bob", "local"),
+        (&mut outsider, "outsider", "other"),
+    ] {
+        let mut p = profile(id);
+        p["relay"] = json!(true);
+        send(socket, json!({"type":"join","room":room,"profile":p})).await;
+        receive(socket).await;
+    }
+    receive(&mut alice).await;
+    let packet = json!({"type":"relay","to":"bob","session":"transfer","data":{"kind":"data","binary":true,"payload":"AAAA"}});
+    send(&mut outsider, packet.clone()).await;
+    assert_eq!(receive(&mut outsider).await["code"], "peer_unavailable");
+    for _ in 0..300 {
+        send(&mut alice, packet.clone()).await;
+        assert_eq!(receive(&mut bob).await["data"]["payload"], "AAAA");
+    }
+    let mut full_block = packet.clone();
+    let binary: Vec<u8> = (0..128 * 1024 + 44).map(|i| i as u8).collect();
+    full_block["data"]["payload"] =
+        json!(base64::engine::general_purpose::STANDARD.encode(&binary));
+    send(&mut alice, full_block.clone()).await;
+    assert_eq!(
+        receive(&mut bob).await["data"]["payload"],
+        full_block["data"]["payload"]
+    );
+    send(&mut alice, json!({"type":"ping"})).await;
+    assert_eq!(receive(&mut alice).await["type"], "pong");
+    let mut oversized = packet.clone();
+    oversized["data"]["payload"] = json!("A".repeat((128_usize * 1024 + 44).div_ceil(3) * 4 + 4));
+    send(&mut alice, oversized).await;
+    assert_eq!(receive(&mut alice).await["code"], "invalid_relay");
+    let mut bp = profile("bob");
+    bp["relay"] = json!(false);
+    send(&mut bob, json!({"type":"profile","profile":bp})).await;
+    receive(&mut alice).await;
+    send(&mut alice, packet).await;
+    assert_eq!(receive(&mut alice).await["code"], "relay_not_allowed");
+}
+
+async fn http_get(server: &Server, method: &str, path: &str, headers: &str) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let url = url::Url::parse(&server.url).unwrap();
+    let address = format!("{}:{}", url.host_str().unwrap(), url.port().unwrap());
+    let mut stream = TcpStream::connect(&address).await.unwrap();
+    stream
+        .write_all(
+            format!(
+                "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n{headers}\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    response
+}
+
+#[tokio::test]
+async fn authorization_protects_http_and_websocket_and_supports_browser_tickets() {
+    let server = Server::start(Config {
+        authorization: "Bearer test-secret".into(),
+        cors_origins: vec!["https://frontend.example".into()],
+        ..Config::default()
+    })
+    .await;
+    for path in ["/api/ws/ticket", "/api/health/details"] {
+        for header in ["", "Authorization: Bearer wrong\r\n"] {
+            let response = http_get(&server, "GET", path, header).await;
+            assert!(response.starts_with("HTTP/1.1 401"), "{response}");
+        }
+    }
+    assert!(
+        http_get(&server, "GET", "/api/health", "")
+            .await
+            .starts_with("HTTP/1.1 200")
+    );
+    for value in [None, Some("Bearer wrong")] {
+        let mut request = server.url.as_str().into_client_request().unwrap();
+        if let Some(value) = value {
+            request
+                .headers_mut()
+                .insert("Authorization", HeaderValue::from_static(value));
+        }
+        let error = connect_async(request).await.unwrap_err();
+        assert!(
+            matches!(error, tokio_tungstenite::tungstenite::Error::Http(response) if response.status() == 401)
+        );
+    }
+    let mut request = server.url.as_str().into_client_request().unwrap();
+    request.headers_mut().insert(
+        "Authorization",
+        HeaderValue::from_static("Bearer test-secret"),
+    );
+    let mut socket = connect_async(request).await.unwrap().0;
+    send(&mut socket, json!({"type":"capabilities"})).await;
+    assert_eq!(receive(&mut socket).await["relay"], false);
+    socket.close(None).await.unwrap();
+
+    let response = http_get(
+        &server,
+        "GET",
+        "/api/ws/ticket",
+        "Authorization: Bearer test-secret\r\nOrigin: https://frontend.example\r\n",
+    )
+    .await;
+    assert!(response.starts_with("HTTP/1.1 200"));
+    assert!(response.contains("cache-control: no-store"));
+    assert!(response.contains("access-control-allow-origin: https://frontend.example"));
+    let body: Value = serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let ticket = body["ticket"].as_str().unwrap();
+    assert!(!ticket.contains("test-secret"));
+    let mut socket = connect_async(format!("{}?ticket={ticket}", server.url))
+        .await
+        .unwrap()
+        .0;
+    send(
+        &mut socket,
+        json!({"type":"join", "room":"auth", "profile":profile("authorized")}),
+    )
+    .await;
+    assert_eq!(receive(&mut socket).await["type"], "welcome");
+    socket.close(None).await.unwrap();
+    assert!(
+        connect_async(format!("{}?ticket={ticket}x", server.url))
+            .await
+            .is_err()
+    );
+
+    let details = http_get(
+        &server,
+        "GET",
+        "/api/health/details",
+        "Authorization: Bearer test-secret\r\nCookie: session=private\r\n",
+    )
+    .await;
+    assert!(details.starts_with("HTTP/1.1 200"));
+    assert!(!details.contains("test-secret"));
+    assert!(!details.contains("session=private"));
+    for origin in ["https://frontend.example", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] {
+        let response = http_get(&server, "OPTIONS", "/api/ws/ticket", &format!("Origin: {origin}\r\nAccess-Control-Request-Method: GET\r\nAccess-Control-Request-Headers: authorization\r\n")).await;
+        assert!(response.contains(&format!("access-control-allow-origin: {origin}")));
+        assert!(response.contains("authorization"));
+    }
 }

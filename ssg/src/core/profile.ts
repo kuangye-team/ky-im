@@ -1,5 +1,10 @@
 import { PROFILE_GENERATION_CONFIG, type AppLanguage } from "../config";
 import { readLanguagePreference, resolveLanguage } from "../i18n/language";
+import type { Profile } from "./types";
+
+export function deviceLabel(profile: Pick<Profile, "device" | "clientType">) {
+  return `${profile.device} · ${profile.clientType === "app" ? "App" : "Web"}`;
+}
 
 function randomIndex(length: number) {
   return crypto.getRandomValues(new Uint32Array(1))[0]! % length;

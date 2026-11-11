@@ -14,10 +14,23 @@ const adapters: IndexedDBStorageAdapter[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   await Promise.all(adapters.splice(0).map((adapter) => adapter.close()));
 });
 
 describe("localized generated profiles", () => {
+  it.each([false, true])("persists the current Web/App runtime (%s)", async (desktop) => {
+    vi.stubEnv("VITE_DESKTOP", desktop ? "true" : "");
+    const adapter = new IndexedDBStorageAdapter(`client-type-${crypto.randomUUID()}`);
+    adapters.push(adapter);
+    const first = (await createChatEngine(adapter)).getSnapshot().profile;
+    expect(first.clientType).toBe(desktop ? "app" : "web");
+    // Runtime metadata is refreshed when the same profile is opened in another client.
+    vi.stubEnv("VITE_DESKTOP", desktop ? "" : "true");
+    const reopened = (await createChatEngine(adapter)).getSnapshot().profile;
+    expect(reopened).toEqual({ ...first, clientType: desktop ? "web" : "app" });
+    expect(await adapter.getProfile()).toEqual(reopened);
+  });
   it.each(["en", "zh-CN"] as const)(
     "offers every configured introduction in %s and avoids the current one",
     (language) => {

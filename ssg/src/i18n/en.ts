@@ -1,5 +1,155 @@
 /** English UI copy. Chinese source phrases are the fallback keys. */
 export const appEnglish: Record<string, string> = {
+  打开客户端: "Open desktop app",
+  打开WEB端: "Open Web app",
+  下载蜂鸟客户端: "Download Hummingbird",
+  "让聊天与分享，随时在身边。": "Keep your conversations close.",
+  "正在获取下载地址…": "Getting downloads…",
+  "下载地址暂时无法获取，请稍后重试。": "Downloads are unavailable. Please try again.",
+  "Apple 芯片与 Intel": "Apple silicon & Intel",
+  适合此设备: "For this device",
+  "客户端支持 macOS 和 Windows。": "The desktop app is available for macOS and Windows.",
+  "若未打开，请先下载并安装客户端。": "If the app didn’t open, download and install it first.",
+  "已安装？点击上方按钮即可打开。": "Already installed? Use the button above to open it.",
+  查看所有下载: "All downloads",
+  访问密钥: "Access key",
+  显示密钥: "Show key",
+  隐藏密钥: "Hide key",
+  无需密钥时留空: "Leave blank if no key is required",
+  "填写服务器管理员提供的完整密钥，仅保存在这台设备上。":
+    "Enter the full key provided by the server administrator. It is saved only on this device.",
+  此服务器不支持中转: "This server does not support relay",
+
+  已连接: "Connected",
+  优先直接传输: "Direct transfers first",
+  中转: "Relay",
+  测试: "Test",
+  "正在测试…": "Testing\u2026",
+  "测试服务器 {{index}}": "Test server {{index}}",
+  "启用服务器 {{index}} 的中转": "Enable relay on server {{index}}",
+  "连接成功 · 支持中转": "Connected \u00b7 Relay available",
+  "连接成功 · 不支持中转": "Connected \u00b7 Relay unavailable",
+  测试后可查看中转支持情况: "Test to check relay availability",
+  "双方开启且直连失败后，才会使用中转":
+    "Relay is used only after direct connections fail and both devices enable it",
+  "连接失败，请检查服务器地址或稍后重试":
+    "Connection failed. Check the server address or try again later.",
+
+  消息已从此设备删除: "Message deleted from this device",
+  "聊天记录和附件保存在此设备的数据目录，不会自动同步。重要文件记得备份。":
+    "History and attachments stay in this device’s data directory and do not sync automatically. Back up important files.",
+  "这会删除此设备中的消息、附件和对应联系人的备注，无法恢复。对方的记录不受影响。":
+    "This permanently deletes messages, attachments, and contact remarks from this device. Other devices are unaffected.",
+  "这会删除此设备中的这条消息和对应附件，无法恢复。对方的记录不受影响。":
+    "This permanently deletes the message and its attachment from this device. Other devices are unaffected.",
+  "请检查数据存储目录的访问权限、磁盘空间和磁盘连接，然后重试。":
+    "Check the storage directory’s permissions, free space, and drive connection, then try again.",
+
+  文件夹将保留目录结构并直接传输到对方设备:
+    "Transfer the folder directly while preserving its directory structure",
+  "点对点传输，记录保存在此设备":
+    "Peer-to-peer transfers. History stays on this device.",
+  从此设备删除消息: "Delete this message from this device",
+  默认服务器不能修改或删除: "The default server cannot be edited or removed.",
+  "默认服务器由应用提供，可设置访问密钥、启用或停用。":
+    "The default server is provided by the app. You can set its access key, enable or disable it.",
+  应用版本: "App version",
+  当前版本: "Current version",
+  暂时无法读取版本: "Version unavailable",
+  "读取中…": "Loading\u2026",
+  此版本暂不支持在线更新: "Online updates are unavailable in this build",
+  "更新已安装，请关闭并重新打开蜂鸟。":
+    "Update installed. Close and reopen Hummingbird.",
+  "正在检查更新…": "Checking for updates\u2026",
+  有新版本可更新: "Update available",
+  已是最新版本: "Up to date",
+  尚未检查更新: "Not checked yet",
+  "可更新至 {{version}}": "Update to {{version}}",
+  检查更新: "Check for updates",
+  前往更新: "View release",
+  更新并重启: "Update and restart",
+  "暂时无法检查更新，请稍后重试。":
+    "Unable to check for updates. Please try again later.",
+  "链接暂时无法打开，请稍后重试。":
+    "Unable to open the link. Please try again later.",
+  "更新完成后，蜂鸟将自动重启。": "Hummingbird will restart after the update.",
+  应用更新: "App update",
+  系统配置: "System settings",
+  "选择怎么找到其他设备，以及怎么传送消息和文件。设置只保存在这台设备上。":
+    "Choose how to find devices and send messages and files. Settings are saved on this device only.",
+  怎么找到其他设备: "Find other devices",
+  "可以同时选择，每组至少保留一种。同一台设备只会显示一次。":
+    "You can use both options. Keep at least one in each group. Each device appears only once.",
+  "在线查找（中心信令）": "Online discovery (signaling)",
+  "通过连接服务器找到设备，也可以用蜂鸟号联系朋友。":
+    "Find devices with a connection server, or use a Hummingbird number to find friends.",
+  "附近查找（mDNS）": "Nearby discovery (mDNS)",
+  "自动寻找同一 Wi-Fi 或有线网络里的客户端，没有互联网也能用。":
+    "Find apps on the same Wi-Fi or wired network, even without internet access.",
+  怎么传送消息和文件: "Send messages and files",
+  "同时开启时，先尝试快速直连；连接不成功，再尝试兼容传输。":
+    "When both are on, try a direct connection first, then try compatible transfer if it cannot connect.",
+  "快速直连（TCP）": "Direct transfer (TCP)",
+  "适合客户端之间直接传输，需要双方都能使用这种方式。":
+    "Connect apps directly. Both devices need to support this option.",
+  "兼容传输（WebRTC）": "Compatible transfer (WebRTC)",
+  "支持网页与客户端互传，能否连通取决于双方网络。":
+    "Share between browsers and apps. Connectivity depends on both networks.",
+  "网页版使用在线查找和兼容传输；附近查找和快速直连需要安装客户端。":
+    "Browsers use online discovery and compatible transfer. Nearby discovery and direct transfer require the desktop app.",
+  服务器列表: "Servers",
+  "连接服务器帮助设备找到彼此。双方都开启同一服务器的中转后，直连失败时可由该服务器转送消息和文件。":
+    "Connection servers help devices find each other. If both devices enable relay on the same server, it can forward messages and files when direct connections fail.",
+  服务器名称: "Server name",
+  默认服务器: "Default server",
+  未命名服务器: "Unnamed server",
+  服务器地址: "Server address",
+  复制服务器地址: "Copy server address",
+  服务器地址已复制: "Server address copied",
+  操作: "Actions",
+  "启用服务器 {{index}}": "Enable server {{index}}",
+  启用: "Enabled",
+  "编辑服务器 {{index}}": "Edit server {{index}}",
+  编辑服务器: "Edit server",
+  删除服务器: "Delete server",
+  "删除服务器 {{index}}": "Delete server {{index}}",
+  添加服务器: "Add server",
+  添加: "Add",
+  保存: "Save",
+  "修改后自动生效并重新连接。正在传输内容时，请完成后再修改。":
+    "Changes apply automatically and reconnect your device. Finish any transfers before making changes.",
+  "设置已生效。": "Settings applied.",
+  "正在应用设置…": "Applying settings…",
+  "还有内容正在传输，请完成后再修改设置":
+    "Sharing is in progress. Finish before changing settings.",
+  "配置格式不正确，请重新设置": "Invalid settings. Please check your options.",
+  请至少选择一种查找设备的方式: "Select at least one way to find devices.",
+  请至少选择一种传输方式: "Select at least one transfer method.",
+  "网页版使用在线查找和兼容传输，其他方式请使用客户端":
+    "Browsers use online discovery and compatible transfer. Use the app for other options.",
+  "服务器信息不完整，请检查名称和地址":
+    "Please check the server name and address.",
+  "请输入完整的 ws:// 或 wss:// 服务器地址":
+    "Enter a full ws:// or wss:// server address.",
+  "当前网页需要使用 wss:// 安全地址":
+    "This page requires a secure wss:// address.",
+  这个服务器地址已经添加过了: "This server address is already in the list.",
+  "使用在线查找时，请至少启用一个服务器":
+    "Enable at least one server for online discovery.",
+  客户端需要填写完整的服务器地址:
+    "Enter a full server address in the desktop app.",
+  "暂时无法联系设备，请检查发现方式和服务器设置":
+    "Cannot reach the device. Check discovery options and server settings.",
+
+  "消息和文件直接在设备之间传输，无需中心服务器。请在可信的局域网中使用。":
+    "Messages and files travel directly between devices without a central server. Use a trusted local network.",
+  局域网直连: "Local network",
+  "连接同一个网络并打开蜂鸟客户端，设备会自动出现。":
+    "Connect to the same network and open Hummingbird on both devices. They will appear automatically.",
+  "请允许蜂鸟访问本地网络，并在防火墙中允许连接。":
+    "Allow Hummingbird to access your local network and accept connections through your firewall.",
+  "聊天和传文件时，请保持双方客户端在线。文件默认需确认接收。":
+    "Keep both apps online while chatting and sharing files. Receiving a file requires your approval by default.",
   发送文件夹: "Send folder",
   选择文件夹: "Choose folder",
   文件夹: "Folder",
@@ -144,8 +294,8 @@ export const appEnglish: Record<string, string> = {
   "找不到朋友时，可以尝试打开“邀请朋友”并输入朋友的蜂鸟号。 聊天和传文件时，双方都要保持在线。文件每个最大 {{limit}} MB。":
     "If you cannot find a friend, open “Invite friends” and enter their Hummingbird number. Both devices must stay online to chat and transfer files. Each file can be up to {{limit}} MB.",
   私密高速传输: "Private, fast transfers",
-  "消息和文件直接在你们的设备之间传输，不经过服务器转发。服务器只协助你们建立点对点连接，不负责传输数据。":
-    "Messages and files travel directly between your devices. The server only helps establish the peer-to-peer connection and does not relay your content.",
+  "消息和文件优先在设备之间直传。双方开启同一服务器的中转后，直连失败时才会由服务器转送，服务器不保存聊天内容。":
+    "Messages and files use direct connections first. If both devices enable relay on the same server, it forwards content only when direct connections fail, without storing it.",
   "记录，留在自己手里": "Keep your history with you",
   "聊天记录和附件只保存在当前浏览器，不会自动同步到其他设备。清理浏览器数据或使用无痕模式可能让数据丢失，重要文件记得下载保存。":
     "Chat history and attachments stay in this browser and do not sync to other devices. Clearing browser data or using private browsing may remove them. Download important files to keep a copy.",

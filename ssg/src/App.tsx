@@ -1,3 +1,8 @@
+import { deviceLabel } from "./core/profile";
+import { getInviteUrl } from "./invite-url";
+import { ClientAccess } from "./components/ClientAccess";
+import { handleExternalLinkClick } from "./external-links";
+import { DesktopVersion } from "./components/DesktopVersion";
 import {
   PROFILE_AVATARS as EMOJI,
   PROFILE_COLORS as COLORS,
@@ -47,6 +52,7 @@ import {
   Radio,
   RefreshCw,
   Search,
+  Settings,
   Send,
   ShieldCheck,
   Shuffle,
@@ -68,6 +74,7 @@ import { ContactCopyButton } from "./components/ContactCopyButton";
 import { copyText } from "./components/copyText";
 import { siteInfo } from "./site-info";
 import { HistoryPage } from "./components/HistoryPage";
+import { SystemSettings } from "./components/SystemSettings";
 import { StoragePage } from "./components/StoragePage";
 import { ForwardMessageModal } from "./components/ForwardMessageModal";
 import { MyStatus } from "./components/MyStatus";
@@ -85,17 +92,27 @@ import {
   chooseFileDestination,
   chooseFolderDestination,
   readableSize,
+  downloadAttachment,
+  download as saveBlob,
 } from "./components/fileDownloads";
 import { LegalLinks, LicensesPage, PrivacyPage } from "./components/Legal";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { getChatDrafts, setChatDraft, subscribeChatDrafts } from "./drafts";
 
-type View = "chat" | "nearby" | "history" | "storage" | "licenses" | "privacy";
+type View =
+  | "chat"
+  | "nearby"
+  | "history"
+  | "storage"
+  | "settings"
+  | "licenses"
+  | "privacy";
 const pageNames: Record<View, string> = {
   chat: "聊天消息",
   nearby: "在线设备",
   history: "聊天记录",
   storage: "存储管理",
+  settings: "系统配置",
   licenses: "开源许可",
   privacy: "隐私协议",
 };
@@ -104,6 +121,7 @@ function currentView(pathname: string): View {
   return path === "nearby" ||
     path === "history" ||
     path === "storage" ||
+    path === "settings" ||
     path === "licenses" ||
     path === "privacy"
     ? path
@@ -146,14 +164,6 @@ function DeviceIcon({ device, size = 16 }: { device: string; size?: number }) {
   ) : (
     <Laptop size={size} />
   );
-}
-function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 function peerName(peer: Profile, snap: ChatSnapshot) {
   return (
@@ -224,7 +234,11 @@ export function App({ engine }: { engine: ChatEngine }) {
     try {
       await engine.deleteMessage(deleteTarget.id);
       setDeleteTarget(null);
-      notify("消息已从此浏览器删除");
+      notify(
+        engine.storage.getStorageInfo
+          ? "消息已从此设备删除"
+          : "消息已从此浏览器删除",
+      );
     } catch (error) {
       setDeleteError(
         error instanceof Error ? error.message : "删除失败，请重试",
@@ -263,7 +277,7 @@ export function App({ engine }: { engine: ChatEngine }) {
           ),
         ];
   const visiblePeers = peers.filter((p) =>
-    `${peerName(p, snap)} ${p.name} ${p.bio} ${p.device} ${p.numericId || ""}`
+    `${peerName(p, snap)} ${p.name} ${p.bio} ${deviceLabel(p)} ${p.numericId || ""}`
       .toLowerCase()
       .includes(filter.toLowerCase()),
   );
@@ -273,7 +287,9 @@ export function App({ engine }: { engine: ChatEngine }) {
     document.title = `${t(pageNames[view])} · ${t("蜂鸟")}`;
   }, [t, view]);
   return (
-    <div className="app-shell">
+    <div className="app-shell"
+      onClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}
+      onAuxClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}>
       <header className="topbar">
         <Link className="brand" to="/" aria-label={t("蜂鸟首页")}>
           <span className="brand-mark">
@@ -286,6 +302,7 @@ export function App({ engine }: { engine: ChatEngine }) {
           <ThemeSelector />
           <LanguageSelector />
           <MyStatus snap={snap} engine={engine} />
+          <ClientAccess onNotice={notify} />
           <button
             className="icon-button about-trigger"
             aria-label={t("关于本站")}
@@ -310,12 +327,18 @@ export function App({ engine }: { engine: ChatEngine }) {
             </div>
             <strong data-label={t("我的")}>{snap.profile.name}</strong>
             <span className="profile-number">
-              {t("蜂鸟号")} {snap.profile.numericId || t("上线后显示")}
+              {engine.supportsNumericIds ? (
+                <>
+                  {t("蜂鸟号")} {snap.profile.numericId || t("上线后显示")}
+                </>
+              ) : (
+                t("局域网直连")
+              )}
             </span>
             <span>{snap.profile.bio || t("给今天的自己打个招呼")}</span>
             <span className="my-device">
               <DeviceIcon device={snap.profile.device} />
-              {snap.profile.device}
+              {deviceLabel(snap.profile)}
               <ChevronDown size={12} />
             </span>
           </button>
@@ -361,6 +384,15 @@ export function App({ engine }: { engine: ChatEngine }) {
               <span>{t("存储管理")}</span>
               <i />
             </button>
+            <button
+              className={view === "settings" ? "active" : ""}
+              aria-label={t("系统配置")}
+              onClick={() => setView("settings")}
+            >
+              <Settings size={20} />
+              <span>{t("系统配置")}</span>
+              <i />
+            </button>
           </nav>
           <div className="sidebar-bottom">
             <div className="sidebar-note">
@@ -391,8 +423,9 @@ export function App({ engine }: { engine: ChatEngine }) {
                   </h1>
                   <button
                     className="icon-button new-chat"
-                    aria-label={t("发起聊天")}
-                    onClick={() => setListTab("online")}
+                    aria-label={t("邀请朋友")}
+                    aria-haspopup="dialog"
+                    onClick={() => openConnection()}
                   >
                     <Plus size={19} />
                   </button>
@@ -468,7 +501,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                           </p>
                           <span>
                             <DeviceIcon device={peer.device} size={12} />
-                            {peer.device}
+                            {deviceLabel(peer)}
                           </span>
                         </div>
                         {!!conversation?.unread && (
@@ -581,7 +614,11 @@ export function App({ engine }: { engine: ChatEngine }) {
                   </button>
                 </div>
                 <p>
-                  {t("同一网络自动发现；找不到朋友时，可以通过蜂鸟号连接。")}
+                  {t(
+                    engine.supportsNumericIds
+                      ? "同一网络自动发现；找不到朋友时，可以通过蜂鸟号连接。"
+                      : "连接同一个网络并打开蜂鸟客户端，设备会自动出现。",
+                  )}
                 </p>
               </div>
               <div className="nearby-status">
@@ -605,7 +642,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                         className={`device-card-online ${snap.peerStates[peer.id] === "failed" ? "connection-failed" : ""}`}
                       >
                         {snap.peerStates[peer.id] === "connected"
-                          ? t("已直连")
+                          ? t("已连接")
                           : snap.peerStates[peer.id] === "failed"
                             ? t("连接未成功")
                             : snap.peerStates[peer.id] === "connecting"
@@ -617,7 +654,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                       <p>{peer.bio || t("很高兴见到你")}</p>
                       <span>
                         <DeviceIcon device={peer.device} />
-                        {peer.device}
+                        {deviceLabel(peer)}
                       </span>
                       <div>
                         {t("开始聊天")}
@@ -645,6 +682,8 @@ export function App({ engine }: { engine: ChatEngine }) {
             />
           ) : view === "storage" ? (
             <StoragePage engine={engine} snap={snap} onNotice={notify} />
+          ) : view === "settings" ? (
+            <SystemSettings engine={engine} onNotice={notify} />
           ) : view === "licenses" ? (
             <LicensesPage onNotice={notify} />
           ) : (
@@ -735,6 +774,7 @@ export function App({ engine }: { engine: ChatEngine }) {
         description={t("轻快连接，自在分享。")}
         className="about-modal"
       >
+        <DesktopVersion engine={engine} />
         <div className="about-layout">
           <div className="help-content">
             <div>
@@ -742,7 +782,9 @@ export function App({ engine }: { engine: ChatEngine }) {
               <h3>{t("连接同一个网络")}</h3>
               <p>
                 {t(
-                  "让两台设备连接同一个 Wi-Fi，或同一个有线网络，再打开本网站即可。",
+                  engine.supportsNumericIds
+                    ? "让两台设备连接同一个 Wi-Fi，或同一个有线网络，再打开本网站即可。"
+                    : "连接同一个网络并打开蜂鸟客户端，设备会自动出现。",
                 )}
               </p>
             </div>
@@ -751,16 +793,22 @@ export function App({ engine }: { engine: ChatEngine }) {
               <h3>{t("找到彼此，开始聊天")}</h3>
               <p>
                 {t(
-                  "找不到朋友时，可通过“邀请朋友”输入蜂鸟号。聊天和传文件时，双方需保持在线。文件默认需确认接收，可在联系人资料中开启自动接收。",
+                  engine.supportsNumericIds
+                    ? "找不到朋友时，可通过“邀请朋友”输入蜂鸟号。聊天和传文件时，双方需保持在线。文件默认需确认接收，可在联系人资料中开启自动接收。"
+                    : "聊天和传文件时，请保持双方客户端在线。文件默认需确认接收。",
                 )}
               </p>
             </div>
             <div>
               <ShieldCheck />
-              <h3>{t("私密高速传输")}</h3>
+              <h3>
+                {t(engine.supportsNumericIds ? "优先直接传输" : "局域网直连")}
+              </h3>
               <p>
                 {t(
-                  "消息和文件直接在你们的设备之间传输，不经过服务器转发。服务器只协助你们建立点对点连接，不负责传输数据。",
+                  engine.supportsNumericIds
+                    ? "消息和文件优先在设备之间直传。双方开启同一服务器的中转后，直连失败时才会由服务器转送，服务器不保存聊天内容。"
+                    : "消息和文件直接在设备之间传输，无需中心服务器。请在可信的局域网中使用。",
                 )}
               </p>
             </div>
@@ -769,7 +817,9 @@ export function App({ engine }: { engine: ChatEngine }) {
               <h3>{t("记录，留在自己手里")}</h3>
               <p>
                 {t(
-                  "聊天记录和普通附件保存在当前浏览器，不会自动同步。清理浏览器可能丢失记录，重要文件记得下载保存。",
+                  engine.storage.getStorageInfo
+                    ? "聊天记录和附件保存在此设备的数据目录，不会自动同步。重要文件记得备份。"
+                    : "聊天记录和普通附件保存在当前浏览器，不会自动同步。清理浏览器可能丢失记录，重要文件记得下载保存。",
                 )}
               </p>
             </div>
@@ -793,7 +843,11 @@ export function App({ engine }: { engine: ChatEngine }) {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    <span>{siteInfo.website}</span>
+                    <span>
+                      {siteInfo.website
+                        .replace(/^https?:\/\//, "")
+                        .replace(/\/$/, "")}
+                    </span>
                     <ArrowUpRight size={15} aria-hidden="true" />
                   </a>
                   <ContactCopyButton
@@ -811,7 +865,11 @@ export function App({ engine }: { engine: ChatEngine }) {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    <span>{siteInfo.repository}</span>
+                    <span>
+                      {siteInfo.repository
+                        .replace(/^https?:\/\//, "")
+                        .replace(/\/$/, "")}
+                    </span>
                     <ArrowUpRight size={15} aria-hidden="true" />
                   </a>
                   <ContactCopyButton
@@ -853,7 +911,9 @@ export function App({ engine }: { engine: ChatEngine }) {
           modal === "clear" ? t("清空本地聊天记录？") : t("删除这段聊天记录？")
         }
         description={t(
-          "这会删除此浏览器中的消息、附件和对应联系人的备注，无法恢复。对方的记录不受影响。",
+          engine.storage.getStorageInfo
+            ? "这会删除此设备中的消息、附件和对应联系人的备注，无法恢复。对方的记录不受影响。"
+            : "这会删除此浏览器中的消息、附件和对应联系人的备注，无法恢复。对方的记录不受影响。",
         )}
       >
         <div className="modal-actions">
@@ -911,7 +971,9 @@ export function App({ engine }: { engine: ChatEngine }) {
         onClose={() => !deleting && setDeleteTarget(null)}
         title={t("删除这条消息？")}
         description={t(
-          "这会删除此浏览器中的这条消息和对应附件，无法恢复。对方的记录不受影响。",
+          engine.storage.getStorageInfo
+            ? "这会删除此设备中的这条消息和对应附件，无法恢复。对方的记录不受影响。"
+            : "这会删除此浏览器中的这条消息和对应附件，无法恢复。对方的记录不受影响。",
         )}
       >
         <div className="message-delete-preview">
@@ -989,7 +1051,7 @@ function ContactDetails({
         <p>{peer.bio}</p>
         <span className="device-label">
           <DeviceIcon device={peer.device} />
-          {peer.device}
+          {deviceLabel(peer)}
         </span>
         <div className="contact-profile-fields">
           <RemarkEditor
@@ -1010,7 +1072,9 @@ function ContactDetails({
             engine={engine}
             onNotice={onNotice}
           />
-          <ContactNumber peer={peer} onConnect={onConnectGroup} />
+          {engine.supportsNumericIds && (
+            <ContactNumber peer={peer} onConnect={onConnectGroup} />
+          )}
         </div>
       </div>
       <SharedFiles
@@ -1288,6 +1352,15 @@ function ChatPanel({
     }
   };
   const chooseFolder = () => {
+    if (import.meta.env.VITE_DESKTOP) {
+      void sendFolder(async (signal, report) =>
+        (await import("./components/desktopFolderSelection")).readDesktopFolder(
+          signal,
+          report,
+        ),
+      );
+      return;
+    }
     const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
     if (picker) {
       // Call the picker during the click, then keep the destination peer fixed while it is open.
@@ -1402,7 +1475,11 @@ function ChatPanel({
       <div className="messages" role="log" aria-label={t("聊天消息记录")}>
         <div className="conversation-start">
           <ShieldCheck size={13} />
-          {t("私密高速传输，记录保存在此浏览器")}
+          {t(
+            engine.storage.getStorageInfo
+              ? "点对点传输，记录保存在此设备"
+              : "私密高速传输，记录保存在此浏览器",
+          )}
         </div>
         {messages.length === 0 && (
           <div className="chat-empty">
@@ -1473,7 +1550,9 @@ function ChatPanel({
               className="icon-button"
               aria-label={t("发送文件夹")}
               title={t(
-                "不超过 {{limit}} MB 且不超过 {{count}} 个文件的文件夹将打包发送，其他文件夹直接保存到对方设备",
+                engine.storage.createFolderDestination
+                  ? "文件夹将保留目录结构并直接传输到对方设备"
+                  : "不超过 {{limit}} MB 且不超过 {{count}} 个文件的文件夹将打包发送，其他文件夹直接保存到对方设备",
                 {
                   limit: MAX_FILE_SIZE / 1024 ** 2,
                   count: FOLDER_CONFIG.maxCompressedFiles,
@@ -1673,7 +1752,9 @@ function MessageBubble({
     if (choosing) return;
     setChoosing(true);
     try {
-      if (message.folder) {
+      if (message.attachmentStorage === "managed") {
+        await engine.acceptFile(message.id);
+      } else if (message.folder) {
         const destination = await chooseFolderDestination(
           message.fileName || t("文件夹"),
         );
@@ -1717,9 +1798,7 @@ function MessageBubble({
   }, [engine, message.id, message.kind, message.status]);
   const download = async () => {
     try {
-      const blob = await engine.getAttachment(message.id);
-      if (!blob) throw new Error(t("附件尚未接收完成或已被清除"));
-      saveBlob(blob, message.fileName || t("附件"));
+      await downloadAttachment(engine.storage, message);
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "下载失败");
     }
@@ -1887,7 +1966,11 @@ function MessageBubble({
                 : t("转发给朋友")
             }
             disabled={
-              message.status === "sending" || awaiting || external || missingAttachment
+              message.status === "sending" ||
+              awaiting ||
+              external ||
+              !!message.folder ||
+              missingAttachment
             }
             onClick={onForward}
           >
@@ -1897,7 +1980,11 @@ function MessageBubble({
           <button
             className="message-delete-button"
             aria-label={t("删除消息")}
-            title={t("从此浏览器删除消息")}
+            title={t(
+              engine.storage.getStorageInfo
+                ? "从此设备删除消息"
+                : "从此浏览器删除消息",
+            )}
             onClick={onDelete}
           >
             <Trash2 size={12} />
@@ -1961,15 +2048,13 @@ function SharedFiles({
                   (file.senderId !== engine.getSnapshot().profile.id &&
                     file.status === "failed")
                 }
+                canForward={!file.folder}
                 onDownload={() => {
-                  void engine
-                    .getAttachment(file.id)
-                    .then((blob) =>
-                      blob
-                        ? saveBlob(blob, file.fileName || t("附件"))
-                        : onNotice("附件尚未接收完成或已被清除"),
-                    )
-                    .catch(() => onNotice("无法读取附件"));
+                  void downloadAttachment(engine.storage, file).catch((error) =>
+                    onNotice(
+                      error instanceof Error ? error.message : "无法读取附件",
+                    ),
+                  );
                 }}
                 onForward={() => onForward(file)}
                 onDelete={() => onDelete(file)}
@@ -2041,8 +2126,8 @@ function InviteModal({
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const copyButton = useRef<HTMLButtonElement>(null);
-  const url = location.origin;
-  const local = ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname);
+  const url = getInviteUrl(location.origin);
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
   useEffect(() => {
     if (!open) return;
     setNumericId(previousPeer?.numericId || "");
@@ -2083,6 +2168,18 @@ function InviteModal({
       setBusy(false);
     }
   };
+  if (!engine.supportsNumericIds)
+    return (
+      <Modal
+        open={open}
+        onClose={onClose}
+        title={t("邀请朋友")}
+        description={t("局域网直连")}
+      >
+        <p>{t("连接同一个网络并打开蜂鸟客户端，设备会自动出现。")}</p>
+        <p>{t("请允许蜂鸟访问本地网络，并在防火墙中允许连接。")}</p>
+      </Modal>
+    );
   return (
     <Modal
       open={open}
@@ -2240,13 +2337,15 @@ function ProfileModal({
                 <MyStatus snap={snap} engine={engine} compact />
               </div>
             </div>
-            <OwnNumber
-              numericId={profile.numericId}
-              compact
-              onNotice={onNotice}
-              connected={snap.status === "connected"}
-              onRefresh={() => engine.refreshNumericId()}
-            />
+            {engine.supportsNumericIds && (
+              <OwnNumber
+                numericId={profile.numericId}
+                compact
+                onNotice={onNotice}
+                connected={snap.status === "connected"}
+                onRefresh={() => engine.refreshNumericId()}
+              />
+            )}
             <p className="profile-status-hint">
               {snap.availability === "offline"
                 ? t("主动离线后停止发现和连接，本地聊天记录仍保留。")
@@ -2382,7 +2481,7 @@ async function exportConversation(engine: ChatEngine, peer: Profile) {
     .conversations.find(
       (conversation) => conversation.peer.id === peer.id,
     )?.remark;
-  saveBlob(
+  await saveBlob(
     new Blob(
       [
         JSON.stringify(

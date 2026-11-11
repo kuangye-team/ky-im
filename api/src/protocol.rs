@@ -1,7 +1,12 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[path = "../../shared/client_type.rs"]
+mod client_type;
+pub use client_type::ClientType;
+
 pub const MAX_MESSAGE_BYTES: usize = 256 * 1024;
+pub const MAX_RELAY_BINARY_BYTES: usize = 128 * 1024 + 44;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +24,11 @@ pub struct Profile {
     pub avatar: String,
     #[serde(default)]
     pub device: String,
+    #[serde(rename = "clientType")]
+    pub client_type: ClientType,
+    /// Effective consent on this server, never inherited from another server.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relay: bool,
 }
 
 impl Profile {
@@ -59,57 +69,9 @@ pub fn valid_numeric_id(value: &str) -> bool {
     value.len() == 6 && value.bytes().all(|b| b.is_ascii_digit()) && !value.starts_with('0')
 }
 
-// The signaling socket has no chat/file transport. Only WebRTC negotiation
-// envelopes are accepted, with strict field names and bounded SDP/ICE strings.
-pub fn valid_signal(data: &Value) -> bool {
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct Description {
-        #[serde(rename = "type")]
-        kind: String,
-        sdp: String,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct DescriptionSignal {
-        description: Description,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields, rename_all = "camelCase")]
-    struct Candidate {
-        candidate: String,
-        sdp_mid: Option<String>,
-        sdp_m_line_index: Option<u16>,
-        username_fragment: Option<String>,
-    }
-    #[derive(Deserialize)]
-    #[serde(deny_unknown_fields)]
-    struct CandidateSignal {
-        candidate: Candidate,
-    }
-    if let Ok(signal) = serde_json::from_value::<DescriptionSignal>(data.clone()) {
-        let sdp = signal.description.sdp;
-        return matches!(signal.description.kind.as_str(), "offer" | "answer")
-            && sdp.len() < 128 * 1024
-            && sdp.lines().next() == Some("v=0")
-            && sdp.lines().any(|line| line.starts_with("m=application "));
-    }
-    if let Ok(signal) = serde_json::from_value::<CandidateSignal>(data.clone()) {
-        let candidate = signal.candidate;
-        let _ = candidate.sdp_m_line_index;
-        return candidate.candidate.len() < 4096
-            && (candidate.candidate.is_empty() || candidate.candidate.starts_with("candidate:"))
-            && candidate
-                .sdp_mid
-                .as_ref()
-                .is_none_or(|mid| mid.len() <= 256)
-            && candidate
-                .username_fragment
-                .as_ref()
-                .is_none_or(|fragment| fragment.len() <= 256);
-    }
-    false
-}
+#[path = "../../shared/network_signal.rs"]
+mod network_signal;
+pub use network_signal::valid_signal;
 
 fn default_room() -> String {
     "local".into()
@@ -118,6 +80,12 @@ fn default_room() -> String {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ClientMessage {
+    Capabilities,
+    Relay {
+        to: String,
+        session: String,
+        data: RelayPacket,
+    },
     Join {
         #[serde(default = "default_room")]
         room: String,
@@ -154,6 +122,20 @@ pub enum ClientMessage {
 #[derive(Clone, Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    Capabilities {
+        relay: bool,
+    },
+    Relay {
+        from: String,
+        session: String,
+        data: RelayPacket,
+    },
+    RelayError {
+        to: String,
+        session: String,
+        code: String,
+        message: String,
+    },
     NumberUpdated {
         #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
         request_id: Option<String>,
@@ -163,6 +145,7 @@ pub enum ServerMessage {
         peer_ids: Vec<String>,
     },
     Welcome {
+        relay: bool,
         id: String,
         room: String,
         #[serde(rename = "numericId")]
@@ -207,11 +190,70 @@ pub enum ServerMessage {
     },
 }
 
+/// Bounded frames, with receive credit returned by the consuming device.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RelayPacket {
+    Open,
+    Accept,
+    Close,
+    Ack,
+    Data { binary: bool, payload: String },
+}
+
+impl RelayPacket {
+    pub fn valid(&self) -> bool {
+        match self {
+            Self::Data { payload, binary } => {
+                let limit = if *binary {
+                    MAX_RELAY_BINARY_BYTES
+                } else {
+                    48 * 1024
+                };
+                !payload.is_empty()
+                    && payload.len() <= limit.div_ceil(3) * 4
+                    && payload.len().is_multiple_of(4)
+                    && payload
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"+/=".contains(&b))
+            }
+            _ => true,
+        }
+    }
+}
+
 impl ServerMessage {
     pub fn error(code: &str, message: &str) -> Self {
         Self::Error {
             code: code.into(),
             message: message.into(),
+        }
+    }
+}
+
+/// Independent traffic budgets keep file chunks from exhausting signaling limits.
+#[derive(Default, Serialize, Deserialize)]
+pub(crate) struct MessageRate {
+    at: u64,
+    signaling: u32,
+    relay_frames: u32,
+    relay_bytes: usize,
+}
+impl MessageRate {
+    pub fn allow(&mut self, now: u64, relay: bool, bytes: usize) -> bool {
+        if now.saturating_sub(self.at) >= 10_000 {
+            *self = Self {
+                at: now,
+                ..Self::default()
+            };
+        }
+        if relay {
+            self.relay_frames += 1;
+            self.relay_bytes += bytes;
+            self.relay_frames <= 8192 && self.relay_bytes <= 64 * 1024 * 1024
+        } else {
+            self.signaling += 1;
+            self.signaling <= 240
         }
     }
 }

@@ -71,7 +71,7 @@ export type ControlPacket =
       createdAt: number;
     }
   | { type: "file-end"; id: string }
-  | { type: "file-accept"; id: string }
+  | { type: "file-accept"; id: string; streaming?: boolean }
   | { type: "file-progress"; id: string; received: number }
   | { type: "ack"; id: string }
   | { type: "transfer-error"; id: string; message: string };
@@ -124,7 +124,13 @@ export function parseControlPacket(raw: string): ControlPacket | null {
         size: p.size,
       };
   }
-  if (p.type === "ack" || p.type === "file-end" || p.type === "file-accept")
+  if (p.type === "file-accept")
+    return {
+      type: p.type,
+      id: p.id,
+      ...(p.streaming === true ? { streaming: true } : {}),
+    };
+  if (p.type === "ack" || p.type === "file-end")
     return { type: p.type, id: p.id };
   if (
     p.type === "file-progress" &&
@@ -265,7 +271,8 @@ export function isProfile(value: unknown): value is Profile {
     p.avatar.length > 0 &&
     p.avatar.length <= 16 &&
     typeof p.device === "string" &&
-    p.device.length <= 64
+    p.device.length <= 64 &&
+    (p.clientType === "web" || p.clientType === "app")
   );
 }
 
