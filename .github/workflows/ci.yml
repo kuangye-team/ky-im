@@ -29,9 +29,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: api -> target
+          cache-on-failure: true
       - run: npm ci --ignore-scripts
       - run: npm --prefix ssg ci
       - run: node --test scripts/desktop.test.mjs
+      - run: npm run test:rust-cache
       - run: npm --prefix ssg test
       - run: node scripts/prepare-licenses.mjs
       - run: npm --prefix ssg run build
@@ -73,6 +75,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: app -> target
+          shared-key: desktop-check
+          cache-on-failure: true
       - run: cargo fmt --manifest-path app/Cargo.toml --check
       - run: cargo clippy --manifest-path app/Cargo.toml --locked --all-targets -- -D warnings
       - run: cargo test --manifest-path app/Cargo.toml --locked

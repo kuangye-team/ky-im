@@ -14,9 +14,20 @@ concurrency:
   group: docker-publish-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE || 'kyteam/ky-im' }}
+
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -40,7 +51,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ secrets.DOCKERHUB_IMAGE || 'kyteam/ky-im' }}
+          images: ${{ env.IMAGE_NAME }}
           flavor: latest=false
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
@@ -48,7 +59,44 @@ jobs:
             type=semver,pattern=v{{major}}.{{minor}}
 
       - name: Set up Docker Buildx
+        id: buildx
         uses: docker/setup-buildx-action@v4
+
+      # The gha layer exporter does not include RUN --mount=type=cache data.
+      - name: Restore Docker Rust cache
+        id: rust-cache
+        uses: actions/cache@v5
+        with:
+          path: temp/artifacts/buildkit-cache
+          key: docker-rust-linux-${{ matrix.arch }}-${{ hashFiles('Dockerfile', 'api/Cargo.toml', 'api/Cargo.lock') }}-${{ github.sha }}
+          restore-keys: |
+            docker-rust-linux-${{ matrix.arch }}-${{ hashFiles('Dockerfile', 'api/Cargo.toml', 'api/Cargo.lock') }}-
+            docker-rust-linux-${{ matrix.arch }}-
+
+      - name: Restore and save BuildKit cache mounts
+        uses: reproducible-containers/buildkit-cache-dance@5422eac04292c961a382e0f584ea0f03ad9da723 # v3.4.0
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          scratch-dir: temp/artifacts/buildkit-cache-dance
+          cache-map: |
+            {
+              "temp/artifacts/buildkit-cache/registry": {
+                "target": "/usr/local/cargo/registry",
+                "id": "ky-im-cargo-registry",
+                "sharing": "locked"
+              },
+              "temp/artifacts/buildkit-cache/git": {
+                "target": "/usr/local/cargo/git",
+                "id": "ky-im-cargo-git",
+                "sharing": "locked"
+              },
+              "temp/artifacts/buildkit-cache/target": {
+                "target": "/build/api/target",
+                "id": "ky-im-cargo-target-linux/${{ matrix.arch }}",
+                "sharing": "locked"
+              }
+            }
+          skip-extraction: ${{ steps.rust-cache.outputs.cache-hit }}
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
@@ -56,14 +104,83 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push image
+      # Push by digest so parallel builds cannot overwrite the shared tags.
+      - name: Build and push platform image
+        id: build
         uses: docker/build-push-action@v7
         with:
           # Use the working tree so the generated license notices are included.
           context: .
           file: ./Dockerfile
+          platforms: linux/${{ matrix.arch }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
+          cache-from: type=gha,scope=ky-im-${{ matrix.arch }}
+          cache-to: type=gha,scope=ky-im-${{ matrix.arch }},mode=max
+
+      - name: Export image digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p temp/artifacts/docker-publish/digests
+          touch "temp/artifacts/docker-publish/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: temp/artifacts/docker-publish/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: image-digest-*
+          path: temp/artifacts/docker-publish/digests
+          merge-multiple: true
+
+      - name: Generate image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=semver,pattern=v{{version}}
+            type=semver,pattern=v{{major}}.{{minor}}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Publish and verify multi-platform image
+        working-directory: temp/artifacts/docker-publish/digests
+        env:
+          METADATA: ${{ steps.meta.outputs.json }}
+        run: |
+          mapfile -t tags < <(jq -r '.tags[]' <<< "$METADATA")
+          tag_args=()
+          for tag in "${tags[@]}"; do
+            tag_args+=(--tag "$tag")
+          done
+          images=()
+          for digest in *; do
+            images+=("$IMAGE_NAME@sha256:$digest")
+          done
+          test "${#tags[@]}" -gt 0
+          test "${#images[@]}" -eq 2
+          docker buildx imagetools create "${tag_args[@]}" "${images[@]}"
+          for tag in "${tags[@]}"; do
+            docker buildx imagetools inspect "$tag" --raw | jq -e '
+              [.manifests[].platform | select(.os == "linux") | .architecture]
+              | unique == ["amd64", "arm64"]'
+          done

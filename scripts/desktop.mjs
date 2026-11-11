@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { desktopEnv, root, updaterConfig } from "./desktop-config.mjs";
+import { rustCacheEnv } from "./rust.mjs";
 import {
   collectArtifacts,
   releaseVersion,
@@ -14,7 +15,7 @@ try {
   if (!["dev", "build"].includes(command))
     throw new Error("Use desktop.mjs dev or build");
   const env = {
-    ...desktopEnv(),
+    ...rustCacheEnv(desktopEnv()),
     TAURI_APP_PATH: resolve(root, "app"),
     TAURI_FRONTEND_PATH: root,
   };

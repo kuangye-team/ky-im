@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { fileURLToPath } from "node:url";
+import { rustCacheEnv } from "./rust.mjs";
 
 const child = spawn("cargo", ["run", "--locked", ...process.argv.slice(2)], {
   cwd: fileURLToPath(new URL("../api/", import.meta.url)),
+  env: rustCacheEnv(),
   stdio: "inherit",
 });
 

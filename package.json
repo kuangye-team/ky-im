@@ -24,7 +24,9 @@
     "desktop:build": "node scripts/desktop.mjs build",
     "desktop:frontend:dev": "npm --prefix ssg run dev -- --mode desktop",
     "desktop:frontend:build": "node scripts/prepare-licenses.mjs && npm --prefix ssg run build -- --mode desktop",
-    "desktop:check": "cargo check --manifest-path app/Cargo.toml --locked",
+    "desktop:check": "node scripts/rust.mjs check --manifest-path app/Cargo.toml --locked",
+    "rust": "node scripts/rust.mjs",
+    "test:rust-cache": "node --test scripts/rust.test.mjs",
     "test:desktop": "node --test scripts/desktop.test.mjs",
     "tauri": "tauri"
   },
