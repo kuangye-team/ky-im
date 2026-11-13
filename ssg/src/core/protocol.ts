@@ -36,6 +36,7 @@ export function newId(): string {
 }
 
 export type ControlPacket =
+  | { type: "peer-ping" | "peer-pong"; id: string }
   | {
       type: "folder-start";
       id: string;
@@ -91,6 +92,8 @@ export function parseControlPacket(raw: string): ControlPacket | null {
   if (!packet || typeof packet !== "object") return null;
   const p = packet as Record<string, unknown>;
   if (typeof p.id !== "string" || !uuidPattern.test(p.id)) return null;
+  if (p.type === "peer-ping" || p.type === "peer-pong")
+    return { type: p.type, id: p.id };
   if (p.type === "folder-supported" || p.type === "folder-end")
     return { type: p.type, id: p.id };
   if (

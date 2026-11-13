@@ -1,11 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { DownloadEvent } from "@tauri-apps/plugin-updater";
 
 const mocks = vi.hoisted(() => ({ check: vi.fn(), relaunch: vi.fn(), getVersion: vi.fn() }));
 vi.mock("@tauri-apps/api/app", () => ({ getVersion: mocks.getVersion }));
 vi.mock("@tauri-apps/plugin-updater", () => ({ check: mocks.check }));
 vi.mock("@tauri-apps/plugin-process", () => ({ relaunch: mocks.relaunch }));
 
-const makeUpdate = (version = "1.1.0") => ({ version, download: vi.fn().mockResolvedValue(undefined),
+vi.mock("./desktop-update-download", () => ({
+  downloadDesktopUpdate: async (update: ReturnType<typeof makeUpdate>, onEvent: (event: DownloadEvent) => void, signal: AbortSignal) => {
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => reject(signal.reason);
+      signal.addEventListener("abort", abort, { once: true });
+      update.download(onEvent).then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+    return { install: update.install, close: update.closeDownload };
+  },
+}));
+
+const makeUpdate = (version = "1.1.0") => ({ version, download: vi.fn<(event?: (event: DownloadEvent) => void) => Promise<void>>().mockResolvedValue(undefined),
+  closeDownload: vi.fn().mockResolvedValue(undefined),
   install: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) });
 
 beforeEach(() => {
@@ -318,4 +331,84 @@ describe("desktop updates", () => {
     expect(first.close).not.toHaveBeenCalled(); expect(first.install).toHaveBeenCalledOnce();
     expect(second.close).toHaveBeenCalledOnce(); expect(second.install).not.toHaveBeenCalled();
   });
+});
+
+it("reports byte progress, caps at 99 until verified, and switches installation/restart phases", async () => {
+  const update = makeUpdate(); mocks.check.mockResolvedValue(update);
+  const app = await import("./desktop-updates"); await app.checkDesktopUpdate();
+  let report!: (event: DownloadEvent) => void;
+  let finish!: () => void;
+  update.download.mockImplementation((callback) => { report = callback!; return new Promise((resolve) => { finish = resolve; }); });
+  const phases: string[] = [];
+  app.subscribeAppUpdate(() => phases.push(app.getAppUpdate().phase));
+  const installing = app.applyAppUpdate(() => null);
+  report({ event: "Started", data: { contentLength: 1000 } });
+  report({ event: "Progress", data: { chunkLength: 375 } });
+  expect(app.getAppUpdate()).toMatchObject({ phase: "downloading", progress: 37, downloadedBytes: 375, totalBytes: 1000 });
+  report({ event: "Progress", data: { chunkLength: 700 } });
+  expect(app.getAppUpdate().progress).toBe(99);
+  report({ event: "Finished" });
+  expect(app.getAppUpdate().progress).toBe(100);
+  finish(); await installing;
+  expect(phases).toContain("installing"); expect(phases.at(-1)).toBe("restarting");
+});
+
+it.each([undefined, 0])("handles downloads with no usable size (%s) without inventing a percentage", async (contentLength) => {
+  const update = makeUpdate(); mocks.check.mockResolvedValue(update);
+  const app = await import("./desktop-updates"); await app.checkDesktopUpdate();
+  update.download.mockImplementation(async (report) => {
+    report!({ event: "Started", data: { contentLength } });
+    report!({ event: "Progress", data: { chunkLength: 512 } });
+    expect(app.getAppUpdate()).toMatchObject({ progress: null, downloadedBytes: 512, totalBytes: null });
+  });
+  await app.applyAppUpdate(() => null);
+  expect(app.getAppUpdate().progress).toBe(100);
+});
+
+it("cancels a download, ignores late events, and allows a fresh update", async () => {
+  const update = makeUpdate(); mocks.check.mockResolvedValue(update);
+  const app = await import("./desktop-updates"); await app.checkDesktopUpdate();
+  let report!: (event: DownloadEvent) => void;
+  let finish!: () => void;
+  update.download.mockImplementationOnce((callback) => { report = callback!; return new Promise((resolve) => { finish = resolve; }); });
+  const installing = app.applyAppUpdate(() => null);
+  app.cancelAppUpdate(); await installing;
+  expect(app.getAppUpdate()).toMatchObject({ updating: false, phase: "idle", error: "", progress: null });
+  report({ event: "Progress", data: { chunkLength: 100 } }); finish();
+  expect(app.getAppUpdate().downloadedBytes).toBe(0);
+  expect(update.install).not.toHaveBeenCalled(); expect(mocks.relaunch).not.toHaveBeenCalled();
+  await app.applyAppUpdate(() => null);
+  expect(update.download).toHaveBeenCalledTimes(2); expect(update.install).toHaveBeenCalledOnce();
+});
+
+it("cancels immediately during retry backoff and starts the next attempt from zero", async () => {
+  vi.useFakeTimers();
+  const update = makeUpdate(); mocks.check.mockResolvedValue(update);
+  const app = await import("./desktop-updates"); await app.checkDesktopUpdate();
+  update.download.mockImplementationOnce(async (report) => {
+    report!({ event: "Started", data: { contentLength: 1000 } });
+    report!({ event: "Progress", data: { chunkLength: 500 } });
+    throw "error sending request for url (https://cdn.example.com/update.tar.gz)";
+  });
+  const installing = app.applyAppUpdate(() => null);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(app.getAppUpdate()).toMatchObject({ phase: "retrying", progress: 50 });
+  app.cancelAppUpdate(); await installing;
+  await vi.runAllTimersAsync();
+  expect(update.download).toHaveBeenCalledOnce(); expect(update.install).not.toHaveBeenCalled();
+  update.download.mockImplementationOnce(async () => {
+    expect(app.getAppUpdate()).toMatchObject({ progress: null, downloadedBytes: 0 });
+  });
+  await app.applyAppUpdate(() => null);
+});
+
+it("cannot cancel after installation has started", async () => {
+  const update = makeUpdate(); mocks.check.mockResolvedValue(update);
+  const app = await import("./desktop-updates"); await app.checkDesktopUpdate();
+  update.install.mockImplementation(async () => {
+    app.cancelAppUpdate();
+    expect(app.getAppUpdate()).toMatchObject({ updating: true, phase: "installing" });
+  });
+  await app.applyAppUpdate(() => null);
+  expect(mocks.relaunch).toHaveBeenCalledOnce();
 });

@@ -68,6 +68,7 @@ export default suiteConfig("browser", {
         // Deployment environment files may point at a remote API; tests use the local proxy.
         VITE_SIGNAL_URL: "",
         VITE_API_AUTH: "",
+        VITE_API_LATEST: process.env.VITE_API_LATEST || "/api/latest",
       },
       timeout: 60_000,
       reuseExistingServer: false,

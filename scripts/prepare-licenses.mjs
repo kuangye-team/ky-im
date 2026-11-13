@@ -15,19 +15,13 @@ if (
 const root = fileURLToPath(new URL("../ssg/", import.meta.url));
 const output = resolve(root, "public/licenses");
 const entries = [];
-const notices = [];
 const json = async (path) => JSON.parse(await readFile(path, "utf8"));
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 
 async function add(entry, text) {
   if (!text.trim()) throw new Error(`Missing license text: ${entry.name}`);
-  const filename = `${entry.id}.txt`;
-  await writeFile(resolve(output, filename), text);
-  entries.push({ ...entry, licenseUrl: `/licenses/${filename}` });
-  notices.push(
-    `${entry.name}${entry.version ? ` ${entry.version}` : ""}\n${entry.license}\n${entry.projectUrl}\n\n${text}`,
-  );
+  entries.push({ ...entry, text });
 }
 
 // Include the frontend's runtime dependency tree, including nested package versions.
@@ -104,10 +98,6 @@ for (const name of Object.keys(app.dependencies).sort())
 
 await writeFile(
   resolve(output, "index.json"),
-  JSON.stringify({ entries }, null, 2) + "\n",
-);
-await writeFile(
-  resolve(output, "THIRD-PARTY-NOTICES.txt"),
-  notices.join("\n\n" + "=".repeat(72) + "\n\n"),
+  JSON.stringify({ entries }) + "\n",
 );
 console.log(`已整理 ${entries.length} 项第三方组件的许可声明。`);

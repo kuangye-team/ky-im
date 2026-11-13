@@ -2,10 +2,18 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ky-im-ssg",
   "compatibility_date": "2026-10-24",
-  "build": { "command": "npm run build" },
+  "build": { "command": "npm run build -- --mode cloudflare" },
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application",
   },
-  "vars": {}
+  "vars": {
+    "VITE_PEER_CHECK_INTERVAL_MS": "10000",
+    "VITE_ROOM": "local",
+    "VITE_SIGNAL_URL": "",
+    "VITE_API_LATEST": "/api/latest",
+    "VITE_WEB_URL": "https://im.kuangye.team/",
+    "VITE_CLIENT_DOWNLOAD_URL": "https://github.com/kuangye-team/ky-im/releases/latest",
+    "VITE_STORAGE_CHUNK_SIZE": "2097152",
+  }
 }

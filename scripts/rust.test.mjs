@@ -35,6 +35,13 @@ test("an available sccache enables caching without changing the caller's environ
   assert.equal(env.RUSTC_WRAPPER, undefined);
 });
 
+test("sccache defaults to the persistent project cache", (t) => {
+  const env = { PATH: fixture(t, ["sccache"]) };
+  assert.equal(rustCacheEnv(env).SCCACHE_DIR,
+    fileURLToPath(new URL("../temp/cache/sccache", import.meta.url)));
+  assert.equal(env.SCCACHE_DIR, undefined);
+});
+
 test("explicit wrappers, opt-out, incremental compilation and CI remain in control", (t) => {
   const PATH = fixture(t, ["sccache"]);
   for (const settings of [

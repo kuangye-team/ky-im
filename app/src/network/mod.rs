@@ -1,5 +1,5 @@
 pub mod frame;
-#[path = "../../../shared/network_signal.rs"]
+#[path = "../../../api/shared/network_signal.rs"]
 mod network_signal;
 pub use network_signal::TcpEndpoint;
 
@@ -38,7 +38,7 @@ pub struct Profile {
     pub client_type: ClientType,
 }
 
-#[path = "../../../shared/client_type.rs"]
+#[path = "../../../api/shared/client_type.rs"]
 mod client_type;
 pub use client_type::ClientType;
 
@@ -92,6 +92,13 @@ pub enum NetworkEvent {
     Signal {
         peer_id: String,
         data: serde_json::Value,
+    },
+    Log {
+        source: String,
+        level: String,
+        message: String,
+        peer_id: Option<String>,
+        detail: Option<String>,
     },
     Error,
 }
@@ -154,6 +161,18 @@ pub struct LanNode {
 }
 
 impl LanNode {
+    #[track_caller]
+    fn log(&self, level: &str, message: &str, peer_id: Option<&str>, detail: impl Into<String>) {
+        let caller = std::panic::Location::caller();
+        (self.emit)(NetworkEvent::Log {
+            source: format!("{}:{}", caller.file(), caller.line()),
+            level: level.into(),
+            message: message.into(),
+            peer_id: peer_id.map(str::to_owned),
+            detail: Some(detail.into()),
+        });
+    }
+
     pub async fn start(
         profile: Profile,
         room: String,
@@ -244,7 +263,13 @@ impl LanNode {
                                 let _permit = permit;
                                 tokio::select! {
                                     _ = receiver.stop.cancelled() => {},
-                                    _ = timeout(CONNECT_TIMEOUT, receiver.accept(stream)) => {},
+                                    result = timeout(CONNECT_TIMEOUT, receiver.accept(stream)) => {
+                                        match result {
+                                            Ok(Ok(())) => {},
+                                            Ok(Err(error)) => receiver.log("warn", "收到连接请求，但未能完成连接", None, error),
+                                            Err(_) => receiver.log("warn", "收到的连接请求等待超时", None, "handshake timeout"),
+                                        }
+                                    },
                                 }
                             });
                         }
@@ -400,7 +425,9 @@ impl LanNode {
             let node = self.clone();
             let id = peer.profile.id;
             tokio::spawn(async move {
-                let _ = node.connect(&id).await;
+                if let Err(error) = node.connect(&id).await {
+                    node.log("warn", "回连对方失败", Some(&id), error);
+                }
             });
         } else {
             self.attach(peer, hello.connection_id, stream)?;
@@ -440,6 +467,9 @@ impl LanNode {
             _ = cancel.cancelled() => Err("Connection cancelled".into()),
             result = timeout(Duration::from_secs(12), self.dial(peer_id)) => result.unwrap_or_else(|_| Err("Connection timed out".into())),
         };
+        if let Err(error) = &result {
+            self.log("warn", "快速直连失败", Some(peer_id), error.clone());
+        }
         let mut pending = self.connecting.lock().unwrap();
         if pending
             .get(peer_id)
@@ -458,6 +488,12 @@ impl LanNode {
             .get(peer_id)
             .cloned()
             .ok_or("Device is not discovered")?;
+        self.log(
+            "info",
+            "正在尝试快速直连",
+            Some(peer_id),
+            format!("addresses={:?}", peer.addresses),
+        );
         let local_id = self.profile.lock().unwrap().id.clone();
         let hello = self.hello(
             &peer,
@@ -469,13 +505,26 @@ impl LanNode {
         let mut attempts = tokio::task::JoinSet::new();
         for address in &peer.addresses {
             let address = *address;
-            attempts.spawn(async move { TcpStream::connect(address).await });
+            attempts.spawn(async move { (address, TcpStream::connect(address).await) });
         }
         let mut connected = None;
         while let Some(result) = attempts.join_next().await {
-            if let Ok(Ok(stream)) = result {
-                connected = Some(stream);
-                break;
+            match result {
+                Ok((_, Ok(stream))) => {
+                    connected = Some(stream);
+                    break;
+                }
+                Ok((address, Err(error))) => {
+                    self.log(
+                        "warn",
+                        "连接地址暂时无法访问",
+                        Some(peer_id),
+                        format!("{address}: {error}"),
+                    );
+                }
+                Err(error) => {
+                    self.log("warn", "快速直连失败", Some(peer_id), error.to_string());
+                }
             }
         }
         attempts.abort_all();
@@ -529,7 +578,7 @@ impl LanNode {
             if connections.contains_key(&peer_id) {
                 return Err("Already connected".into());
             }
-            if connections.len() >= 64 {
+            if connections.len() >= MAX_PEERS {
                 return Err("Too many connections".into());
             }
             connections.insert(
@@ -586,7 +635,15 @@ impl LanNode {
                     }
                 }
             };
-            tokio::select! { _ = stop.cancelled() => {}, _ = receive => {}, _ = send => {} }
+            tokio::select! {
+                _ = stop.cancelled() => {},
+                result = receive => {
+                    if let Err(error) = result {
+                        node.log("warn", "快速直连接收已中断", Some(&peer_id), error);
+                    }
+                },
+                _ = send => { node.log("warn", "快速直连发送已中断", Some(&peer_id), "writer stopped"); }
+            }
             node.close_peer(&peer_id, Some(&connection_id));
         });
         Ok(())

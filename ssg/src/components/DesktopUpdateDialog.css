@@ -1,0 +1,23 @@
+.modal-overlay.desktop-update-overlay { z-index: 90; }
+.modal.desktop-update-dialog { z-index: 91; width: 460px; }
+.desktop-update-heading { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
+.desktop-update-icon { display: flex; padding: 13px; border-radius: 15px; color: var(--primary); background: var(--primary-soft); }
+.desktop-update-heading h2 { font-size: 19px; line-height: 1.5; }
+.desktop-update-heading p { margin-top: 4px; font-size: 12px; color: var(--muted); }
+.desktop-update-status { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 13px; }
+.desktop-update-status span { display: flex; align-items: center; gap: 8px; }
+.desktop-update-status strong { color: var(--primary); font-size: 18px; font-variant-numeric: tabular-nums; }
+.desktop-update-progress { height: 8px; overflow: hidden; border-radius: 99px; background: var(--primary-soft); }
+.desktop-update-progress > div { height: 100%; border-radius: inherit; background: var(--primary); transition: width 0.15s ease; }
+.desktop-update-progress .is-indeterminate { width: 35%; animation: desktop-update-progress 1.3s ease-in-out infinite alternate; }
+.desktop-update-detail { min-height: 20px; margin-top: 10px; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.desktop-update-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
+.desktop-update-footer p { flex: 1; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.desktop-update-footer button { flex-shrink: 0; min-height: 40px; }
+.desktop-update-spinner { animation: desktop-update-spin 1s linear infinite; }
+@keyframes desktop-update-spin { to { transform: rotate(360deg); } }
+@keyframes desktop-update-progress { to { transform: translateX(185%); } }
+@media (prefers-reduced-motion: reduce) {
+  .desktop-update-spinner, .desktop-update-progress .is-indeterminate { animation: none; }
+  .desktop-update-progress > div { transition: none; }
+}

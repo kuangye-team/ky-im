@@ -1,3 +1,4 @@
+import { runtimeLog } from "../../runtime-logs";
 import { CONNECTION_CONFIG } from "../../config";
 import type {
   TransportAdapter,
@@ -46,6 +47,7 @@ class WebRTCConnection implements TransportConnection {
     pc.onconnectionstatechange = () => {
       if (this.closed) return;
       const state = pc.connectionState;
+      runtimeLog(state === "failed" ? "warn" : "info", "connection", "兼容传输状态变化", { peerId: options.peerId, detail: state, raw: { transport: "webrtc", connectionState: state, iceConnectionState: pc.iceConnectionState, signalingState: pc.signalingState } });
       if (state === "connected" || state === "disconnected")
         options.onState(state);
       else if (state === "closed" || state === "failed")

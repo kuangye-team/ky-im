@@ -1,3 +1,4 @@
+import { runtimeLog } from "../../runtime-logs";
 import type {
   TransportAdapter,
   TransportChannel,
@@ -31,6 +32,7 @@ export class PreferredTransportAdapter implements TransportAdapter {
     };
     const fallback = (initiate: boolean) => {
       if (closed || usingRtc || selected) return;
+      runtimeLog("info", "connection", "正在尝试兼容传输", { peerId: options.peerId });
       usingRtc = true;
       clearProbe();
       current?.close();

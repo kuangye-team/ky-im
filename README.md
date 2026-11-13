@@ -35,7 +35,7 @@ flowchart LR
     R <-.-> B
 ```
 
-Discovery, transport, and storage are separate adapters around a shared `ChatEngine`, which handles messages, file transfers, and persistence. Devices use a persistent local UUID to merge results from multiple discovery sources. Files are transferred in chunks with support for streaming reads and writes.
+Discovery, transport, and storage are separate adapters around a shared `ChatEngine`, which handles messages, file transfers, and persistence. Devices use a persistent local UUID to merge results from multiple discovery sources. Files are transferred in chunks with support for streaming reads and writes, independent acceptance, and concurrent transfers. Receivers retain task-count and buffer-budget limits.
 
 The Rust backend shares its core logic across two runtimes: the native service uses Axum / Tokio with in-memory presence, while the Cloudflare version uses Workers / Durable Objects to store presence data. Optional relay forwards only the active transfer; neither backend stores chat history or relay content.
 
@@ -44,15 +44,17 @@ The Rust backend shares its core logic across two runtimes: the native service u
 | Web and shared logic | React, TypeScript, Vite; UI, chat engine, network and storage adapters | [`ssg/src/`](ssg/src) |
 | Desktop app | Tauri 2, Rust; mDNS / TCP, SQLite, local filesystem | [`app/src/`](app/src) |
 | Signaling and relay | Rust; native and Cloudflare runtimes | [`api/src/`](api/src) |
-| Shared protocol | Network types shared by the server and desktop app | [`shared/`](shared) |
+| Shared protocol | Network types shared by the server and desktop app | [`api/shared/`](api/shared) |
 | Build and release | Configuration generation, license notices, desktop and server packaging | [`scripts/`](scripts) |
 
 ### Scope and limitations
 
 - **Discovery and connectivity:** browser groups use `VITE_ROOM` and the source IP observed by the server, without scanning the LAN. Desktop discovery requires reachable IPv4 addresses, UDP 5353 multicast, and dynamic TCP ports. WebRTC has no STUN/TURN servers configured by default, so cross-network direct connections depend on reachability.
-- **Availability and storage:** both devices must be online to transfer content. The server does not hold offline messages, and history does not automatically sync between devices. PWA offline caching provides app assets and access to local history; clearing site data removes the browser's local identity and history.
+- **Availability and storage:** presence is advisory, so sending can be attempted even when a contact appears offline. Open channels can carry messages without a heartbeat reply; probes help renegotiate stale channels, while delivery requires the recipient’s storage acknowledgment. The server does not hold offline messages, and history does not automatically sync between devices. PWA offline caching provides app assets and access to local history; clearing site data removes the browser's local identity and history.
 - **Identity and privacy:** group numbers, UUIDs, and server access keys do not authenticate contacts. Device identifiers can currently be impersonated; use the app between trusted devices. WebRTC encrypts transport, but desktop TCP is currently unencrypted. Relay is not end-to-end encrypted, so the relay server can access content. Public device profiles are sent to enabled discovery services.
 - **Browser support:** receiving large files and original folders depends on filesystem APIs, storage quotas, and available space. Use HTTPS for production websites to support PWA and protected browser capabilities.
+
+See the [IM communication design](docs/arch.md) for discovery, liveness checks, transport selection, and reconnection details (Chinese).
 
 ## Quick start
 
@@ -219,4 +221,4 @@ Contributions are welcome through [Issues](https://github.com/kuangye-team/ky-im
 
 Copyright (c) 2026 旷野团队. This project is licensed under the [MIT License](LICENSE). Third-party dependencies and assets retain their own licenses.
 
-After installing or updating frontend dependencies, run `npm run prepare` to generate third-party notices in `ssg/public/licenses/` and distribute them with the frontend. Desktop release builds and GitHub Actions include this step; generate the notices before building the website or Docker image yourself.
+After installing or updating frontend dependencies, run `npm run prepare` to generate `ssg/public/licenses/index.json`, a single file containing third-party component metadata and full license texts. Frontend builds distribute it as `licenses/index.json`. Desktop release builds and GitHub Actions include this step; generate the notices before building the website or Docker image yourself.

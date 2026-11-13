@@ -33,8 +33,13 @@ class Channel extends EventTarget {
   onmessage?: (event: { data: unknown }) => void;
   onerror?: () => void;
   sent: unknown[] = [];
+  autoPong = true;
   send(data: unknown) {
     this.sent.push(data);
+    if (this.autoPong && typeof data === "string") {
+      const packet = JSON.parse(data);
+      if (packet.type === "peer-ping") this.receive(JSON.stringify({ type: "peer-pong", id: packet.id }));
+    }
   }
   close() {
     this.readyState = "closed";
@@ -147,7 +152,8 @@ async function setup(open = true) {
 const controls = (channel: Channel) =>
   channel.sent
     .filter((value): value is string => typeof value === "string")
-    .map((value) => JSON.parse(value) as Record<string, unknown>);
+    .map((value) => JSON.parse(value) as Record<string, unknown>)
+    .filter((packet) => packet.type !== "peer-ping" && packet.type !== "peer-pong");
 beforeEach(() => {
   PeerConnection.instances = [];
   Socket.instances = [];
@@ -223,6 +229,84 @@ async function pending(engine: ChatEngine, id: string) {
 }
 
 describe("contact file receiving permission", () => {
+  it("offers a whole batch and later files without waiting, and accepts them independently", async () => {
+    const { engine, channel } = await setup();
+    const first = new File(["first"], "first.txt");
+    const readFirst = vi.spyOn(first, "slice");
+    const batch = engine.sendFiles([first, new File(["second"], "second.txt")])
+      .catch(() => false);
+    const later = engine.sendFiles([new File(["third"], "third.txt")]);
+    await vi.waitFor(() =>
+      expect(controls(channel).filter((p) => p.type === "file-start")).toHaveLength(3),
+    );
+    const idFor = (name: string) => engine.getSnapshot().messages.find((m) => m.fileName === name)!.id;
+    const firstId = idFor("first.txt");
+    const secondId = idFor("second.txt");
+    const thirdId = idFor("third.txt");
+    channel.receive(JSON.stringify({ type: "file-accept", id: thirdId }));
+    expect(await later).toBe(true);
+    channel.receive(JSON.stringify({ type: "ack", id: thirdId }));
+    channel.receive(JSON.stringify({ type: "transfer-error", id: firstId, message: "对方已拒绝接收此文件" }));
+    expect(await batch).toBe(false);
+    channel.receive(JSON.stringify({ type: "file-accept", id: secondId }));
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({ type: "file-end", id: secondId }),
+    );
+    channel.receive(JSON.stringify({ type: "ack", id: secondId }));
+    await vi.waitFor(() => expect(engine.hasPendingTransfers()).toBe(false));
+    expect(readFirst).not.toHaveBeenCalled();
+    const chunks = channel.sent.filter((p) => p instanceof ArrayBuffer)
+      .map((p) => decodeChunk(p as ArrayBuffer)!);
+    expect(chunks.map((chunk) => [chunk.id, new TextDecoder().decode(chunk.data)])).toEqual([
+      [thirdId, "third"], [secondId, "second"],
+    ]);
+    expect(engine.getSnapshot().messages.filter((m) => m.status === "delivered")).toHaveLength(2);
+  });
+
+  it("receives interleaved files while another request remains unanswered", async () => {
+    const { engine, channel } = await setup();
+    const waiting = offer(channel, 6);
+    const first = offer(channel, 6);
+    const second = offer(channel, 6);
+    await Promise.all([waiting, first, second].map((id) => pending(engine, id)));
+    await engine.acceptFile(second);
+    await engine.acceptFile(first);
+    for (let sequence = 0; sequence < 2; sequence++) {
+      for (const [id, value] of [[first, "abc"], [second, "xyz"]])
+        channel.receive(encodeChunk(id as string, sequence, new TextEncoder().encode(value).buffer));
+    }
+    channel.receive(JSON.stringify({ type: "file-end", id: second }));
+    channel.receive(JSON.stringify({ type: "file-end", id: first }));
+    await vi.waitFor(() =>
+      expect(engine.getSnapshot().messages.filter((m) => m.status === "delivered")).toHaveLength(2),
+    );
+    expect(await (await engine.getAttachment(first))?.text()).toBe("abcabc");
+    expect(await (await engine.getAttachment(second))?.text()).toBe("xyzxyz");
+    await pending(engine, waiting);
+    await engine.cancelTransfer(waiting);
+    expect(engine.hasPendingTransfers()).toBe(false);
+  });
+
+  it("sends an attachment to a legacy client without pong and still requires acceptance and ack", async () => {
+    const { engine, channel } = await setup(false);
+    channel.autoPong = false;
+    channel.open();
+    const sending = engine.sendFiles([new File(["legacy file"], "legacy.txt")]);
+    await vi.waitFor(() =>
+      expect(controls(channel).some((packet) => packet.type === "file-start")).toBe(true),
+    );
+    const id = engine.getSnapshot().messages[0].id;
+    expect(channel.sent.some((packet) => packet instanceof ArrayBuffer)).toBe(false);
+    channel.receive(JSON.stringify({ type: "file-accept", id }));
+    expect(await sending).toBe(true);
+    const chunk = channel.sent.find((packet) => packet instanceof ArrayBuffer) as ArrayBuffer;
+    expect(new TextDecoder().decode(decodeChunk(chunk)!.data)).toBe("legacy file");
+    expect(engine.getSnapshot().messages[0].status).toBe("sent");
+    channel.receive(JSON.stringify({ type: "ack", id }));
+    await vi.waitFor(() =>
+      expect(engine.getSnapshot().messages[0].status).toBe("delivered"),
+    );
+  });
   it.each([0, 3, MAX_FILE_SIZE])(
     "requires consent by default for %i bytes and stores only after acceptance",
     async (size) => {
@@ -331,6 +415,41 @@ describe("contact file receiving permission", () => {
 });
 
 describe("large file consent and direct-to-disk transfers", () => {
+  it("keeps stream windows independent when another file stalls or is cancelled", async () => {
+    const { engine, channel } = await setup();
+    const bytes = new Uint8Array(MAX_FILE_SIZE + 17).fill(9);
+    const batch = engine.sendFiles([
+      new File([bytes], "stalled.bin"),
+      new File([bytes], "completed.bin"),
+    ]).catch(() => false);
+    await vi.waitFor(() =>
+      expect(controls(channel).filter((p) => p.type === "file-start")).toHaveLength(2),
+    );
+    const [stalled, completed] = engine.getSnapshot().messages.map((m) => m.id);
+    for (const id of [stalled, completed])
+      channel.receive(JSON.stringify({ type: "file-accept", id, streaming: true }));
+    const chunks = (id: string) => channel.sent.filter((p) => p instanceof ArrayBuffer)
+      .map((p) => decodeChunk(p as ArrayBuffer)!).filter((chunk) => chunk.id === id);
+    for (let received = TRANSFER_CONFIG.streamWindowBytes; received < bytes.length; received += TRANSFER_CONFIG.streamWindowBytes) {
+      await vi.waitFor(() =>
+        expect(chunks(completed).reduce((sum, chunk) => sum + chunk.data.byteLength, 0)).toBe(received),
+      );
+      channel.receive(JSON.stringify({ type: "file-progress", id: completed, received }));
+    }
+    await vi.waitFor(() =>
+      expect(controls(channel)).toContainEqual({ type: "file-end", id: completed }),
+    );
+    channel.receive(JSON.stringify({ type: "ack", id: completed }));
+    expect(chunks(stalled).reduce((sum, chunk) => sum + chunk.data.byteLength, 0))
+      .toBe(TRANSFER_CONFIG.streamWindowBytes);
+    expect(chunks(completed).map((chunk) => chunk.sequence)).toEqual([0, 1, 2, 3, 4]);
+    expect(new Uint8Array(await new Blob(chunks(completed).map((chunk) => chunk.data)).arrayBuffer())).toEqual(bytes);
+    await engine.cancelTransfer(stalled);
+    expect(await batch).toBe(false);
+    await vi.waitFor(() => expect(engine.hasPendingTransfers()).toBe(false));
+    expect(engine.getSnapshot().messages.find((m) => m.id === completed)?.status).toBe("delivered");
+  });
+
   it("finishes local cancellation even when the channel cannot send the notice", async () => {
     const { engine, channel } = await setup();
     const id = offer(channel);
@@ -598,6 +717,27 @@ describe("large file consent and direct-to-disk transfers", () => {
 });
 
 describe("direct folder transfers", () => {
+  it("offers files and folders independently while earlier requests await consent", async () => {
+    const { engine, storage, channel } = await setup();
+    Object.assign(storage, { createFolderDestination: vi.fn() });
+    const first = engine.sendFiles([new File(["first"], "first.txt")]).catch(() => false);
+    const folder = engine.sendFolder(
+      async () => ({ name: "folder", entries: [{ kind: "directory", path: "empty" }] }),
+      () => {},
+      new AbortController().signal,
+    ).catch(() => false);
+    const later = engine.sendFiles([new File(["later"], "later.txt")]).catch(() => false);
+    await vi.waitFor(() => {
+      expect(controls(channel).filter((p) => p.type === "file-start")).toHaveLength(2);
+      expect(controls(channel).filter((p) => p.type === "folder-start")).toHaveLength(1);
+    });
+    expect(channel.sent.some((p) => p instanceof ArrayBuffer)).toBe(false);
+    for (const message of engine.getSnapshot().messages)
+      await engine.cancelTransfer(message.id);
+    expect(await Promise.all([first, folder, later])).toEqual([false, false, false]);
+    expect(engine.hasPendingTransfers()).toBe(false);
+  });
+
   it("requires consent even for tiny files, then saves structure and payload without browser attachments or signaling content", async () => {
     const { engine, channel, storage, socket } = await setup();
     const save = vi.spyOn(storage, "saveAttachment");

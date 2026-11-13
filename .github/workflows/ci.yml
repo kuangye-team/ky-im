@@ -28,7 +28,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: api -> target
+          workspaces: api -> ../temp/cache/cargo
           cache-on-failure: true
       - run: npm ci --ignore-scripts
       - run: npm --prefix ssg ci
@@ -74,7 +74,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app -> target
+          workspaces: app -> ../temp/cache/cargo
           shared-key: desktop-check
           cache-on-failure: true
       - run: cargo fmt --manifest-path app/Cargo.toml --check

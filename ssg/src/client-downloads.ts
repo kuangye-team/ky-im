@@ -1,5 +1,3 @@
-import { SIGNALING_CONFIG } from "./config";
-
 export type DesktopPlatform = "windows" | "macos";
 export type ClientRelease = {
   version: string;
@@ -54,14 +52,8 @@ export function parseClientRelease(value: unknown): ClientRelease {
 }
 
 let pending: Promise<ClientRelease> | undefined;
-export function clientManifestRequestUrl(signalUrl = SIGNALING_CONFIG.url): string {
-  // The API owns the upstream URL; split deployments use the signaling API origin.
-  const path = "/api/latest";
-  if (!signalUrl) return path;
-  const signal = new URL(signalUrl);
-  if (signal.protocol !== "ws:" && signal.protocol !== "wss:") throw new Error("Invalid signaling URL");
-  signal.protocol = signal.protocol === "wss:" ? "https:" : "http:";
-  return new URL(path, signal.origin).href;
+export function clientManifestRequestUrl(): string {
+  return import.meta.env.VITE_API_LATEST?.trim() || "/api/latest";
 }
 
 export function loadClientRelease(): Promise<ClientRelease> {
@@ -69,6 +61,7 @@ export function loadClientRelease(): Promise<ClientRelease> {
   return pending ??= Promise.resolve().then(() => fetch(clientManifestRequestUrl(), {
     signal: AbortSignal.timeout(12_000),
     credentials: "omit",
+    cache: "no-store",
   })).then(async (response) => {
     if (!response.ok) throw new Error("Client release unavailable");
     return parseClientRelease(await response.json());

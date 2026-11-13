@@ -37,9 +37,20 @@ export const INVITE_CONFIG = {
   fallbackUrl: CLIENT_CONFIG.webUrl,
 } as const;
 
+/** Invalid public configuration falls back to 10 seconds; allow 1 second to 5 minutes. */
+export function listHeartbeatInterval(value: string | undefined): number {
+  const interval = Number(value);
+  return Number.isSafeInteger(interval) && interval >= 1000 && interval <= 300_000 ? interval : 10_000;
+}
+
 /** 直连与中转共用的连接时限和本机缓冲。 */
 export const CONNECTION_CONFIG = {
   rtc: { iceServers: [] } satisfies RTCConfiguration, // 默认仅使用本机 ICE 候选。
+  listHeartbeatIntervalMs: listHeartbeatInterval(import.meta.env?.VITE_PEER_CHECK_INTERVAL_MS),
+  peerHeartbeatIntervalMs: 10_000, // 已打开的聊天通道双向探测。
+  peerHeartbeatTimeoutMs: 8_000, // 单次探测等待；静默且无在途内容时重协商。
+  peerHeartbeatMissLimit: 3, // 连续三个探测周期未确认存活则离线，不限制发送。
+  peerRetryMaxMs: 30_000, // 当前联系人的独立重试上限。
   readyTimeoutMs: 15_000, // 等待设备 DataChannel 就绪的时限。
   disconnectGraceMs: 8_000, // 短暂断网的恢复宽限时间。
   pollIntervalMs: 75, // 等待连接状态变化的轮询间隔。

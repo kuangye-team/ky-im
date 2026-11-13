@@ -1277,6 +1277,12 @@ button:hover:not(:disabled) {
   margin-top: 4px;
   color: var(--muted);
 }
+.composer-presence-hint {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
 .composer-tools {
   display: flex;
   align-items: center;

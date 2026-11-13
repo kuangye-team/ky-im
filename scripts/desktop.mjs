@@ -20,7 +20,7 @@ try {
     TAURI_FRONTEND_PATH: root,
   };
   // Cargo runs from app/, while the collector runs from the repository root.
-  env.CARGO_TARGET_DIR = resolve(root, env.CARGO_TARGET_DIR || "app/target");
+  env.CARGO_TARGET_DIR = resolve(root, env.CARGO_TARGET_DIR || "temp/cache/cargo");
   for (const key of [
     "APPLE_ID",
     "APPLE_PASSWORD",
@@ -81,7 +81,7 @@ try {
   if (result.error) throw result.error;
   if (result.status !== 0) process.exit(result.status || 1);
   if (command === "build") {
-    const targetDir = resolve(root, env.CARGO_TARGET_DIR || "app/target");
+    const targetDir = resolve(root, env.CARGO_TARGET_DIR || "temp/cache/cargo");
     const names = collectArtifacts(
       resolve(targetDir, target, "release/bundle"),
       resolve(root, "app/dist"),

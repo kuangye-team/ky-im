@@ -32,3 +32,14 @@ export function updaterConfig(env, release) {
     plugins: { updater: { endpoints: endpoint && pubkey ? [endpoint] : [], pubkey: pubkey || "" } },
   };
 }
+
+export function signPathEnabled(env) {
+  const enabled = env.SIGNPATH_ENABLED || "false";
+  if (!["true", "false"].includes(enabled))
+    throw new Error("SIGNPATH_ENABLED must be true or false");
+  if (enabled === "false") return false;
+  const missing = ["SIGNPATH_API_TOKEN", "SIGNPATH_ORGANIZATION_ID", "SIGNPATH_PROJECT_SLUG", "SIGNPATH_SIGNING_POLICY_SLUG"]
+    .filter((key) => !env[key]?.trim());
+  if (missing.length) throw new Error(`SignPath is enabled but configuration is missing: ${missing.join(", ")}`);
+  return true;
+}

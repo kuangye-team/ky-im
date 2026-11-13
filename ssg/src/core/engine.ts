@@ -1,3 +1,4 @@
+import { runtimeLog } from "../runtime-logs";
 import {
   readSettings,
   saveSettings,
@@ -77,9 +78,14 @@ type PeerLink = {
   connection: TransportConnection;
   channel?: TransportChannel;
   receiving: Promise<void>;
-  sending: Promise<void>;
   disconnectTimer?: Timer;
   queuedPackets: number;
+  createdAt: number;
+  lastPong?: number;
+  lastReceivedAt?: number;
+  lastProbeAt?: number;
+  recoveryPending?: boolean;
+  probe?: { id: string; sentAt: number; deadline: number };
 };
 type IncomingTransfer = {
   peerId: string;
@@ -198,6 +204,11 @@ export class ChatEngine {
   private welcomedAt?: number;
   private reconnectAttempt = 0;
   private running = false;
+  private peerHeartbeat?: ReturnType<typeof setInterval>;
+  private peerTickAt = Date.now();
+  private peerCheckAt = new Map<string, number>();
+  private peerRetries = new Map<string, { attempt: number; at: number }>();
+  private peerMisses = new Map<string, number>();
   private queuedReceiveBytes = 0;
   private queuedReceivePackets = 0;
   private lastPong = Date.now();
@@ -207,11 +218,15 @@ export class ChatEngine {
   private restoringPeers = new Map<string, Promise<Profile>>();
   private connectingById = false;
   private readonly onOnline = () => {
+    this.checkPeers(true);
     if (this.session?.readyState === DISCOVERY_OPEN) this.checkHeartbeat(true);
     else if (!this.session) this.connect();
   };
   private readonly onVisible = () => {
-    if (document.visibilityState === "visible") this.checkHeartbeat(true);
+    if (document.visibilityState === "visible") {
+      this.checkHeartbeat(true);
+      this.checkPeers(true);
+    }
   };
   private readonly onOffline = () => {
     if (this.network.discovery.usesBrowserNetworkStatus) this.disconnect();
@@ -232,6 +247,7 @@ export class ChatEngine {
       activePeerId: null,
       status: "disconnected",
       availability: savedAvailability(),
+      peerPresence: {},
       peerStates: {},
       transfers: {},
       error: null,
@@ -307,10 +323,33 @@ export class ChatEngine {
     };
   };
   private patch(values: Partial<ChatSnapshot>) {
+    if (values.peers) {
+      const peerPresence: ChatSnapshot["peerPresence"] = {};
+      for (const peer of values.peers) {
+        peerPresence[peer.id] = this.snapshot.peerPresence[peer.id] ?? "online";
+        if (!this.peerCheckAt.has(peer.id))
+          this.peerCheckAt.set(
+            peer.id,
+            Date.now() + CONNECTION_CONFIG.listHeartbeatIntervalMs,
+          );
+      }
+      for (const id of this.peerCheckAt.keys()) {
+        if (!(id in peerPresence)) {
+          this.peerCheckAt.delete(id);
+          this.peerRetries.delete(id);
+          this.peerMisses.delete(id);
+        }
+      }
+      values = { ...values, peerPresence };
+    }
     this.snapshot = { ...this.snapshot, ...values };
     for (const listener of this.listeners) listener();
   }
   private showError(error: unknown) {
+    runtimeLog("error", "app", "操作未完成", {
+      detail: errorMessage(error),
+      raw: error,
+    });
     this.patch({ error: errorMessage(error) });
   }
   dismissError() {
@@ -334,6 +373,11 @@ export class ChatEngine {
   start() {
     if (this.running || this.snapshot.availability === "offline") return;
     this.running = true;
+    runtimeLog("info", "app", "开始连接", {
+      detail: `${this.network.discovery.name} / ${this.network.transport.name}`,
+    });
+    this.peerTickAt = Date.now();
+    this.peerHeartbeat = setInterval(() => this.checkPeers(), 1000);
     window.addEventListener("online", this.onOnline);
     window.addEventListener("offline", this.onOffline);
     if (typeof document !== "undefined")
@@ -343,6 +387,9 @@ export class ChatEngine {
   stop() {
     for (const controller of this.preparations.keys()) controller.abort();
     this.running = false;
+    clearInterval(this.peerHeartbeat);
+    this.peerRetries.clear();
+    this.peerMisses.clear();
     window.removeEventListener("online", this.onOnline);
     window.removeEventListener("offline", this.onOffline);
     if (typeof document !== "undefined")
@@ -390,6 +437,7 @@ export class ChatEngine {
       this.patch({ status: "disconnected" });
       return;
     }
+    runtimeLog("info", "discovery", "正在寻找设备");
     this.patch({ status: "connecting" });
     let socket: DiscoverySession;
     try {
@@ -431,15 +479,24 @@ export class ChatEngine {
     };
     socket.onerror = (event) => {
       if (this.session === socket)
+        runtimeLog("error", "discovery", "设备查找遇到问题", {
+          detail:
+            event && "message" in event ? String(event.message) : undefined,
+        });
+      if (this.session === socket)
         this.patch({
           error:
-            event && "message" in event && typeof event.message === "string" && event.message
+            event &&
+            "message" in event &&
+            typeof event.message === "string" &&
+            event.message
               ? event.message
               : "暂时连不上蜂鸟，请检查网络后重试。",
         });
     };
     socket.onclose = () => {
       if (this.session !== socket) return;
+      runtimeLog("warn", "discovery", "设备查找已断开，准备重试");
       this.session = undefined;
       this.rejectLookups("连接已断开，请稍后重试");
       clearInterval(this.heartbeat);
@@ -797,6 +854,9 @@ export class ChatEngine {
       return;
     }
     if (data.type === "error") {
+      runtimeLog("warn", "discovery", "连接服务返回提醒", {
+        detail: String(data.code),
+      });
       if (data.code === "session_replaced") {
         this.stop();
         this.patch({
@@ -841,6 +901,9 @@ export class ChatEngine {
         .filter((peer) => peer.id !== this.snapshot.profile.id);
       this.welcomedAt = Date.now();
       this.lastPong = Date.now();
+      runtimeLog("info", "discovery", "设备查找已就绪", {
+        detail: `peers=${peers.length}`,
+      });
       this.patch({ status: "connected", peers, error: null });
       if (peers.some((peer) => peer.id === this.snapshot.activePeerId))
         this.ensureLink(this.snapshot.activePeerId!);
@@ -869,6 +932,7 @@ export class ChatEngine {
       data.peer.id !== this.snapshot.profile.id
     ) {
       const peer = data.peer;
+      runtimeLog("info", "discovery", "发现设备", { peerId: peer.id });
       this.patch({
         peers: [...this.snapshot.peers.filter((p) => p.id !== peer.id), peer],
       });
@@ -877,6 +941,8 @@ export class ChatEngine {
       return;
     }
     if (data.type === "peer_left" && typeof data.id === "string") {
+      runtimeLog("info", "discovery", "设备已离开", { peerId: data.id });
+      this.peerRetries.delete(data.id);
       this.closeLink(data.id, "对方已离线，请稍后重新发送");
       const peerStates = { ...this.snapshot.peerStates };
       delete peerStates[data.id];
@@ -902,6 +968,19 @@ export class ChatEngine {
       data.data &&
       typeof data.data === "object"
     ) {
+      const negotiation = data.data as { description?: { type?: string } };
+      // A fresh offer on an established channel means the remote rebuilt its connection.
+      // Retire the old transport before negotiating; otherwise it rejects the new channel.
+      const previous = this.links.get(data.from);
+      if (
+        negotiation.description?.type === "offer" &&
+        previous?.channel?.readyState === "open"
+      ) {
+        runtimeLog("info", "connection", "对方正在重新连接", {
+          peerId: data.from,
+        });
+        this.closeLink(data.from, "对方正在重新连接，请重新发送");
+      }
       const link = this.ensureLink(data.from, false);
       if (!link) return;
       await link.connection.signal(data.data);
@@ -956,28 +1035,55 @@ export class ChatEngine {
           if (this.links.get(peerId) !== link) return;
           clearTimeout(link.disconnectTimer);
           if (state === "failed") this.failLink(link, "设备连接已中断");
-          else if (state === "disconnected")
+          else if (state === "disconnected") {
+            link.lastPong = undefined;
+            this.patch({
+              peerStates: {
+                ...this.snapshot.peerStates,
+                [peerId]: "connecting",
+              },
+            });
             link.disconnectTimer = setTimeout(
               () => this.failLink(link, "设备连接已中断"),
               CONNECTION_CONFIG.disconnectGraceMs,
             );
+          } else if (state === "connected" && link.channel?.readyState === "open")
+            this.markPeerConnected(peerId);
         },
-        onError: (error) => this.failLink(link, errorMessage(error)),
+        onError: (error) => {
+          runtimeLog("error", "connection", "连接处理失败", {
+            peerId,
+            detail: errorMessage(error),
+            raw: error,
+          });
+          this.failLink(link, errorMessage(error));
+        },
       });
       link = {
         peerId,
         connection,
         receiving: Promise.resolve(),
-        sending: Promise.resolve(),
         queuedPackets: 0,
+        createdAt: Date.now(),
       };
     } catch (error) {
-      this.showError(error);
+      this.schedulePeerRetry(peerId);
+      runtimeLog("warn", "connection", "暂时无法与对方通信", {
+        peerId,
+        detail: errorMessage(error),
+        raw: error,
+      });
+      if (peerId === this.snapshot.activePeerId) this.showError(error);
       this.patch({
+        peerPresence: { ...this.snapshot.peerPresence, [peerId]: "offline" },
         peerStates: { ...this.snapshot.peerStates, [peerId]: "failed" },
       });
       return;
     }
+    runtimeLog("info", "connection", "正在连接对方", {
+      peerId,
+      detail: this.network.transport.name,
+    });
     this.links.set(peerId, link);
     this.patch({
       peerStates: { ...this.snapshot.peerStates, [peerId]: "connecting" },
@@ -999,13 +1105,19 @@ export class ChatEngine {
     channel.binaryType = "arraybuffer";
     channel.bufferedAmountLowThreshold = CONNECTION_CONFIG.sendBufferLowBytes;
     channel.onopen = () => {
-      if (this.links.get(link.peerId) === link && link.channel === channel)
-        this.patch({
-          peerStates: {
-            ...this.snapshot.peerStates,
-            [link.peerId]: "connected",
-          },
-        });
+      if (this.links.get(link.peerId) !== link || link.channel !== channel)
+        return;
+      runtimeLog("info", "connection", "通道已打开", {
+        peerId: link.peerId,
+      });
+      link.lastPong = undefined;
+      link.lastReceivedAt = undefined;
+      link.lastProbeAt = undefined;
+      link.probe = undefined;
+      link.recoveryPending = false;
+      clearTimeout(link.disconnectTimer);
+      this.markPeerConnected(link.peerId);
+      this.probePeer(link);
     };
     channel.onmessage = (event) => {
       if (this.links.get(link.peerId) !== link || link.channel !== channel)
@@ -1024,6 +1136,21 @@ export class ChatEngine {
       ) {
         channel.consumed?.();
         return;
+      }
+      // Heartbeats bypass persistence work, but still return native receive credit.
+      if (typeof event.data === "string") {
+        const packet = parseControlPacket(event.data);
+        if (packet?.type === "peer-ping" || packet?.type === "peer-pong") {
+          try {
+            this.handlePeerHeartbeat(link, packet);
+          } catch (error) {
+            this.failLink(link, errorMessage(error));
+          } finally {
+            channel.consumed?.();
+          }
+          return;
+        }
+        if (packet) this.receivedFromPeer(link);
       }
       // A peer can keep sending while IndexedDB is busy. Bound that async backlog independently of transfer reservations.
       if (
@@ -1069,11 +1196,254 @@ export class ChatEngine {
     };
     if (channel.readyState === "open") channel.onopen(new Event("open"));
   }
-  private failLink(link: PeerLink, reason: string) {
+  private schedulePeerRetry(peerId: string) {
+    const attempt = (this.peerRetries.get(peerId)?.attempt || 0) + 1;
+    const delay = Math.max(
+      peerId === this.snapshot.activePeerId
+        ? 0
+        : CONNECTION_CONFIG.listHeartbeatIntervalMs,
+      Math.min(
+        1000 * 2 ** Math.min(attempt - 1, 5),
+        CONNECTION_CONFIG.peerRetryMaxMs,
+      ) *
+        (0.8 + Math.random() * 0.2),
+    );
+    this.peerRetries.set(peerId, {
+      attempt,
+      at: Date.now() + delay,
+    });
+  }
+  private checkPeers(resumed = false) {
+    if (!this.running) return;
+    const now = Date.now();
+    const suspended =
+      now - this.peerTickAt > CONNECTION_CONFIG.peerHeartbeatIntervalMs * 2;
+    this.peerTickAt = now;
+    // Time spent suspended is not a completed probe cycle.
+    if (resumed || suspended) this.peerMisses.clear();
+    for (const link of this.links.values()) {
+      if (resumed || suspended) {
+        link.probe = undefined;
+        link.lastPong = undefined;
+        link.lastReceivedAt = undefined;
+        link.lastProbeAt = undefined;
+        link.recoveryPending = false;
+        link.createdAt = now;
+      }
+      if (link.channel?.readyState !== "open") {
+        if (now - link.createdAt >= CONNECTION_CONFIG.readyTimeoutMs)
+          this.failLink(link, "连接等待超时，正在重新尝试");
+        continue;
+      }
+      if (link.probe && now >= link.probe.deadline) {
+        const probe = link.probe;
+        link.probe = undefined;
+        if (
+          link.lastReceivedAt === undefined ||
+          link.lastReceivedAt < probe.sentAt
+        ) {
+          const misses = Math.min(
+            (this.peerMisses.get(link.peerId) || 0) + 1,
+            CONNECTION_CONFIG.peerHeartbeatMissLimit,
+          );
+          this.peerMisses.set(link.peerId, misses);
+          link.recoveryPending = true;
+          runtimeLog("debug", "heartbeat", "暂未收到对方响应", {
+            peerId: link.peerId,
+            raw: { missedCycles: misses, probe },
+          });
+          if (
+            misses >= CONNECTION_CONFIG.peerHeartbeatMissLimit &&
+            this.snapshot.peerPresence[link.peerId] !== "offline"
+          ) {
+            runtimeLog("warn", "heartbeat", "连续多次未收到对方响应，已标记离线", {
+              peerId: link.peerId,
+              raw: { missedCycles: misses, probe },
+            });
+            this.patch({
+              peerPresence: { ...this.snapshot.peerPresence, [link.peerId]: "offline" },
+            });
+          }
+        }
+      }
+      if (
+        link.recoveryPending &&
+        link.queuedPackets === 0 &&
+        ![...this.incoming.values(), ...this.outgoing.values()].some(
+          (transfer) => transfer.peerId === link.peerId,
+        )
+      ) {
+        // Preserve content's own deadlines while continuing liveness cycles.
+        this.failLink(link, "对方暂时没有响应，正在重新连接", false);
+      } else if (
+        !link.probe &&
+        (link.lastProbeAt === undefined ||
+          now - link.lastProbeAt >=
+            (link.peerId === this.snapshot.activePeerId
+              ? CONNECTION_CONFIG.peerHeartbeatIntervalMs
+              : CONNECTION_CONFIG.listHeartbeatIntervalMs))
+      ) {
+        this.probePeer(link);
+      }
+    }
+    const peerId = this.snapshot.activePeerId;
+    if (
+      peerId &&
+      this.snapshot.status === "connected" &&
+      this.snapshot.peers.some((peer) => peer.id === peerId) &&
+      !this.links.has(peerId) &&
+      now >= (this.peerRetries.get(peerId)?.at || 0)
+    ) {
+      runtimeLog("info", "connection", "重新尝试连接对方", { peerId });
+      this.ensureLink(peerId);
+    }
+    if (this.snapshot.status !== "connected") return;
+    // Limit simultaneous background negotiations, while an explicit chat can start immediately.
+    let pending = [...this.links.values()].filter(
+      (link) => link.channel?.readyState !== "open",
+    ).length;
+    const queued = [...this.snapshot.peers].sort(
+      (a, b) =>
+        (this.peerCheckAt.get(a.id) || 0) - (this.peerCheckAt.get(b.id) || 0),
+    );
+    for (const peer of queued) {
+      if (pending >= 4) break;
+      if (
+        peer.id === peerId ||
+        this.links.has(peer.id) ||
+        now < (this.peerCheckAt.get(peer.id) ?? Infinity) ||
+        now < (this.peerRetries.get(peer.id)?.at ?? 0)
+      )
+        continue;
+      this.peerCheckAt.set(
+        peer.id,
+        now + CONNECTION_CONFIG.listHeartbeatIntervalMs,
+      );
+      this.ensureLink(peer.id);
+      pending++;
+    }
+  }
+  private probePeer(link: PeerLink) {
+    if (link.probe || link.channel?.readyState !== "open") return;
+    const sentAt = Date.now();
+    link.lastProbeAt = sentAt;
+    // Bulk data shares the ordered stream. Allow bounded time for disk/backpressure.
+    const busy =
+      link.channel.bufferedAmount > CONNECTION_CONFIG.sendBufferLowBytes ||
+      link.queuedPackets > 0 ||
+      [...this.incoming.values(), ...this.outgoing.values()].some(
+        (transfer) =>
+          transfer.peerId === link.peerId && transfer.message.kind !== "text",
+      );
+    link.probe = {
+      id: newId(),
+      sentAt,
+      deadline:
+        sentAt +
+        (busy
+          ? TRANSFER_CONFIG.timeoutMs
+          : CONNECTION_CONFIG.peerHeartbeatTimeoutMs),
+    };
+    try {
+      runtimeLog("debug", "heartbeat", "检查对方是否可通信", {
+        peerId: link.peerId,
+        raw: {
+          direction: "outgoing",
+          type: "peer-ping",
+          ...link.probe,
+          transport: this.network.transport.name,
+        },
+      });
+      this.sendControl(link.channel, { type: "peer-ping", id: link.probe.id });
+    } catch (error) {
+      this.failLink(link, errorMessage(error));
+    }
+  }
+  private handlePeerHeartbeat(
+    link: PeerLink,
+    packet: { type: "peer-ping" | "peer-pong"; id: string },
+  ) {
+    if (packet.type === "peer-ping") {
+      this.receivedFromPeer(link);
+      this.sendControl(link.channel!, { type: "peer-pong", id: packet.id });
+      runtimeLog("debug", "heartbeat", "已回复对方的检查", {
+        peerId: link.peerId,
+        raw: { direction: "outgoing", type: "peer-pong", id: packet.id },
+      });
+      return;
+    }
+    if (
+      !link.probe ||
+      link.probe.id !== packet.id ||
+      Date.now() >= link.probe.deadline
+    )
+      return;
+    const elapsed = Date.now() - link.probe.sentAt;
+    link.lastPong = Date.now();
+    link.probe = undefined;
+    this.receivedFromPeer(link);
+    runtimeLog("debug", "heartbeat", "对方已响应", {
+      peerId: link.peerId,
+      detail: `${elapsed} ms`,
+      raw: {
+        direction: "incoming",
+        type: "peer-pong",
+        id: packet.id,
+        roundTripMs: elapsed,
+      },
+    });
+  }
+  private receivedFromPeer(link: PeerLink) {
+    link.lastReceivedAt = Date.now();
+    link.recoveryPending = false;
+    clearTimeout(link.disconnectTimer);
+    this.peerRetries.delete(link.peerId);
+    this.peerMisses.delete(link.peerId);
+    this.markPeerConnected(link.peerId, true);
+  }
+  private markPeerConnected(peerId: string, confirmed = false) {
+    // Opening a replacement channel permits sending, but does not prove liveness.
+    const presence = confirmed ? "online" : this.snapshot.peerPresence[peerId] ?? "online";
+    if (
+      this.snapshot.peerStates[peerId] !== "connected" ||
+      this.snapshot.peerPresence[peerId] !== presence
+    ) {
+      this.patch({
+        peerPresence: {
+          ...this.snapshot.peerPresence,
+          [peerId]: presence,
+        },
+        peerStates: { ...this.snapshot.peerStates, [peerId]: "connected" },
+      });
+    }
+  }
+  private failLink(link: PeerLink, reason: string, offline = true) {
     if (this.links.get(link.peerId) !== link) return;
+    runtimeLog("warn", "connection", "暂时无法与对方通信", {
+      peerId: link.peerId,
+      detail: reason,
+      raw: {
+        reason,
+        channelState: link.channel?.readyState,
+        lastPong: link.lastPong,
+        probe: link.probe,
+      },
+    });
     this.closeLink(link.peerId, reason);
+    this.schedulePeerRetry(link.peerId);
     this.patch({
-      peerStates: { ...this.snapshot.peerStates, [link.peerId]: "failed" },
+      ...(offline
+        ? {
+            peerPresence: {
+              ...this.snapshot.peerPresence,
+              [link.peerId]: "offline" as const,
+            },
+          }
+        : {}),
+      peerStates: {
+        ...this.snapshot.peerStates,
+        [link.peerId]: offline ? "failed" : "connecting",
+      },
     });
   }
   private closeLink(peerId: string, reason: string) {
@@ -1092,6 +1462,11 @@ export class ChatEngine {
   private async readyChannel(
     peerId: string,
   ): Promise<{ link: PeerLink; channel: TransportChannel }> {
+    if (this.snapshot.availability === "offline")
+      throw new Error("你已离线，请先上线再发送");
+    const existing = this.links.get(peerId);
+    if (existing?.channel?.readyState === "open")
+      return { link: existing, channel: existing.channel };
     const deadline = Date.now() + CONNECTION_CONFIG.readyTimeoutMs;
     while (
       this.snapshot.status === "connecting" &&
@@ -1159,8 +1534,10 @@ export class ChatEngine {
   }
 
   async selectPeer(peer: Profile) {
-    if (this.snapshot.peers.some((p) => p.id === peer.id))
-      this.ensureLink(peer.id);
+    if (this.snapshot.peers.some((p) => p.id === peer.id)) {
+      const link = this.ensureLink(peer.id);
+      if (link?.channel?.readyState === "open") this.probePeer(link);
+    }
     if (
       peer.numericId &&
       this.snapshot.status === "connected" &&
@@ -1322,6 +1699,16 @@ export class ChatEngine {
       const peer = this.peerProfile(message.peerId);
       if (!peer) return;
       await this.storage.saveMessage(message);
+      if (this.knownMessages.get(message.id)?.status !== message.status)
+        runtimeLog(
+          message.status === "failed" ? "warn" : "info",
+          "message",
+          incoming ? "已接收内容" : "发送进度已更新",
+          {
+            peerId: message.peerId,
+            detail: `${message.id} / ${message.kind} / ${message.status}`,
+          },
+        );
       this.knownMessages.set(message.id, message);
       const previous = this.snapshot.conversations.find(
         (c) => c.peer.id === peer.id,
@@ -1402,6 +1789,10 @@ export class ChatEngine {
       await this.writing;
       return;
     }
+    runtimeLog("warn", "message", "内容未能送达", {
+      peerId: transfer.peerId,
+      detail: `${id}: ${reason}`,
+    });
     this.outgoing.delete(id);
     transfer.failureReason = reason;
     transfer.wake?.();
@@ -1438,16 +1829,13 @@ export class ChatEngine {
           throw new Error("附件尚未接收完成或已被清除，无法转发");
         return { source, attachment };
       });
-      if (
-        this.snapshot.availability !== "online" ||
-        this.snapshot.status !== "connected"
-      )
+      if (this.snapshot.availability !== "online")
         throw new Error("请先上线，再转发消息");
       if (
         targetPeerId === this.snapshot.profile.id ||
-        !this.snapshot.peers.some((peer) => peer.id === targetPeerId)
+        !this.peerProfile(targetPeerId)
       )
-        throw new Error("对方当前离线，请选择在线联系人转发");
+        throw new Error("未找到聊天对象，请刷新后重试");
       let sent: boolean;
       if (source.kind === "text") {
         sent = await this.sendText(source.text || "", targetPeerId);
@@ -1482,8 +1870,7 @@ export class ChatEngine {
       this.showError(error);
       throw error;
     }
-    // Explicit retries after RTC failure reset stale state on both devices.
-    if (this.snapshot.peerStates[peerId] === "failed") this.reconnect();
+    // readyChannel rebuilds only this peer; other conversations stay connected.
     const message: Message = {
       id: newId(),
       peerId,
@@ -1493,6 +1880,10 @@ export class ChatEngine {
       createdAt: Date.now(),
       status: "sending",
     };
+    runtimeLog("info", "message", "准备发送文字", {
+      peerId,
+      detail: message.id,
+    });
     this.outgoing.set(message.id, { peerId, message });
     try {
       await this.recordMessage(message);
@@ -1559,7 +1950,7 @@ export class ChatEngine {
     stats: ReturnType<typeof inspectFolder>,
     peerId: string,
   ): Promise<boolean> {
-    if (this.snapshot.peerStates[peerId] === "failed") this.reconnect();
+    // A failed peer is rebuilt independently by readyChannel.
     const message: Message = {
       id: newId(),
       peerId,
@@ -1581,136 +1972,129 @@ export class ChatEngine {
       await this.recordMessage(message);
       if (!this.outgoing.has(message.id)) return false;
       this.progress(message.id, 0);
-      const { link, channel } = await this.readyChannel(peerId);
-      const send = link.sending.then(async () => {
-        const check = () => {
-          if (this.outgoing.get(message.id) !== outgoing)
-            throw new Error(outgoing.failureReason || "文件传输已取消");
-        };
+      const { channel } = await this.readyChannel(peerId);
+      const check = () => {
+        if (this.outgoing.get(message.id) !== outgoing)
+          throw new Error(outgoing.failureReason || "文件传输已取消");
+      };
+      check();
+      this.sendControl(channel, {
+        type: "folder-start",
+        id: message.id,
+        fileName: folder.name,
+        size: stats.size,
+        fileCount: stats.fileCount,
+        directoryCount: stats.directoryCount,
+        createdAt: message.createdAt,
+      });
+      await this.waitForTransfer(
+        message.id,
+        (t) => !!t.folderSupported,
+        FOLDER_CONFIG.supportTimeoutMs,
+        "对方暂不支持接收文件夹，请更新后重试",
+      );
+      await this.waitForTransfer(
+        message.id,
+        (t) => !!t.accepted,
+        TRANSFER_CONFIG.consentTimeoutMs,
+        "对方未确认接收，请重新发送",
+      );
+      message.status = "sending";
+      await this.recordMessage(message);
+      const chunkSize = fileChunkSize(channel);
+      let sequence = 0;
+      let sent = 0;
+      let reported = -1;
+      for (let index = 0; index < folder.entries.length; index++) {
+        check();
+        const entry = folder.entries[index];
+        outgoing.folderIndex = index;
+        outgoing.entryEnded = false;
+        await this.waitForBuffer(channel);
         check();
         this.sendControl(channel, {
-          type: "folder-start",
+          type: "folder-entry",
           id: message.id,
-          fileName: folder.name,
-          size: stats.size,
-          fileCount: stats.fileCount,
-          directoryCount: stats.directoryCount,
-          createdAt: message.createdAt,
+          index,
+          path: entry.path,
+          kind: entry.kind,
+          size: entry.kind === "file" ? entry.file.size : 0,
         });
         await this.waitForTransfer(
           message.id,
-          (t) => !!t.folderSupported,
-          FOLDER_CONFIG.supportTimeoutMs,
-          "对方暂不支持接收文件夹，请更新后重试",
+          (t) => t.entryReady === index,
+          TRANSFER_CONFIG.timeoutMs,
+          "文件传输超时",
         );
-        await this.waitForTransfer(
-          message.id,
-          (t) => !!t.accepted,
-          TRANSFER_CONFIG.consentTimeoutMs,
-          "对方未确认接收，请重新发送",
-        );
-        message.status = "sending";
-        await this.recordMessage(message);
-        const chunkSize = fileChunkSize(channel);
-        let sequence = 0;
-        let sent = 0;
-        let reported = -1;
-        for (let index = 0; index < folder.entries.length; index++) {
-          check();
-          const entry = folder.entries[index];
-          outgoing.folderIndex = index;
-          outgoing.entryEnded = false;
-          await this.waitForBuffer(channel);
-          check();
-          this.sendControl(channel, {
-            type: "folder-entry",
-            id: message.id,
-            index,
-            path: entry.path,
-            kind: entry.kind,
-            size: entry.kind === "file" ? entry.file.size : 0,
-          });
-          await this.waitForTransfer(
-            message.id,
-            (t) => t.entryReady === index,
-            TRANSFER_CONFIG.timeoutMs,
-            "文件传输超时",
-          );
-          if (entry.kind === "file") {
-            for (
-              let offset = 0;
-              offset < entry.file.size;
-              offset += chunkSize
-            ) {
-              check();
-              await this.waitForBuffer(channel);
-              await this.waitForTransfer(
-                message.id,
-                (t) =>
-                  sent <
-                  (t.receivedBytes || 0) + TRANSFER_CONFIG.streamWindowBytes,
-                TRANSFER_CONFIG.timeoutMs,
-                "文件传输超时",
-              );
-              const chunk = await entry.file
-                .slice(offset, offset + chunkSize)
-                .arrayBuffer();
-              check();
-              if (
-                chunk.byteLength !==
-                Math.min(chunkSize, entry.file.size - offset)
-              )
-                throw new Error("文件已发生变化，请重新选择文件夹");
-              channel.send(encodeChunk(message.id, sequence++, chunk));
-              sent += chunk.byteLength;
-              outgoing.sentBytes = sent;
-              const percentage = Math.min(
-                99,
-                Math.floor((sent / Math.max(stats.size, 1)) * 100),
-              );
-              if (reported !== percentage) {
-                reported = percentage;
-                this.progress(message.id, percentage);
-              }
+        if (entry.kind === "file") {
+          for (
+            let offset = 0;
+            offset < entry.file.size;
+            offset += chunkSize
+          ) {
+            check();
+            await this.waitForBuffer(channel);
+            await this.waitForTransfer(
+              message.id,
+              (t) =>
+                sent <
+                (t.receivedBytes || 0) + TRANSFER_CONFIG.streamWindowBytes,
+              TRANSFER_CONFIG.timeoutMs,
+              "文件传输超时",
+            );
+            const chunk = await entry.file
+              .slice(offset, offset + chunkSize)
+              .arrayBuffer();
+            check();
+            if (
+              chunk.byteLength !==
+              Math.min(chunkSize, entry.file.size - offset)
+            )
+              throw new Error("文件已发生变化，请重新选择文件夹");
+            channel.send(encodeChunk(message.id, sequence++, chunk));
+            sent += chunk.byteLength;
+            outgoing.sentBytes = sent;
+            const percentage = Math.min(
+              99,
+              Math.floor((sent / Math.max(stats.size, 1)) * 100),
+            );
+            if (reported !== percentage) {
+              reported = percentage;
+              this.progress(message.id, percentage);
             }
           }
-          check();
-          outgoing.entryEnded = true;
-          this.sendControl(channel, {
-            type: "folder-entry-end",
-            id: message.id,
-            index,
-          });
-          await this.waitForTransfer(
-            message.id,
-            (t) => t.entrySaved === index,
-            TRANSFER_CONFIG.timeoutMs,
-            "文件传输超时",
-          );
-          if (!stats.size)
-            this.progress(
-              message.id,
-              Math.min(
-                99,
-                Math.floor(((index + 1) / folder.entries.length) * 100),
-              ),
-            );
         }
         check();
-        outgoing.finished = true;
-        this.sendControl(channel, { type: "folder-end", id: message.id });
-        await this.recordMessage({ ...message, status: "sent" });
-        this.armAck(message.id);
-        return (
-          this.outgoing.has(message.id) ||
-          this.knownMessages.get(message.id)?.status === "delivered"
+        outgoing.entryEnded = true;
+        this.sendControl(channel, {
+          type: "folder-entry-end",
+          id: message.id,
+          index,
+        });
+        await this.waitForTransfer(
+          message.id,
+          (t) => t.entrySaved === index,
+          TRANSFER_CONFIG.timeoutMs,
+          "文件传输超时",
         );
-      });
-      link.sending = send.then(
-        () => undefined,
-        () => undefined,
+        if (!stats.size)
+          this.progress(
+            message.id,
+            Math.min(
+              99,
+              Math.floor(((index + 1) / folder.entries.length) * 100),
+            ),
+          );
+      }
+      check();
+      outgoing.finished = true;
+      this.sendControl(channel, { type: "folder-end", id: message.id });
+      await this.recordMessage({ ...message, status: "sent" });
+      this.armAck(message.id);
+      return (
+        this.outgoing.has(message.id) ||
+        this.knownMessages.get(message.id)?.status === "delivered"
       );
-      return await send;
     } catch (error) {
       await this.failOutgoing(message.id, errorMessage(error));
       if (this.deletedMessages.has(message.id)) return false;
@@ -1731,8 +2115,6 @@ export class ChatEngine {
   ): Promise<boolean> {
     if (!peerId || files.length === 0) return false;
     if (this.movingStorage) throw new Error("正在迁移存储，请稍后重试");
-    const historyRevision = this.historyRevision;
-    const peerRevision = this.peerHistoryRevisions.get(peerId) || 0;
     const tooLarge = files.find(
       (file) =>
         !Number.isSafeInteger(file.size) ||
@@ -1744,181 +2126,188 @@ export class ChatEngine {
       this.showError(error);
       throw error;
     }
-    if (this.snapshot.peerStates[peerId] === "failed") this.reconnect();
-    for (const file of files) {
-      const streaming = file.size > MAX_FILE_SIZE;
-      const external = streaming && !this.storage.createFileDestination;
+    // Publish every request immediately; each file waits for its own consent.
+    const sent = await Promise.all(
+      files.map((file) => this.sendAttachment(file, peerId, kind)),
+    );
+    return sent.every(Boolean);
+  }
+
+  private async sendAttachment(
+    file: AttachmentSource,
+    peerId: string,
+    kind?: "image" | "file",
+  ): Promise<boolean> {
+    const historyRevision = this.historyRevision;
+    const peerRevision = this.peerHistoryRevisions.get(peerId) || 0;
+    const streaming = file.size > MAX_FILE_SIZE;
+    const external = streaming && !this.storage.createFileDestination;
+    const message: Message = {
+      id: newId(),
+      peerId,
+      senderId: this.snapshot.profile.id,
+      kind: streaming
+        ? "file"
+        : kind || (imageTypes.test(file.type) ? "image" : "file"),
+      fileName: file.name.slice(0, 255) || "未命名文件",
+      mimeType: file.type.slice(0, 128) || "application/octet-stream",
+      size: file.size,
+      createdAt: Date.now(),
+      status: "awaiting-acceptance",
+      ...(external
+        ? { attachmentStorage: "external" as const }
+        : this.storage.createFileDestination
+          ? { attachmentStorage: "managed" as const }
+          : {}),
+    };
+    runtimeLog("info", "message", "准备发送附件", {
+      peerId,
+      detail: message.id,
+    });
+    this.outgoing.set(message.id, { peerId, message });
+    this.progress(message.id, 0);
+    try {
+      await this.recordMessage(message);
+      if (!this.outgoing.has(message.id)) return false;
+      this.progress(message.id, 0);
+      const { channel } = await this.readyChannel(peerId);
+      if (!this.outgoing.has(message.id)) return false;
+      this.sendControl(channel, {
+        type: "file-start",
+        id: message.id,
+        kind: message.kind as "image" | "file",
+        fileName: message.fileName!,
+        mimeType: message.mimeType!,
+        size: file.size,
+        createdAt: message.createdAt,
+      });
+      await this.waitForTransfer(
+        message.id,
+        (transfer) => !!transfer.accepted,
+        TRANSFER_CONFIG.consentTimeoutMs,
+        "对方未确认接收，请确认双方已更新并重新发送",
+      );
+      message.status = "sending";
+      await this.recordMessage(message);
+      const check = () => {
+        if (!this.outgoing.has(message.id))
+          throw new Error("文件传输已取消");
+      };
+      let destination: FileDestination | undefined;
+      // Browsers keep only small attachments in IndexedDB. Desktop copies
+      // each source block to disk while sending that same block to the peer.
+      const cached: ArrayBuffer[] = [];
+      const chunkSize = fileChunkSize(channel);
+      let sequence = 0;
+      let reported = -1;
+      try {
+        check();
+        if (this.storage.createFileDestination)
+          destination = await this.storage.createFileDestination(message);
+        check();
+        for (
+          let offset = 0;
+          offset < file.size;
+          offset += STORAGE_CONFIG.chunkBytes
+        ) {
+          check();
+          const block = await file
+            .slice(
+              offset,
+              Math.min(offset + STORAGE_CONFIG.chunkBytes, file.size),
+            )
+            .arrayBuffer();
+          check();
+          if (
+            block.byteLength !==
+            Math.min(STORAGE_CONFIG.chunkBytes, file.size - offset)
+          )
+            throw new Error("文件已发生变化，请重新选择文件");
+          if (!external && !destination && !(file instanceof Blob))
+            cached.push(block);
+          // Only one storage block is in flight. A slow disk or receiver
+          // applies backpressure before the next source read.
+          await Promise.all([
+            destination?.write(new Blob([block])),
+            (async () => {
+              for (
+                let start = 0;
+                start < block.byteLength;
+                start += chunkSize
+              ) {
+                check();
+                await this.waitForBuffer(channel);
+                if (streaming || this.outgoing.get(message.id)?.streaming)
+                  await this.waitForTransfer(
+                    message.id,
+                    (transfer) =>
+                      offset + start <
+                      (transfer.receivedBytes || 0) +
+                        TRANSFER_CONFIG.streamWindowBytes,
+                    TRANSFER_CONFIG.timeoutMs,
+                    "文件传输超时",
+                  );
+                check();
+                const chunk = block.slice(start, start + chunkSize);
+                channel.send(encodeChunk(message.id, sequence++, chunk));
+                this.outgoing.get(message.id)!.sentBytes =
+                  offset + start + chunk.byteLength;
+                const percentage = Math.min(
+                  99,
+                  Math.floor(
+                    ((offset + start + chunk.byteLength) / file.size) * 100,
+                  ),
+                );
+                if (percentage !== reported) {
+                  reported = percentage;
+                  this.progress(message.id, percentage);
+                }
+              }
+            })(),
+          ]);
+        }
+        check();
+        if (destination) await destination.close();
+        else if (!external)
+          await this.write(async () => {
+            check();
+            await this.storage.saveAttachment(
+              message.id,
+              file instanceof Blob
+                ? file
+                : new Blob(cached, { type: file.type }),
+            );
+          });
+        check();
+      } catch (error) {
+        // Wake the network window waiter if disk writing failed, and keep
+        // incomplete local copies out of history and attachment exports.
+        await this.failOutgoing(message.id, errorMessage(error));
+        await destination?.abort().catch(() => undefined);
+        throw error;
+      }
+      await this.waitForBuffer(channel);
+      if (!this.outgoing.has(message.id)) return false;
+      this.outgoing.get(message.id)!.finished = true;
+      this.sendControl(channel, { type: "file-end", id: message.id });
+      await this.recordMessage({ ...message, status: "sent" });
+      if (this.outgoing.has(message.id)) this.progress(message.id, 100);
+      this.armAck(message.id);
+      return (
+        this.outgoing.has(message.id) ||
+        this.knownMessages.get(message.id)?.status === "delivered"
+      );
+    } catch (error) {
+      await this.failOutgoing(message.id, errorMessage(error));
       if (
+        this.deletedMessages.has(message.id) ||
         this.historyRevision !== historyRevision ||
         (this.peerHistoryRevisions.get(peerId) || 0) !== peerRevision
       )
         return false;
-      const message: Message = {
-        id: newId(),
-        peerId,
-        senderId: this.snapshot.profile.id,
-        kind: streaming
-          ? "file"
-          : kind || (imageTypes.test(file.type) ? "image" : "file"),
-        fileName: file.name.slice(0, 255) || "未命名文件",
-        mimeType: file.type.slice(0, 128) || "application/octet-stream",
-        size: file.size,
-        createdAt: Date.now(),
-        status: "awaiting-acceptance",
-        ...(external
-          ? { attachmentStorage: "external" as const }
-          : this.storage.createFileDestination
-            ? { attachmentStorage: "managed" as const }
-            : {}),
-      };
-      this.outgoing.set(message.id, { peerId, message });
-      this.progress(message.id, 0);
-      try {
-        await this.recordMessage(message);
-        if (!this.outgoing.has(message.id)) return false;
-        this.progress(message.id, 0);
-        const { link, channel } = await this.readyChannel(peerId);
-        const send = link.sending.then(async () => {
-          if (!this.outgoing.has(message.id)) return false;
-          this.sendControl(channel, {
-            type: "file-start",
-            id: message.id,
-            kind: message.kind as "image" | "file",
-            fileName: message.fileName!,
-            mimeType: message.mimeType!,
-            size: file.size,
-            createdAt: message.createdAt,
-          });
-          await this.waitForTransfer(
-            message.id,
-            (transfer) => !!transfer.accepted,
-            TRANSFER_CONFIG.consentTimeoutMs,
-            "对方未确认接收，请确认双方已更新并重新发送",
-          );
-          message.status = "sending";
-          await this.recordMessage(message);
-          const check = () => {
-            if (!this.outgoing.has(message.id))
-              throw new Error("文件传输已取消");
-          };
-          let destination: FileDestination | undefined;
-          // Browsers keep only small attachments in IndexedDB. Desktop copies
-          // each source block to disk while sending that same block to the peer.
-          const cached: ArrayBuffer[] = [];
-          const chunkSize = fileChunkSize(channel);
-          let sequence = 0;
-          let reported = -1;
-          try {
-            check();
-            if (this.storage.createFileDestination)
-              destination = await this.storage.createFileDestination(message);
-            check();
-            for (
-              let offset = 0;
-              offset < file.size;
-              offset += STORAGE_CONFIG.chunkBytes
-            ) {
-              check();
-              const block = await file
-                .slice(
-                  offset,
-                  Math.min(offset + STORAGE_CONFIG.chunkBytes, file.size),
-                )
-                .arrayBuffer();
-              check();
-              if (
-                block.byteLength !==
-                Math.min(STORAGE_CONFIG.chunkBytes, file.size - offset)
-              )
-                throw new Error("文件已发生变化，请重新选择文件");
-              if (!external && !destination && !(file instanceof Blob))
-                cached.push(block);
-              // Only one storage block is in flight. A slow disk or receiver
-              // applies backpressure before the next source read.
-              await Promise.all([
-                destination?.write(new Blob([block])),
-                (async () => {
-                  for (
-                    let start = 0;
-                    start < block.byteLength;
-                    start += chunkSize
-                  ) {
-                    check();
-                    await this.waitForBuffer(channel);
-                    if (streaming || this.outgoing.get(message.id)?.streaming)
-                      await this.waitForTransfer(
-                        message.id,
-                        (transfer) =>
-                          offset + start <
-                          (transfer.receivedBytes || 0) +
-                            TRANSFER_CONFIG.streamWindowBytes,
-                        TRANSFER_CONFIG.timeoutMs,
-                        "文件传输超时",
-                      );
-                    check();
-                    const chunk = block.slice(start, start + chunkSize);
-                    channel.send(encodeChunk(message.id, sequence++, chunk));
-                    this.outgoing.get(message.id)!.sentBytes =
-                      offset + start + chunk.byteLength;
-                    const percentage = Math.min(
-                      99,
-                      Math.floor(
-                        ((offset + start + chunk.byteLength) / file.size) * 100,
-                      ),
-                    );
-                    if (percentage !== reported) {
-                      reported = percentage;
-                      this.progress(message.id, percentage);
-                    }
-                  }
-                })(),
-              ]);
-            }
-            check();
-            if (destination) await destination.close();
-            else if (!external)
-              await this.write(async () => {
-                check();
-                await this.storage.saveAttachment(
-                  message.id,
-                  file instanceof Blob
-                    ? file
-                    : new Blob(cached, { type: file.type }),
-                );
-              });
-            check();
-          } catch (error) {
-            // Wake the network window waiter if disk writing failed, and keep
-            // incomplete local copies out of history and attachment exports.
-            await this.failOutgoing(message.id, errorMessage(error));
-            await destination?.abort().catch(() => undefined);
-            throw error;
-          }
-          await this.waitForBuffer(channel);
-          if (!this.outgoing.has(message.id)) return false;
-          this.outgoing.get(message.id)!.finished = true;
-          this.sendControl(channel, { type: "file-end", id: message.id });
-          await this.recordMessage({ ...message, status: "sent" });
-          if (this.outgoing.has(message.id)) this.progress(message.id, 100);
-          this.armAck(message.id);
-          return (
-            this.outgoing.has(message.id) ||
-            this.knownMessages.get(message.id)?.status === "delivered"
-          );
-        });
-        link.sending = send.then(
-          () => undefined,
-          () => undefined,
-        );
-        if (!(await send)) return false;
-      } catch (error) {
-        await this.failOutgoing(message.id, errorMessage(error));
-        if (this.deletedMessages.has(message.id)) return false;
-        this.showError(error);
-        throw error;
-      }
+      this.showError(error);
+      throw error;
     }
-    return true;
   }
 
   private async alreadyReceived(id: string, peerId: string): Promise<boolean> {
@@ -1964,6 +2353,8 @@ export class ChatEngine {
         });
         return;
       }
+      // Count validated file activity without decoding/copying every chunk twice.
+      this.receivedFromPeer(link);
       if (transfer.folder) {
         try {
           if (!transfer.destination)
@@ -2014,6 +2405,7 @@ export class ChatEngine {
     if (typeof raw !== "string") return;
     const packet = parseControlPacket(raw);
     if (!packet) return;
+    if (packet.type === "peer-ping" || packet.type === "peer-pong") return;
     if (this.deletedMessages.has(packet.id)) return;
     if (
       packet.type === "folder-supported" ||
@@ -2056,6 +2448,10 @@ export class ChatEngine {
       const outgoing = this.outgoing.get(packet.id);
       if (!outgoing || outgoing.peerId !== link.peerId) return;
       if (outgoing.message.kind !== "text" && !outgoing.finished) return;
+      runtimeLog("info", "message", "对方已确认收到", {
+        peerId: link.peerId,
+        detail: packet.id,
+      });
       clearTimeout(outgoing.timer);
       try {
         await this.recordMessage({ ...outgoing.message, status: "delivered" });

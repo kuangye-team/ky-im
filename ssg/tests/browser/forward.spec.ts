@@ -115,7 +115,7 @@ test("历史文字、图片和文件可转发给第三人，保留原会话且�
     await expect(page.locator(".chat-heading h2")).toHaveText(sourceName);
     await expect(page.getByRole("log")).toContainText(ownText);
 
-    // Cancellation and offline destinations do not send anything.
+    // Offline destinations remain selectable; cancellation does not send anything.
     await page
       .locator(".message-row")
       .filter({ hasText: ownText })
@@ -124,7 +124,10 @@ test("历史文字、图片和文件可转发给第三人，保留原会话且�
     const dialog = page.getByRole("dialog", { name: "转发消息", exact: true });
     await expect(
       dialog.getByRole("button", { name: `选择 ${sourceName}`, exact: true }),
-    ).toBeDisabled();
+    ).toBeEnabled();
+    await dialog.getByRole("button", { name: `选择 ${sourceName}`, exact: true }).click();
+    await expect(dialog.locator(".forward-hint")).toContainText("对方不在线，可能接收不到消息");
+    await expect(dialog.getByRole("button", { name: "确认转发", exact: true })).toBeEnabled();
     await dialog
       .getByRole("button", { name: `选择 ${targetName}`, exact: true })
       .click();

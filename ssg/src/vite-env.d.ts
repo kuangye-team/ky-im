@@ -16,6 +16,8 @@ declare module "virtual:app-icons" {
 
 /** 构建时写入前端资源的公开配置。 */
 interface ImportMetaEnv {
+  /** List liveness interval in milliseconds, default 10000; range 1000–300000. */
+  readonly VITE_PEER_CHECK_INTERVAL_MS?: string;
   /** Public Web app URL, also used as the desktop invitation fallback. */
   readonly VITE_WEB_URL?: string;
   /** Public download page, used by download and manual update links. */
@@ -28,6 +30,7 @@ interface ImportMetaEnv {
   readonly VITE_SIGNAL_URL?: string;
   /** 默认服务器访问密钥，与 VITE_SIGNAL_URL 配套，空地址时用于同源服务器。 */
   readonly VITE_API_AUTH?: string;
+  readonly VITE_API_LATEST?: string;
   /** 本地文件读取与存储分块大小，单位字节，默认 2 MiB。 */
   readonly VITE_STORAGE_CHUNK_SIZE?: string;
 }

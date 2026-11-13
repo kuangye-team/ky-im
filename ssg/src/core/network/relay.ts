@@ -1,3 +1,4 @@
+import { runtimeLog } from "../../runtime-logs";
 import { CONNECTION_CONFIG, MAX_CONTROL_BYTES } from "../../config";
 import { CHUNK_SIZE, HEADER_SIZE, newId } from "../protocol";
 import type {
@@ -298,6 +299,7 @@ class RelayFallback implements TransportConnection {
       return;
     }
     this.clearProbe();
+    runtimeLog("info", "connection", "正在尝试通过服务器转送", { peerId: this.options.peerId });
     this.relay = new RelayChannel(route, this.options.peerId);
     this.direct.close();
     this.options.onChannel(this.relay);

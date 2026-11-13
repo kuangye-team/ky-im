@@ -1,6 +1,20 @@
 .system-settings {
   margin: 0 auto;
 }
+.settings-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.settings-page-header .page-heading {
+  flex: 1;
+  min-width: 0;
+}
+.settings-log-button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .settings-sections {
   display: grid;
   gap: 22px;

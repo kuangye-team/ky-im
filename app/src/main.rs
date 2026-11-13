@@ -188,6 +188,20 @@ fn main() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
+            #[cfg(windows)]
+            if let Some(window) = app.get_webview_window("main")
+                && let Some(color) = app
+                    .config()
+                    .app
+                    .windows
+                    .iter()
+                    .find(|config| config.label == "main")
+                    .and_then(|config| config.background_color)
+                && let Err(error) = hummingbird::window_theme::set_title_bar_color(window, color)
+            {
+                // Older Windows versions may not support custom caption colors.
+                eprintln!("{error}");
+            }
             #[cfg(all(debug_assertions, windows))]
             app.deep_link().register_all()?;
             let handle = app.handle().clone();
@@ -210,6 +224,10 @@ fn main() {
         .manage(NetworkState::default())
         .manage(StorageState::default())
         .invoke_handler(tauri::generate_handler![
+            hummingbird::window_theme::set_title_bar_color,
+            hummingbird::updates::prepare_update_download,
+            hummingbird::updates::download_update,
+            hummingbird::updates::install_update,
             lan_start,
             lan_stop,
             lan_profile,

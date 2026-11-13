@@ -6,22 +6,27 @@ import { THEME_CONFIG } from "./src/theme-config";
 import { minify } from "html-minifier-terser";
 import { VitePWA } from "vite-plugin-pwa";
 import { appIcons, brandSvg } from "./build/app-icons";
+import { cloudflareEnv } from "./build/cloudflare-env";
 
 export default defineConfig(({ mode }) => {
-  // 始终读取 ssg/.env*；进程变量优先。空前缀仅供构建配置读取，
-  // 浏览器端仍只会获得 Vite 默认公开的 VITE_* 变量。
+  // Cloudflare 构建从 Wrangler vars 读取，其余构建使用 ssg/.env*。
   const desktop = mode === "desktop";
+  const cloudflare = mode === "cloudflare";
   const root = fileURLToPath(new URL(".", import.meta.url));
-  const env = loadEnv(mode, root, "");
+  const env: Record<string, string> = cloudflare ? {} : loadEnv(mode, root, "");
+  const cloudflareConfig = cloudflare ? cloudflareEnv(root) : {};
   const port = desktop ? 1420 : Number(env.WEB_PORT || 5173);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("WEB_PORT 必须是 1–65535 之间的整数");
 
   return {
     root,
-    define: { "import.meta.env.VITE_DESKTOP": JSON.stringify(desktop) },
+    ...cloudflareConfig,
+    cacheDir: fileURLToPath(new URL(`../temp/cache/vite/${mode}`, import.meta.url)),
+    define: { ...cloudflareConfig.define, "import.meta.env.VITE_DESKTOP": JSON.stringify(desktop) },
     plugins: [
-      react(),
+      // Cached dependencies now live outside node_modules; skip React transforms for them.
+      react({ exclude: [/\/node_modules\//, /\/temp\/cache\//] }),
       appIcons(),
       VitePWA({
         disable: desktop,

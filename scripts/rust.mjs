@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { constants } from "node:os";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 // rust-cache persists Cargo artifacts in Actions; sccache adds a local compiler
 // cache without making it a prerequisite for development.
@@ -20,6 +20,7 @@ export function rustCacheEnv(source = process.env) {
   });
   if (probe.status === 0) {
     env.RUSTC_WRAPPER = "sccache";
+    env.SCCACHE_DIR ??= fileURLToPath(new URL("../temp/cache/sccache", import.meta.url));
     // Keep fast local edit/rebuild cycles: dependencies are cached, while Cargo
     // still handles incremental workspace crates in development profiles.
     env.SCCACHE_ALLOW_INCREMENTAL ??= "1";

@@ -52,6 +52,7 @@ import {
   Radio,
   RefreshCw,
   Search,
+  ScrollText,
   Settings,
   Send,
   ShieldCheck,
@@ -65,6 +66,7 @@ import {
   X,
 } from "lucide-react";
 import { MAX_FILE_SIZE, type ChatEngine } from "./core";
+import { isPeerOnline } from "./core/types";
 import type { Profile, Message, ChatSnapshot } from "./core/types";
 import { Modal } from "./components/Modal";
 import { RemarkEditor } from "./components/RemarkEditor";
@@ -74,6 +76,7 @@ import { ContactCopyButton } from "./components/ContactCopyButton";
 import { copyText } from "./components/copyText";
 import { siteInfo } from "./site-info";
 import { HistoryPage } from "./components/HistoryPage";
+import { RuntimeLogs } from "./components/RuntimeLogs";
 import { SystemSettings } from "./components/SystemSettings";
 import { StoragePage } from "./components/StoragePage";
 import { ForwardMessageModal } from "./components/ForwardMessageModal";
@@ -97,6 +100,8 @@ import {
 } from "./components/fileDownloads";
 import { LegalLinks, LicensesPage, PrivacyPage } from "./components/Legal";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { DesktopUpdateDialog } from "./components/DesktopUpdateDialog";
+import { isDesktop } from "./core/network/settings";
 import { getChatDrafts, setChatDraft, subscribeChatDrafts } from "./drafts";
 
 type View =
@@ -265,9 +270,10 @@ export function App({ engine }: { engine: ChatEngine }) {
     setConnectionPeer(peer);
     setModal("invite");
   };
+  const onlinePeers = snap.peers.filter((peer) => isPeerOnline(snap, peer.id));
   const peers =
     listTab === "online"
-      ? snap.peers
+      ? onlinePeers
       : [
           ...snap.conversations.map(
             (c) => snap.peers.find((p) => p.id === c.peer.id) || c.peer,
@@ -315,6 +321,7 @@ export function App({ engine }: { engine: ChatEngine }) {
         </div>
       </header>
       <UpdateBanner engine={engine} />
+      {isDesktop() && <DesktopUpdateDialog />}
       <div className="app-layout">
         <aside className="sidebar">
           <button
@@ -363,7 +370,7 @@ export function App({ engine }: { engine: ChatEngine }) {
             >
               <Users size={20} />
               <span>{t("在线设备")}</span>
-              <small>{snap.peers.length}</small>
+              <small>{onlinePeers.length}</small>
               <i />
             </button>
             <button
@@ -463,7 +470,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                   >
                     <Users size={14} aria-hidden="true" />
                     {t("在线")}
-                    <span>{snap.peers.length}</span>
+                    <span>{onlinePeers.length}</span>
                   </button>
                 </div>
                 <div className="peer-list">
@@ -471,7 +478,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                     const conversation = snap.conversations.find(
                       (c) => c.peer.id === peer.id,
                     );
-                    const online = snap.peers.some((p) => p.id === peer.id);
+                    const online = isPeerOnline(snap, peer.id);
                     return (
                       <button
                         key={peer.id}
@@ -490,14 +497,11 @@ export function App({ engine }: { engine: ChatEngine }) {
                             <time>
                               {conversation
                                 ? time(conversation.updatedAt)
-                                : t("在线")}
+                                : t(online ? "在线" : "离线")}
                             </time>
                           </div>
                           <p>
-                            {peer.bio ||
-                              (online
-                                ? t("在附近，打个招呼吧")
-                                : t("当前离线 · 记录已保存"))}
+                            {online ? peer.bio || t("在附近，打个招呼吧") : t("离线") }
                           </p>
                           <span>
                             <DeviceIcon device={peer.device} size={12} />
@@ -567,7 +571,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                 />
               ) : (
                 <Welcome
-                  count={snap.peers.length}
+                  count={onlinePeers.length}
                   connected={connected}
                   onInvite={() => openConnection()}
                   onNearby={() => setView("nearby")}
@@ -603,7 +607,7 @@ export function App({ engine }: { engine: ChatEngine }) {
                 <div>
                   <h1>
                     {t("在线的朋友")}
-                    <span className="count-badge">{snap.peers.length}</span>
+                    <span className="count-badge">{onlinePeers.length}</span>
                   </h1>
                   <button
                     className="primary-button"
@@ -639,15 +643,9 @@ export function App({ engine }: { engine: ChatEngine }) {
                       onClick={() => selectPeer(peer)}
                     >
                       <span
-                        className={`device-card-online ${snap.peerStates[peer.id] === "failed" ? "connection-failed" : ""}`}
+                        className={`device-card-online ${!isPeerOnline(snap, peer.id) ? "connection-failed" : ""}`}
                       >
-                        {snap.peerStates[peer.id] === "connected"
-                          ? t("已连接")
-                          : snap.peerStates[peer.id] === "failed"
-                            ? t("连接未成功")
-                            : snap.peerStates[peer.id] === "connecting"
-                              ? t("连接中")
-                              : t("在线")}
+                        {t(isPeerOnline(snap, peer.id) ? "在线" : "离线")}
                       </span>
                       <Avatar peer={peer} size="avatar-xl" />
                       <h2 title={peer.name}>{peerName(peer, snap)}</h2>
@@ -1039,7 +1037,7 @@ function ContactDetails({
         <Avatar
           peer={peer}
           size="avatar-xl"
-          online={snap.peers.some((p) => p.id === peer.id)}
+          online={isPeerOnline(snap, peer.id)}
         />
         <h2>{peerName(peer, snap)}</h2>
         {remark && (
@@ -1250,6 +1248,7 @@ function ChatPanel({
   const draft = drafts[peer.id] || "";
   const setDraft = (text: string) => setChatDraft(peer.id, text);
   const [emoji, setEmoji] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
   const [search, setSearch] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [preparing, setPreparing] = useState<FolderProgress | null>(null);
@@ -1260,7 +1259,8 @@ function ChatPanel({
   const imageRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const previousMessages = useRef({ peerId: peer.id, count: 0 });
-  const online = snap.peers.some((p) => p.id === peer.id);
+  const online = isPeerOnline(snap, peer.id);
+  const canSend = snap.availability === "online";
   useEffect(() => {
     setPreparing(null);
     return () => {
@@ -1290,7 +1290,7 @@ function ChatPanel({
     setEmoji(false);
   }, [peer.id]);
   const send = async () => {
-    if (!draft.trim() || !online) return;
+    if (!draft.trim() || !canSend) return;
     const content = draft;
     setDraft("");
     try {
@@ -1302,8 +1302,8 @@ function ChatPanel({
     textRef.current?.focus();
   };
   const sendFiles = (files: File[]) => {
-    if (!online) {
-      onNotice("对方当前离线，重新上线后即可发送");
+    if (!canSend) {
+      onNotice("你已离线，请先上线再发送");
       return;
     }
     void engine
@@ -1313,8 +1313,8 @@ function ChatPanel({
       );
   };
   const sendFolder = async (read: ReadFolder) => {
-    if (!online) {
-      onNotice("对方当前离线，重新上线后即可发送");
+    if (!canSend) {
+      onNotice("你已离线，请先上线再发送");
       return false;
     }
     if (preparation.current) {
@@ -1427,15 +1427,18 @@ function ChatPanel({
         <div>
           <h2 title={peer.name}>{peerName(peer, snap)}</h2>
           <span>
-            <span className={`status-dot ${online ? "" : "offline"}`} />
+            <span className={`status-dot ${online && snap.peerStates[peer.id] === "connected" ? "" : "offline"}`} />
             {online
               ? snap.peerStates[peer.id] === "connected"
                 ? t("在线 · 可以聊天了")
-                : t("在线 · 正在建立连接")
-              : t("离线 · 历史记录可查看")}
+                : t("正在连接…")
+              : snap.peers.some((p) => p.id === peer.id)
+                ? t("离线 · 正在尝试重新连接")
+                : t("离线 · 仍可尝试发送")}
           </span>
         </div>
         <div className="chat-heading-actions">
+          <button className="icon-button" aria-label={t("查看连接日志")} title={t("查看连接日志")} onClick={() => setShowLogs(true)}><ScrollText size={19} /></button>
           <button
             className={`icon-button ${search !== null ? "tinted" : ""}`}
             aria-label={t("搜索聊天记录")}
@@ -1452,6 +1455,7 @@ function ChatPanel({
           </button>
         </div>
       </div>
+      {showLogs && <RuntimeLogs key={peer.id} peer={peer} onClose={() => setShowLogs(false)} />}
       {search !== null && (
         <div className="message-search search-field">
           <Search size={16} />
@@ -1520,13 +1524,18 @@ function ChatPanel({
         <div ref={endRef} />
       </div>
       <div className="composer">
+        {!online && (
+          <p className="composer-presence-hint" role="status">
+            {t("对方不在线，可能接收不到消息")}
+          </p>
+        )}
         <div className="composer-tools">
           <div>
             <button
               className={`icon-button ${emoji ? "tinted" : ""}`}
               aria-label={t("选择表情")}
               onClick={() => setEmoji(!emoji)}
-              disabled={!online}
+              disabled={!canSend}
             >
               <Smile size={20} />
             </button>
@@ -1534,7 +1543,7 @@ function ChatPanel({
               className="icon-button"
               aria-label={t("发送图片")}
               onClick={() => imageRef.current?.click()}
-              disabled={!online}
+              disabled={!canSend}
             >
               <ImageIcon size={20} />
             </button>
@@ -1542,7 +1551,7 @@ function ChatPanel({
               className="icon-button"
               aria-label={t("发送文件")}
               onClick={() => fileRef.current?.click()}
-              disabled={!online}
+              disabled={!canSend}
             >
               <Paperclip size={20} />
             </button>
@@ -1559,7 +1568,7 @@ function ChatPanel({
                 },
               )}
               onClick={chooseFolder}
-              disabled={!online || !!preparing}
+              disabled={!canSend || !!preparing}
             >
               <FolderOpen size={20} />
             </button>
@@ -1670,10 +1679,10 @@ function ChatPanel({
           placeholder={
             online
               ? t("分享点什么，让对话发生…")
-              : t("对方暂时离线，等 TA 回来再聊吧")
+              : t("对方不在线，可能接收不到消息")
           }
           value={draft}
-          disabled={!online}
+          disabled={!canSend}
           maxLength={COMPOSER_MAX_LENGTH}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -1699,7 +1708,7 @@ function ChatPanel({
           <button
             className="send-button"
             aria-label={t("发送消息")}
-            disabled={!draft.trim() || !online}
+            disabled={!draft.trim() || !canSend}
             onClick={() => void send()}
           >
             {t("发送")}

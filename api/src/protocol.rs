@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-#[path = "../../shared/client_type.rs"]
+#[path = "../shared/client_type.rs"]
 mod client_type;
 pub use client_type::ClientType;
 
@@ -69,7 +69,7 @@ pub fn valid_numeric_id(value: &str) -> bool {
     value.len() == 6 && value.bytes().all(|b| b.is_ascii_digit()) && !value.starts_with('0')
 }
 
-#[path = "../../shared/network_signal.rs"]
+#[path = "../shared/network_signal.rs"]
 mod network_signal;
 pub use network_signal::valid_signal;
 

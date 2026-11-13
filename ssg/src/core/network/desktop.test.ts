@@ -206,6 +206,12 @@ describe("mDNS + TCP engine integration", () => {
     const { a, b, hub, peers } = await pair();
     await a.selectPeer(peers[1]);
     await b.selectPeer(peers[0]);
+    await vi.waitFor(() => {
+      expect(a.getSnapshot().peerStates[peers[1].id]).toBe("connected");
+      expect(b.getSnapshot().peerStates[peers[0].id]).toBe("connected");
+      expect(hub.calls.filter((call) => call.command === "tcp_consumed").length).toBeGreaterThanOrEqual(4);
+    });
+    hub.calls.length = 0; // Initial ping/pong frames return credit without touching storage.
     let release!: () => void;
     const saved = b.storage.saveMessage.bind(b.storage);
     const saving = vi

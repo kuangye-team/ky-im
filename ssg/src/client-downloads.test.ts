@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { clientManifestRequestUrl, detectDesktopPlatform, parseClientRelease } from "./client-downloads";
 
-afterEach(() => { vi.unstubAllGlobals(); vi.resetModules(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.resetModules(); });
 
 it.each([
   [{ userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", platform: "Win32" }, "windows"],
@@ -33,11 +33,23 @@ it("offers installable files instead of the macOS updater archive", () => {
     .toBe("https://cdn.example.com/mac.dmg");
 });
 
-it("loads /api/latest in combined and split deployments without passing an upstream URL", () => {
-  expect(clientManifestRequestUrl("")).toBe("/api/latest");
-  expect(clientManifestRequestUrl("wss://api.example/api/ws")).toBe("https://api.example/api/latest");
-  expect(clientManifestRequestUrl("ws://localhost:8080/api/ws")).toBe("http://localhost:8080/api/latest");
+it.each([undefined, "", "  "])("defaults to same-origin /api/latest when unset: %j", (value) => {
+  vi.stubEnv("VITE_API_LATEST", value);
+  vi.stubEnv("VITE_SIGNAL_URL", "wss://signal.example/api/ws");
+  expect(clientManifestRequestUrl()).toBe("/api/latest");
 });
+
+it.each(["https://cdn.example.com/releases/latest.json?channel=stable", "/releases/latest.json"])(
+  "loads the configured manifest independently of signaling: %s", async (url) => {
+    vi.stubEnv("VITE_API_LATEST", `  ${url}  `);
+    vi.stubEnv("VITE_SIGNAL_URL", "invalid signaling URL");
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => manifest });
+    vi.stubGlobal("fetch", fetchMock);
+    const { loadClientRelease } = await import("./client-downloads");
+    await expect(loadClientRelease()).resolves.toMatchObject({ version: "1.2.3" });
+    expect(fetchMock).toHaveBeenCalledWith(url, expect.objectContaining({ credentials: "omit", cache: "no-store" }));
+  },
+);
 
 it.each([null, {}, { version: "1.2.3", platforms: { "windows-x86_64": { url: "javascript:alert(1)" } } },
   { version: "1.2.3", downloads: { macos: "https://user:password@example.com/app.dmg" } },

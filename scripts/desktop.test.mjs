@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { parseEnv } from "node:util";
-import { desktopEnv, root as projectRoot, updaterConfig } from "./desktop-config.mjs";
+import { desktopEnv, root as projectRoot, signPathEnabled, updaterConfig } from "./desktop-config.mjs";
 import { initEnv } from "./init-env.mjs";
 import {
   collectArtifacts,
@@ -56,6 +56,8 @@ test("central configuration covers template variables and generates desktop env 
     config.desktop.app.APPLE_SIGNING_IDENTITY = "Developer ID Application: Test (TEAMID)";
     config.desktop.ssg.VITE_SIGNAL_URL = "wss://desktop.example.com/api/ws";
     config.desktop.ssg.VITE_API_AUTH = "desktop-test-key";
+    for (const mode of ["local", "production", "compose", "desktop"])
+      config[mode].ssg.VITE_API_LATEST = `https://cdn.example.com/${mode}/latest.json`;
     writeFileSync(join(directory, ".env.json"), JSON.stringify(config));
     const outputs = initEnv(directory);
     assert.ok(outputs.includes("app/.env"));
@@ -68,12 +70,15 @@ test("central configuration covers template variables and generates desktop env 
     const frontend = parseEnv(readFileSync(join(directory, "ssg/.env.desktop"), "utf8"));
     assert.equal(frontend.VITE_SIGNAL_URL, config.desktop.ssg.VITE_SIGNAL_URL);
     assert.equal(frontend.VITE_API_AUTH, config.desktop.ssg.VITE_API_AUTH);
+    assert.equal(frontend.VITE_API_LATEST, config.desktop.ssg.VITE_API_LATEST);
     for (const mode of ["local", "production", "compose"]) {
       const generated = parseEnv(readFileSync(join(directory, `ssg/.env.${mode}`), "utf8"));
       assert.equal(generated.VITE_API_AUTH, config[mode].ssg.VITE_API_AUTH);
+      assert.equal(generated.VITE_API_LATEST, config[mode].ssg.VITE_API_LATEST);
     }
     const compose = parseEnv(readFileSync(join(directory, ".env"), "utf8"));
     assert.equal(compose.VITE_API_AUTH, config.compose.ssg.VITE_API_AUTH);
+    assert.equal(compose.VITE_API_LATEST, config.compose.ssg.VITE_API_LATEST);
     assert.equal(frontend.WEB_PORT, undefined);
     assert.equal(frontend.API_HOST, "http://127.0.0.1:8080");
     assert.equal(frontend.VITE_STORAGE_CHUNK_SIZE, "2097152");
@@ -209,4 +214,56 @@ test("publishes the macOS DMG directly, preserves signed update bytes and assemb
     writeFileSync(join(directory, `${exe}.sig`), "invalid");
     assert.throws(() => writeManifest(directory, "1.2.3", env), /Invalid updater signature/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("SignPath is optional and enabled releases require complete configuration", () => {
+  assert.equal(signPathEnabled({}), false);
+  assert.equal(signPathEnabled({ SIGNPATH_ENABLED: "false" }), false);
+  assert.throws(() => signPathEnabled({ SIGNPATH_ENABLED: "yes" }), /true or false/);
+  const env = { SIGNPATH_ENABLED: "true", SIGNPATH_API_TOKEN: "token",
+    SIGNPATH_ORGANIZATION_ID: "organization", SIGNPATH_PROJECT_SLUG: "project",
+    SIGNPATH_SIGNING_POLICY_SLUG: "release-signing" };
+  assert.equal(signPathEnabled(env), true);
+  for (const key of Object.keys(env).filter((key) => key !== "SIGNPATH_ENABLED"))
+    assert.throws(() => signPathEnabled({ ...env, [key]: " " }), new RegExp(key));
+});
+
+test("SignPath finalization signs the returned bytes and refreshes checksums and manifest", async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { createPublicKey, verify } = await import("node:crypto");
+  const { finalizeWindowsSigning } = await import("./finalize-windows-signing.mjs");
+  const artifacts = join(projectRoot, "temp/artifacts/windows-signing");
+  mkdirSync(artifacts, { recursive: true });
+  const directory = mkdtempSync(join(artifacts, "test-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const signed = join(directory, "signed");
+  const output = join(directory, "dist");
+  mkdirSync(signed);
+  mkdirSync(output);
+  const name = "ky-im-1.2.3-windows-x64-setup.exe";
+  const env = { ...process.env, TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "", TAURI_RELEASE_BASE_URL: "https://downloads.example.com/v1.2.3" };
+  assert.throws(() => finalizeWindowsSigning(signed, output, "1.2.3", env), /Missing or empty/);
+  writeFileSync(join(signed, name), "installer bytes returned by SignPath");
+  writeFileSync(join(signed, `${name}.sig`), "stale signature");
+  writeFileSync(join(output, name), "unsigned installer");
+  assert.throws(() => finalizeWindowsSigning(signed, output, "1.2.3", { ...env, TAURI_SIGNING_PRIVATE_KEY: "" }), /PRIVATE_KEY/);
+  assert.equal(readFileSync(join(output, name), "utf8"), "unsigned installer");
+  const key = join(directory, "test.key");
+  const generated = spawnSync(process.execPath, [join(projectRoot, "node_modules/@tauri-apps/cli/tauri.js"),
+    "signer", "generate", "--ci", "--password", "", "--write-keys", key], { env, encoding: "utf8" });
+  assert.equal(generated.status, 0, "Tauri test key generation failed");
+  // Exercise the same key-file and inline-secret forms supported by release builds.
+  for (const privateKey of [key, readFileSync(key, "utf8")]) {
+    finalizeWindowsSigning(signed, output, "v1.2.3", { ...env, TAURI_SIGNING_PRIVATE_KEY: privateKey });
+    const bytes = readFileSync(join(output, name));
+    assert.deepEqual(bytes, readFileSync(join(signed, name)));
+    verifyChecksums(output, [name, `${name}.sig`]);
+    const sig = readFileSync(join(output, `${name}.sig`), "utf8").trim();
+    assert.equal(JSON.parse(readFileSync(join(output, "latest.json"), "utf8")).platforms["windows-x86_64"].signature, sig);
+    const signatureBytes = Buffer.from(Buffer.from(sig, "base64").toString("utf8").split("\n")[1], "base64");
+    const publicBytes = Buffer.from(Buffer.from(readFileSync(`${key}.pub`, "utf8"), "base64").toString("utf8").split("\n")[1], "base64");
+    const publicKey = createPublicKey({ key: Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), publicBytes.subarray(10)]), format: "der", type: "spki" });
+    assert.equal(verify(null, createHash("blake2b512").update(bytes).digest(), publicKey, signatureBytes.subarray(10)), true);
+    assert.equal(verify(null, createHash("blake2b512").update("unsigned installer").digest(), publicKey, signatureBytes.subarray(10)), false);
+  }
 });

@@ -44,7 +44,7 @@ async function instrument(page: Page) {
   });
 }
 
-test("发现保持空闲，任一方可按需发起，双方同时打开也能收发", async ({
+test("列表在首次检查前保持在线，任一方可立即发起，双方同时打开也能收发", async ({
   browser,
   baseURL,
 }) => {

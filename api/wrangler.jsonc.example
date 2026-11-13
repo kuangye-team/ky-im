@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ky-im-api",
   "main": "build/index.js",
-  "build": { "command": "npm run build:worker", "watch_dir": "src" },
+  "build": { "command": "npm run build:worker", "watch_dir": ["src", "shared"] },
   "compatibility_date": "2026-10-24",
   "dev": { "port": 8080 },
   "durable_objects": {

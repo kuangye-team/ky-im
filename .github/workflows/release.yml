@@ -20,6 +20,9 @@ concurrency:
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  # Set the repository variable to true to promote a release after publishing.
+  RELEASE_AUTO_LATEST: ${{ vars.RELEASE_AUTO_LATEST || 'false' }}
+  SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED || 'false' }}
 
 jobs:
   frontend:
@@ -36,11 +39,19 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             ssg/package-lock.json
+      - name: Validate optional SignPath configuration
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: node --input-type=module -e "import { signPathEnabled } from './scripts/desktop-config.mjs'; signPathEnabled(process.env)"
       - name: Build frontend with license notices
         env:
           VITE_ROOM: local
           VITE_SIGNAL_URL: ''
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+          VITE_API_LATEST: ${{ secrets.VITE_API_LATEST || vars.VITE_API_LATEST || '/api/latest' }}
           VITE_CLIENT_DOWNLOAD_URL: ${{ vars.VITE_CLIENT_DOWNLOAD_URL }}
         run: |
           npm ci --ignore-scripts
@@ -105,7 +116,7 @@ jobs:
       - name: Restore native Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: api -> target
+          workspaces: api -> ../temp/cache/cargo
           key: native-${{ matrix.target }}
           cache-on-failure: true
       - name: Install musl linker
@@ -118,7 +129,7 @@ jobs:
         run: |
           cargo +1.91.0 build --manifest-path api/Cargo.toml --release --locked --bin server --target '${{ matrix.target }}'
           mkdir -p release/bin
-          cp 'api/target/${{ matrix.target }}/release/${{ matrix.source }}' 'release/bin/${{ matrix.filename }}'
+          cp 'temp/cache/cargo/${{ matrix.target }}/release/${{ matrix.source }}' 'release/bin/${{ matrix.filename }}'
       - uses: actions/download-artifact@v8
         if: matrix.target != 'aarch64-apple-darwin'
         with:
@@ -139,6 +150,9 @@ jobs:
 
   desktop:
     needs: frontend
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -170,13 +184,13 @@ jobs:
       - name: Restore desktop test cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app -> target
+          workspaces: app -> ../temp/cache/cargo
           shared-key: desktop-check
           save-if: false
       # Keep a separate key so a test-cache hit does not skip saving release output.
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app -> target
+          workspaces: app -> ../temp/cache/cargo
           key: ${{ matrix.target }}
           cache-on-failure: true
       - run: npm ci --ignore-scripts
@@ -210,6 +224,7 @@ jobs:
           VITE_API_AUTH: ${{ secrets.VITE_API_AUTH || vars.VITE_API_AUTH }}
           VITE_ROOM: ${{ secrets.VITE_ROOM || vars.VITE_ROOM || 'local' }}
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+          VITE_API_LATEST: ${{ secrets.VITE_API_LATEST || vars.VITE_API_LATEST || '/api/latest' }}
           VITE_CLIENT_DOWNLOAD_URL: ${{ vars.VITE_CLIENT_DOWNLOAD_URL }}
           VITE_STORAGE_CHUNK_SIZE: ${{ secrets.VITE_STORAGE_CHUNK_SIZE || vars.VITE_STORAGE_CHUNK_SIZE || '2097152' }}
           RELEASE_VERSION: ${{ env.RELEASE_TAG }}
@@ -221,10 +236,49 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      - name: Upload Windows installer for SignPath
+        if: runner.os == 'Windows' && env.SIGNPATH_ENABLED == 'true'
+        id: signpath-unsigned
+        uses: actions/upload-artifact@v7
+        with:
+          name: signpath-unsigned-windows
+          path: app/dist/*-windows-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 1
+      - name: Sign Windows installer with SignPath
+        if: runner.os == 'Windows' && env.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          github-artifact-id: ${{ steps.signpath-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: temp/artifacts/signpath-signed
+      - name: Verify Windows signature and regenerate updater signature
+        if: runner.os == 'Windows' && env.SIGNPATH_ENABLED == 'true'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          $installer = "temp/artifacts/signpath-signed/ky-im-$version-windows-x64-setup.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne 'Valid') {
+            throw "SignPath installer signature is not valid: $($signature.Status)"
+          }
+          node scripts/finalize-windows-signing.mjs temp/artifacts/signpath-signed
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
-          path: app/dist/
+          path: |
+            app/dist/*
+            !app/dist/latest.json
           if-no-files-found: error
           retention-days: 7
 
@@ -279,5 +333,11 @@ jobs:
             gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* --clobber
           else
             gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* \
-              --verify-tag --title "ky-im ${RELEASE_TAG#v}" --generate-notes
+              --verify-tag --title "ky-im ${RELEASE_TAG#v}" --generate-notes --latest=false
           fi
+      - name: Mark release as latest
+        if: env.RELEASE_AUTO_LATEST == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$RELEASE_TAG" --prerelease=false --latest

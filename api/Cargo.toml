@@ -39,5 +39,6 @@ futures-util = "0.3"
 tokio-tungstenite = "0.29"
 
 [profile.release]
-lto = true
+lto = "thin"
+codegen-units = 16
 strip = true

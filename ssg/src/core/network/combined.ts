@@ -1,3 +1,4 @@
+import { runtimeLog } from "../../runtime-logs";
 import { SIGNALING_CONFIG } from "../../config";
 import { isNumericId, isProfile } from "../protocol";
 import type { Profile } from "../types";
@@ -115,6 +116,7 @@ class CombinedSession implements DiscoverySession {
   private lost(source: Source, session = source.session) {
     if (this.readyState === 3 || (session && source.session !== session))
       return;
+    runtimeLog("warn", "discovery", "设备查找来源已断开，准备重试", { detail: source.adapter.name });
     source.session = undefined;
     if (session) {
       session.onclose = session.onerror = null;

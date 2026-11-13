@@ -1,0 +1,3 @@
+[build]
+# Shared by native, desktop, and worker builds; process overrides still win.
+target-dir = "temp/cache/cargo"

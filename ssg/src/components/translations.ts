@@ -35,6 +35,9 @@ export const componentEnglish: Record<string, string> = {
   删除聊天记录: "Delete chat history",
   "转发失败，请重试": "Could not forward. Please try again.",
   转发消息: "Forward message",
+  "选择一位朋友，分享这条消息。": "Choose a friend to share this message with.",
+  "离线 · 可能接收不到消息": "Offline · May not receive your message",
+  "对方不在线，可能接收不到消息": "This person is offline and may not receive your message.",
   "选择一位在线的朋友，分享这条消息。":
     "Choose an online friend to share this message with.",
   文字消息: "Text message",

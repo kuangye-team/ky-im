@@ -15,6 +15,8 @@ import {
 import { siteInfo } from "../site-info";
 import { MAX_FILE_SIZE } from "../config";
 import { ContactCopyButton } from "./ContactCopyButton";
+import { download } from "./fileDownloads";
+import { Modal } from "./Modal";
 import "./Legal.css";
 
 type LicenseEntry = {
@@ -23,16 +25,44 @@ type LicenseEntry = {
   version: string;
   license: string;
   projectUrl: string;
-  licenseUrl: string;
+  text: string;
 };
 
 function ExternalLinkTo({
   href,
   children,
+  licenseText,
 }: {
   href: string;
   children: ReactNode;
+  licenseText?: string;
 }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  if (import.meta.env.VITE_DESKTOP && licenseText !== undefined) {
+    return (
+      <>
+        <a
+          href={href}
+          onClick={(event) => {
+            event.preventDefault();
+            setOpen(true);
+          }}
+        >
+          {children}
+          <ExternalLink size={13} aria-hidden="true" />
+        </a>
+        <Modal
+          open={open}
+          title={t("许可全文")}
+          onClose={() => setOpen(false)}
+          wide
+        >
+          <pre className="license-text">{licenseText}</pre>
+        </Modal>
+      </>
+    );
+  }
   return (
     <a href={href} target="_blank" rel="noopener noreferrer">
       {children}
@@ -119,12 +149,25 @@ export function LicensesPage({
   onNotice: (message: string) => void;
 }) {
   const { t } = useTranslation();
-  const [entries, setEntries] = useState<LicenseEntry[]>([]);
+  const [entries, setEntries] = useState<
+    Array<LicenseEntry & { licenseUrl: string }>
+  >([]);
+  const [noticesUrl, setNoticesUrl] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
+    const urls: string[] = [];
+    const textUrl = (text: string) => {
+      const url = URL.createObjectURL(
+        new Blob([text], { type: "text/plain;charset=utf-8" }),
+      );
+      urls.push(url);
+      return url;
+    };
+    setEntries([]);
+    setNoticesUrl("");
     setLoading(true);
     setError(false);
     fetch("/licenses/index.json", { signal: controller.signal })
@@ -143,14 +186,27 @@ export function LicensesPage({
                 entry.version,
                 entry.license,
                 entry.projectUrl,
-                entry.licenseUrl,
+                entry.text,
               ].every((value) => typeof value === "string") &&
               entry.projectUrl.startsWith("https://") &&
-              /^\/licenses\/[a-zA-Z0-9._-]+\.txt$/.test(entry.licenseUrl),
+              entry.text.trim().length > 0,
           )
         )
           throw new Error("Invalid license list");
-        if (!controller.signal.aborted) setEntries(data.entries);
+        if (controller.signal.aborted) return;
+        setEntries(
+          data.entries.map((entry: LicenseEntry) => ({
+            ...entry,
+            licenseUrl: textUrl(entry.text),
+          })),
+        );
+        setNoticesUrl(
+          textUrl(
+            data.entries.map((entry: LicenseEntry) =>
+              `${entry.name}${entry.version ? ` ${entry.version}` : ""}\n${entry.license}\n${entry.projectUrl}\n\n${entry.text}`,
+            ).join("\n\n" + "=".repeat(72) + "\n\n"),
+          ),
+        );
       })
       .catch(() => {
         if (!controller.signal.aborted) setError(true);
@@ -158,7 +214,10 @@ export function LicensesPage({
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      urls.forEach((url) => URL.revokeObjectURL(url));
+    };
   }, [attempt]);
   return (
     <article className="legal-page">
@@ -204,14 +263,26 @@ export function LicensesPage({
             <h2>{t("开源项目与许可")}</h2>
             <p>{t("查看项目来源，或保存完整的许可说明。")}</p>
           </div>
-          <a
-            className="legal-download"
-            href="/licenses/THIRD-PARTY-NOTICES.txt"
-            download
-          >
-            <Download size={16} />
-            {t("下载全部许可说明")}
-          </a>
+          {noticesUrl && (
+            <a
+              className="legal-download"
+              href={noticesUrl}
+              download="THIRD-PARTY-NOTICES.txt"
+              onClick={import.meta.env.VITE_DESKTOP ? (event) => {
+                event.preventDefault();
+                void fetch(noticesUrl)
+                  .then((response) => response.blob())
+                  .then((blob) => download(blob, "THIRD-PARTY-NOTICES.txt"))
+                  .catch((error: unknown) => {
+                    if (!(error instanceof DOMException && error.name === "AbortError"))
+                      onNotice(t("保存失败"));
+                  });
+              } : undefined}
+            >
+              <Download size={16} />
+              {t("下载全部许可说明")}
+            </a>
+          )}
         </div>
         {loading ? (
           <p className="legal-status" role="status">
@@ -238,7 +309,7 @@ export function LicensesPage({
                   <span>{entry.license}</span>
                 </div>
                 <div className="legal-links">
-                  <ExternalLinkTo href={entry.licenseUrl}>
+                  <ExternalLinkTo href={entry.licenseUrl} licenseText={entry.text}>
                     {t("许可全文")}
                   </ExternalLinkTo>
                   <ExternalLinkTo href={entry.projectUrl}>
@@ -295,6 +366,7 @@ export function PrivacyPage({
       </div>
       <section className="legal-card">
         <h2>{t("1. 保存在你设备上的内容")}</h2>
+        <p>{t("运行日志保存在本机，包含连接时间、设备标识、连接地址和收发结果，不记录聊天正文和文件内容。最多保留最近 7 天的 2000 条记录，可在运行日志中导出或清空，不会自动上传。")}</p>
         <p>
           {t(
             import.meta.env.VITE_DESKTOP

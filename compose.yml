@@ -7,8 +7,10 @@ services:
       dockerfile: Dockerfile
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
+        VITE_PEER_CHECK_INTERVAL_MS: ${VITE_PEER_CHECK_INTERVAL_MS:-10000}
         VITE_ROOM: ${VITE_ROOM:-local}
         VITE_SIGNAL_URL: ${VITE_SIGNAL_URL:-}
+        VITE_API_LATEST: ${VITE_API_LATEST:-/api/latest}
         VITE_API_AUTH: ${VITE_API_AUTH:-}
         VITE_WEB_URL: ${VITE_WEB_URL:-https://im.kuangye.team/}
         VITE_CLIENT_DOWNLOAD_URL: ${VITE_CLIENT_DOWNLOAD_URL:-https://github.com/kuangye-team/ky-im/releases/latest}

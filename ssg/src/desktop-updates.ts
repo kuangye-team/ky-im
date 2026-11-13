@@ -1,13 +1,18 @@
+import { runtimeLog } from "./runtime-logs";
 import type { Update } from "@tauri-apps/plugin-updater";
+import { downloadDesktopUpdate, type DownloadedUpdate } from "./desktop-update-download";
 
 type State = {
   available: boolean; dismissed: boolean; updating: boolean; installed: boolean; error: string;
   currentVersion: string; versionError: boolean; version: string;
   checking: boolean; checked: boolean; checkError: string;
+  phase: "idle" | "downloading" | "retrying" | "cancelling" | "installing" | "restarting";
+  progress: number | null; downloadedBytes: number; totalBytes: number | null;
 };
 let state: State = {
   available: false, dismissed: false, updating: false, installed: false, error: "",
   currentVersion: "", versionError: false, version: "", checking: false, checked: false, checkError: "",
+  phase: "idle", progress: null, downloadedBytes: 0, totalBytes: null,
 };
 export const desktopUpdaterEnabled = import.meta.env.VITE_DESKTOP_UPDATER_ENABLED === "true";
 const listeners = new Set<() => void>();
@@ -24,7 +29,8 @@ function patch(values: Partial<State>) {
 let started = false;
 let lastCheck = 0;
 let pending: Update | null = null;
-let downloaded = false;
+let downloaded: DownloadedUpdate | null = null;
+let activeDownload: AbortController | null = null;
 let versionRequest: Promise<void> | null = null;
 
 export function loadDesktopVersion() {
@@ -78,11 +84,14 @@ export async function checkDesktopUpdate({ manual = false } = {}) {
     }
     const previous = pending;
     pending = update;
-    downloaded = false;
+    const previousDownload = downloaded;
+    downloaded = null;
     patch({ available: !!update, version: update?.version || "", dismissed: false, error: "" });
+    await previousDownload?.close().catch(() => {});
     await previous?.close().catch(() => {});
   } catch (error) {
     if (state.updating || state.installed) return;
+    runtimeLog("warn", "app", "检查更新失败", { detail: String(error), raw: error });
     console.error("Desktop update check failed", error);
     // Expose failures in About without interrupting sharing with a new banner.
     patch({ checkError: "暂时无法检查更新，请稍后重试。" });
@@ -109,15 +118,51 @@ export function dismissAppUpdate() {
   if (!state.updating) patch({ dismissed: true, error: "" });
 }
 
-async function downloadUpdate(update: Update) {
+function waitToRetry(delay: number, signal: AbortSignal) {
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }, delay);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
+export function cancelAppUpdate() {
+  if (!activeDownload || !["downloading", "retrying"].includes(state.phase)) return;
+  patch({ phase: "cancelling" });
+  activeDownload.abort();
+}
+
+async function downloadUpdate(update: Update, signal: AbortSignal) {
   for (let attempt = 0; ; attempt++) {
+    signal.throwIfAborted();
+    patch({ phase: "downloading", progress: null, downloadedBytes: 0, totalBytes: null });
     try {
-      await update.download();
-      return;
+      const result = await downloadDesktopUpdate(update, (event) => {
+        if (signal.aborted) return;
+        if (event.event === "Started") {
+          const length = event.data.contentLength;
+          const totalBytes = length && Number.isFinite(length) && length > 0 ? length : null;
+          patch({ totalBytes, downloadedBytes: 0, progress: totalBytes ? 0 : null });
+        } else if (event.event === "Progress") {
+          const downloadedBytes = state.downloadedBytes + event.data.chunkLength;
+          patch({ downloadedBytes, progress: state.totalBytes
+            ? Math.min(99, Math.floor(downloadedBytes / state.totalBytes * 100)) : null });
+        } else {
+          patch({ progress: 100 });
+        }
+      }, signal);
+      patch({ progress: 100 });
+      return result;
     } catch (error) {
-      // Signature, permissions and installation errors need attention, not retries.
+      signal.throwIfAborted();
+      // Signature and permission errors need attention, not retries.
       if (!isRetryableUpdateError(error) || attempt >= 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 1_000));
+      patch({ phase: "retrying" });
+      await waitToRetry((attempt + 1) * 1_000, signal);
     }
   }
 }
@@ -126,17 +171,36 @@ export async function applyAppUpdate(beforeRestart: () => string | null) {
   if (!pending || state.updating) return;
   const error = beforeRestart();
   if (error) { patch({ error }); return; }
-  patch({ updating: true, error: "" });
+  const controller = new AbortController();
+  activeDownload = controller;
+  patch({ updating: true, dismissed: false, error: "", phase: "downloading", progress: downloaded ? 100 : null });
   try {
     // Keep the download separate: a transfer may start while it is in flight.
-    if (!downloaded && !state.installed) { await downloadUpdate(pending); downloaded = true; }
+    if (!downloaded && !state.installed) downloaded = await downloadUpdate(pending, controller.signal);
+    controller.signal.throwIfAborted();
     const busy = beforeRestart();
-    if (busy) { patch({ updating: false, error: busy }); return; }
-    if (!state.installed) { await pending.install(); patch({ installed: true }); }
+    if (busy) { patch({ updating: false, phase: "idle", error: busy }); return; }
+    if (!state.installed) {
+      patch({ phase: "installing", progress: 100 });
+      await downloaded!.install();
+      patch({ installed: true });
+      await downloaded!.close().catch(() => {});
+      downloaded = null;
+    }
+    patch({ phase: "restarting", progress: 100 });
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   } catch (error) {
-    console.error("Desktop update failed", error);
-    patch({ updating: false, error: state.installed ? "更新已安装，请关闭并重新打开蜂鸟。" : "更新暂时未完成，请重试。" });
+    if (controller.signal.aborted) {
+      await downloaded?.close().catch(() => {});
+      downloaded = null;
+      patch({ updating: false, phase: "idle", progress: null, downloadedBytes: 0, totalBytes: null, error: "" });
+    } else {
+      runtimeLog("error", "app", "应用更新未完成", { detail: String(error), raw: error });
+      console.error("Desktop update failed", error);
+      patch({ updating: false, phase: "idle", error: state.installed ? "更新已安装，请关闭并重新打开蜂鸟。" : "更新暂时未完成，请重试。" });
+    }
+  } finally {
+    activeDownload = null;
   }
 }

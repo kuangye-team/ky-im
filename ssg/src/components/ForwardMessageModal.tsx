@@ -1,3 +1,4 @@
+import { isPeerOnline } from "../core/types";
 import { deviceLabel } from "../core/profile";
 import { translateError } from "../localizeError";
 import { useTranslation } from "react-i18next";
@@ -48,7 +49,7 @@ export function ForwardMessageModal({
       displayName:
         snap.conversations.find((chat) => chat.peer.id === peer.id)?.remark ||
         peer.name,
-      online: onlineIds.has(peer.id) && snap.availability === "online",
+      online: isPeerOnline(snap, peer.id) && snap.availability === "online",
     }));
   const visibleContacts = contacts.filter((peer) =>
     `${peer.displayName} ${peer.name} ${deviceLabel(peer)} ${peer.numericId || ""}`
@@ -57,7 +58,7 @@ export function ForwardMessageModal({
   );
   const selected = visibleContacts.find((peer) => peer.id === selectedId);
   const forward = async () => {
-    if (!selected?.online || sendingRef.current) return;
+    if (!selected || snap.availability !== "online" || sendingRef.current) return;
     sendingRef.current = true;
     setSending(true);
     setError("");
@@ -78,7 +79,7 @@ export function ForwardMessageModal({
       open
       onClose={() => !sendingRef.current && onClose()}
       title={t("转发消息")}
-      description={t("选择一位在线的朋友，分享这条消息。")}
+      description={t("选择一位朋友，分享这条消息。")}
     >
       <div className="forward-preview">
         <span className="forward-preview-label">
@@ -123,7 +124,7 @@ export function ForwardMessageModal({
             key={peer.id}
             aria-label={t("选择 {{name}}", { name: peer.displayName })}
             aria-pressed={selectedId === peer.id}
-            disabled={!peer.online || sending}
+            disabled={snap.availability !== "online" || sending}
             onClick={() => {
               setSelectedId(peer.id);
               setError("");
@@ -145,7 +146,7 @@ export function ForwardMessageModal({
             <span className="forward-contact-copy">
               <strong>{peer.displayName}</strong>
               <small>
-                {peer.online ? deviceLabel(peer) : t("离线 · 暂不可转发")}
+                {peer.online ? deviceLabel(peer) : t("离线 · 可能接收不到消息")}
               </small>
             </span>
             <span className="forward-contact-check" aria-hidden="true">
@@ -164,9 +165,9 @@ export function ForwardMessageModal({
           </div>
         )}
       </div>
-      {!contacts.some((peer) => peer.online) && (
+      {selected && !selected.online && (
         <p className="forward-hint">
-          {t("双方上线后即可转发，已保存的消息会保留在这里。")}
+          {t("对方不在线，可能接收不到消息")}
         </p>
       )}
       {error && (
@@ -185,7 +186,7 @@ export function ForwardMessageModal({
         </button>
         <button
           className="primary-button"
-          disabled={!selected?.online || sending}
+          disabled={!selected || snap.availability !== "online" || sending}
           onClick={() => void forward()}
         >
           {sending ? (

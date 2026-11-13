@@ -4,7 +4,7 @@ FROM rust:1.91-bookworm AS backend
 WORKDIR /build/api
 COPY api/Cargo.toml api/Cargo.lock ./
 COPY api/src/ ./src/
-COPY shared/ /build/shared/
+COPY api/shared/ ./shared/
 ARG TARGETPLATFORM
 # Refresh crate roots so older COPY timestamps cannot reuse stale app binaries.
 # Keep the server outside the cache mount for the final stage and CI layer cache.
@@ -22,8 +22,12 @@ COPY ssg/package*.json ./
 RUN --mount=type=cache,id=ky-im-npm,target=/root/.npm,sharing=locked \
     npm config set registry "${NPM_REGISTRY}" && npm ci --prefer-offline --verbose
 COPY ssg/ ./
+ARG VITE_PEER_CHECK_INTERVAL_MS=10000
+ENV VITE_PEER_CHECK_INTERVAL_MS=$VITE_PEER_CHECK_INTERVAL_MS
 ARG VITE_ROOM=local
 ARG VITE_SIGNAL_URL=
+ARG VITE_API_LATEST=/api/latest
+ENV VITE_API_LATEST=$VITE_API_LATEST
 ARG VITE_API_AUTH=
 ARG VITE_WEB_URL=https://im.kuangye.team/
 ARG VITE_CLIENT_DOWNLOAD_URL=https://github.com/kuangye-team/ky-im/releases/latest

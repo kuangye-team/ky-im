@@ -1,3 +1,4 @@
+import { initializeRuntimeLogs, runtimeLog } from "./runtime-logs";
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, HashRouter } from "react-router";
@@ -11,6 +12,7 @@ import "./themes.css";
 import { startAppUpdates } from "./app-updates";
 import { initializeAppIcons } from "./app-icons";
 
+initializeRuntimeLogs();
 initializeAppIcons();
 startAppUpdates();
 const Router = import.meta.env.VITE_DESKTOP ? HashRouter : BrowserRouter;
@@ -30,6 +32,7 @@ function Bootstrap() {
         instance.start();
       })
       .catch((error) => {
+        runtimeLog("error", "app", "应用启动失败", { detail: error instanceof Error ? error.message : String(error), raw: error });
         if (alive)
           setError(
             import.meta.env.VITE_DESKTOP && error instanceof Error

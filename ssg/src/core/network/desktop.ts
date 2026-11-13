@@ -1,3 +1,4 @@
+import { runtimeLog } from "../../runtime-logs";
 import { RelayTransportAdapter } from "./relay";
 import { SIGNALING_CONFIG } from "../../config";
 import { CombinedDiscoveryAdapter } from "./combined";
@@ -36,12 +37,24 @@ export type NativeEvent =
       data: ArrayBuffer;
     }
   | { type: "signal"; peerId: string; data: unknown }
+  | {
+      type: "log";
+      level: "info" | "warn" | "error";
+      message: string;
+      source?: string;
+      peerId?: string;
+      detail?: string;
+    }
   | { type: "error" };
 
 /** Inject the bridge for tests without a WebView or any network globals. */
 export interface NativeBridge {
   invoke(command: string, args: Record<string, unknown>): Promise<unknown>;
-  invokeBinary(command: string, data: ArrayBuffer, headers: Record<string, string>): Promise<unknown>;
+  invokeBinary(
+    command: string,
+    data: ArrayBuffer,
+    headers: Record<string, string>,
+  ): Promise<unknown>;
   channel(receive: (event: NativeEvent | ArrayBuffer) => void): unknown;
 }
 const nativeBridge: NativeBridge = {
@@ -60,7 +73,8 @@ function decodeEvent(raw: NativeEvent | ArrayBuffer): NativeEvent {
   const bytes = new Uint8Array(raw);
   if (bytes.length <= 73) throw new Error("Invalid native frame");
   const kind = bytes[72];
-  const limit = kind === 1 ? MAX_CONTROL_BYTES : kind === 2 ? CHUNK_SIZE + HEADER_SIZE : 0;
+  const limit =
+    kind === 1 ? MAX_CONTROL_BYTES : kind === 2 ? CHUNK_SIZE + HEADER_SIZE : 0;
   if (bytes.length - 73 > limit) throw new Error("Invalid native frame");
   const decoder = new TextDecoder("utf-8", { fatal: true });
   return {
@@ -111,7 +125,9 @@ class DesktopRuntime {
     });
   }
   event(event: NativeEvent) {
-    if (event.type === "peer") {
+    if (event.type === "log") {
+      runtimeLog(event.level, "connection", event.message, { ...event, raw: event });
+    } else if (event.type === "peer") {
       if (isProfile(event.profile)) {
         this.knownPeers.add(event.profile.id);
         this.session?.receive({ type: "peer_updated", peer: event.profile });
@@ -125,9 +141,14 @@ class DesktopRuntime {
         data: event.data,
       });
     } else if (event.type === "error") {
+      runtimeLog("error", "discovery", "附近设备查找已中断");
       this.session?.fail();
     } else {
       if (event.type === "open") {
+        runtimeLog("info", "connection", "快速直连通道已打开", {
+          peerId: event.peerId,
+          detail: event.connectionId,
+        });
         const previous = this.channels.get(event.peerId);
         if (
           previous?.connectionId &&
@@ -183,7 +204,9 @@ class MdnsSession implements DiscoverySession {
           if (this.joined) this.runtime.event(event);
           else if (this.pending.length < 1024) this.pending.push(event);
           else this.fail();
-        } catch { this.fail(); }
+        } catch {
+          this.fail();
+        }
       });
       this.runtime.lifecycle = this.runtime.lifecycle
         .catch(() => {})
@@ -206,15 +229,19 @@ class MdnsSession implements DiscoverySession {
           for (const event of this.pending.splice(0)) this.runtime.event(event);
           this.runtime.onReady?.();
         })
-        .catch(() => this.fail());
+        .catch((error) => this.fail(error));
     } else if (packet.type === "profile") {
       void this.runtime
         .call("lan_profile", { profile: packet.profile })
-        .catch(() => this.fail());
+        .catch((error) => this.fail(error));
     } else if (packet.type === "signal") {
       void this.runtime
         .call("lan_signal", { peerId: packet.to, data: packet.data })
-        .catch(() => {
+        .catch((error) => {
+          runtimeLog("warn", "connection", "连接请求未能送达", {
+            peerId: packet.to,
+            detail: String(error),
+          });
           this.receive({ type: "error", code: "signal_failed" });
         });
     } else if (packet.type === "ping") {
@@ -223,8 +250,15 @@ class MdnsSession implements DiscoverySession {
       throw new Error("局域网内的设备会自动出现，无需蜂鸟号");
     }
   }
-  fail() {
+  fail(error?: unknown) {
     if (this.readyState === 3) return;
+    runtimeLog("error", "discovery", "附近设备查找未能继续", {
+      detail:
+        error instanceof Error
+          ? error.message
+          : String(error ?? "native session error"),
+      raw: error,
+    });
     this.onerror?.();
     this.close();
   }
@@ -281,8 +315,16 @@ class TcpChannel extends EventTarget implements TransportChannel {
     this.readyState = "open";
     this.onopen?.(new Event("open"));
   }
-  fail() {
+  fail(error?: unknown) {
     if (this.readyState === "closed") return;
+    runtimeLog("warn", "connection", "快速直连未完成", {
+      peerId: this.peerId,
+      detail:
+        error instanceof Error
+          ? error.message
+          : String(error ?? "channel error"),
+      raw: error,
+    });
     this.onerror?.(new Event("error"));
     this.dispatchEvent(new Event("error"));
     this.close();
@@ -303,7 +345,7 @@ class TcpChannel extends EventTarget implements TransportChannel {
   consumed() {
     void this.runtime
       .call("tcp_consumed", this.args())
-      .catch(() => this.fail());
+      .catch((error) => this.fail(error));
   }
   send(data: string | ArrayBuffer) {
     if (this.readyState !== "open") throw new Error("设备连接已断开");
@@ -322,16 +364,14 @@ class TcpChannel extends EventTarget implements TransportChannel {
       throw new Error("传输缓冲区已满，请稍后重试");
     const kind = typeof data === "string" ? 1 : 2;
     const payload =
-      typeof data === "string"
-        ? new TextEncoder().encode(data).buffer
-        : data;
+      typeof data === "string" ? new TextEncoder().encode(data).buffer : data;
     this.bufferedAmount += size;
     this.writing = this.writing
       .then(async () => {
         if (this.readyState !== "open") return;
         await this.runtime.send(this.peerId, this.connectionId!, kind, payload);
       })
-      .catch(() => this.fail())
+      .catch((error) => this.fail(error))
       .finally(() => {
         this.bufferedAmount -= size;
         if (this.bufferedAmount <= this.bufferedAmountLowThreshold)
@@ -386,7 +426,7 @@ export class TcpTransportAdapter implements TransportAdapter {
               return;
             return this.runtime.call("tcp_connect", { peerId: options.peerId });
           })
-          .catch(() => channel.fail());
+          .catch((error) => channel.fail(error));
       },
       signal: async () => {},
       close: () => channel.close(),
@@ -472,7 +512,12 @@ class DesktopDiscoveryAdapter implements DiscoveryAdapter {
           if (profiles.has(peerId) && runtime.session === session)
             runtime.knownPeers.add(peerId);
         })
-        .catch(() => {});
+        .catch((error) =>
+          runtimeLog("warn", "connection", "对方的连接地址未能更新", {
+            peerId,
+            detail: String(error),
+          }),
+        );
     };
     runtime.onReady = () => {
       auxiliaryAttempts = 0;

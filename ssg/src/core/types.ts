@@ -95,7 +95,14 @@ export type ChatSnapshot = {
   status: ConnectionStatus;
   /** User intent, separate from the actual signaling connection state. */
   availability: Availability;
+  /** Advisory presence; three silent probe cycles or connection failures mark a peer offline. */
+  peerPresence: Record<string, "online" | "offline">;
   peerStates: Record<string, "connecting" | "connected" | "failed">;
   transfers: Record<string, number>;
   error: string | null;
 };
+
+/** Presence is advisory and must never be used as a prerequisite for sending. */
+export function isPeerOnline(snapshot: ChatSnapshot, peerId: string): boolean {
+  return snapshot.peers.some((peer) => peer.id === peerId) && snapshot.peerPresence[peerId] !== "offline";
+}

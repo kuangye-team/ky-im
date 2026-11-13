@@ -67,7 +67,7 @@ jobs:
         id: rust-cache
         uses: actions/cache@v5
         with:
-          path: temp/artifacts/buildkit-cache
+          path: temp/cache/buildkit
           key: docker-rust-linux-${{ matrix.arch }}-${{ hashFiles('Dockerfile', 'api/Cargo.toml', 'api/Cargo.lock') }}-${{ github.sha }}
           restore-keys: |
             docker-rust-linux-${{ matrix.arch }}-${{ hashFiles('Dockerfile', 'api/Cargo.toml', 'api/Cargo.lock') }}-
@@ -80,17 +80,17 @@ jobs:
           scratch-dir: temp/artifacts/buildkit-cache-dance
           cache-map: |
             {
-              "temp/artifacts/buildkit-cache/registry": {
+              "temp/cache/buildkit/registry": {
                 "target": "/usr/local/cargo/registry",
                 "id": "ky-im-cargo-registry",
                 "sharing": "locked"
               },
-              "temp/artifacts/buildkit-cache/git": {
+              "temp/cache/buildkit/git": {
                 "target": "/usr/local/cargo/git",
                 "id": "ky-im-cargo-git",
                 "sharing": "locked"
               },
-              "temp/artifacts/buildkit-cache/target": {
+              "temp/cache/buildkit/target": {
                 "target": "/build/api/target",
                 "id": "ky-im-cargo-target-linux/${{ matrix.arch }}",
                 "sharing": "locked"
@@ -114,6 +114,8 @@ jobs:
           file: ./Dockerfile
           platforms: linux/${{ matrix.arch }}
           push: true
+          build-args: |
+            VITE_API_LATEST=${{ secrets.VITE_API_LATEST || vars.VITE_API_LATEST || '/api/latest' }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true
           cache-from: type=gha,scope=ky-im-${{ matrix.arch }}

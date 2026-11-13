@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
+  ScrollText,
   Check,
   Copy,
   Eye,
@@ -27,6 +28,7 @@ import {
   type SignalServer,
 } from "../core/network/settings";
 import { translateError } from "../localizeError";
+import { RuntimeLogs } from "./RuntimeLogs";
 import { Modal } from "./Modal";
 import { copyText } from "./copyText";
 import "./SystemSettings.css";
@@ -39,6 +41,7 @@ export function SystemSettings({
   onNotice: (message: string) => void;
 }) {
   const { t } = useTranslation();
+  const [showLogs, setShowLogs] = useState(false);
   const serverHeadingId = useId();
   const serverKeyId = useId();
   const [settings, setSettings] = useState<NetworkSettings>(
@@ -171,17 +174,27 @@ export function SystemSettings({
   );
   return (
     <section className="full-page system-settings">
-      <div className="page-heading">
-        <div>
-          <Settings size={24} aria-hidden="true" />
-          <h1>{t("系统配置")}</h1>
+      <div className="settings-page-header">
+        <div className="page-heading">
+          <div>
+            <Settings size={24} aria-hidden="true" />
+            <h1>{t("系统配置")}</h1>
+          </div>
+          <p>
+            {t(
+              "选择怎么找到其他设备，以及怎么传送消息和文件。设置只保存在这台设备上。",
+            )}
+          </p>
         </div>
-        <p>
-          {t(
-            "选择怎么找到其他设备，以及怎么传送消息和文件。设置只保存在这台设备上。",
-          )}
-        </p>
+        <button
+          className="secondary-button settings-log-button"
+          onClick={() => setShowLogs(true)}
+        >
+          <ScrollText size={18} aria-hidden="true" />
+          {t("运行日志")}
+        </button>
       </div>
+      {showLogs && <RuntimeLogs onClose={() => setShowLogs(false)} />}
       <div className="settings-feedback">
         <p>{t("修改后自动生效并重新连接。正在传输内容时，请完成后再修改。")}</p>
         <p role="status">

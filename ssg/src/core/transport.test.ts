@@ -16,8 +16,13 @@ class Channel extends EventTarget {
   onmessage?: (event: { data: unknown }) => void;
   onerror?: () => void;
   sent: unknown[] = [];
+  autoPong = true;
   send(data: unknown) {
     this.sent.push(data);
+    if (this.autoPong && typeof data === "string") {
+      const packet = JSON.parse(data);
+      if (packet.type === "peer-ping") this.receive(JSON.stringify({ type: "peer-pong", id: packet.id }));
+    }
   }
   close() {
     this.readyState = "closed";
@@ -130,7 +135,8 @@ async function setup(open = true) {
 const controls = (channel: Channel) =>
   channel.sent
     .filter((value): value is string => typeof value === "string")
-    .map((value) => JSON.parse(value) as Record<string, unknown>);
+    .map((value) => JSON.parse(value) as Record<string, unknown>)
+    .filter((packet) => packet.type !== "peer-ping" && packet.type !== "peer-pong");
 async function acceptOutgoing(channel: Channel) {
   await vi.waitFor(() =>
     expect(
@@ -448,15 +454,13 @@ describe("RTC transport lifecycle", () => {
     expect(JSON.stringify(socket.sent)).not.toContain("同事的电脑");
   });
 
-  it("rejoins signaling and recreates RTC when sending after an RTC failure", async () => {
+  it("recreates only the failed peer when sending after an RTC failure", async () => {
     const { engine, pc } = await setup();
     pc.fail();
     expect(engine.getSnapshot().peerStates[peer.id]).toBe("failed");
     const sending = engine.sendText("重试成功");
-    const socket = Socket.instances.at(-1)!;
-    expect(Socket.instances).toHaveLength(2);
-    socket.onopen?.();
-    socket.receive({ type: "welcome", id: me.id, peers: [peer] });
+    expect(Socket.instances).toHaveLength(1);
+    await vi.waitFor(() => expect(PeerConnection.instances).toHaveLength(2));
     const replacement = PeerConnection.instances.at(-1)!;
     expect(replacement).not.toBe(pc);
     replacement.channel.open();
@@ -643,7 +647,7 @@ describe("RTC transport lifecycle", () => {
       expect(engine.getSnapshot().messages).toHaveLength(0),
     );
   });
-  it("does not resurrect deleted history with the next file in a pending batch", async () => {
+  it("cancels every file in a concurrent batch when its conversation is deleted", async () => {
     const { engine, storage, channel } = await setup();
     const originalSave = storage.saveMessage.bind(storage);
     let release!: () => void;
@@ -671,7 +675,11 @@ describe("RTC transport lifecycle", () => {
     expect(engine.getSnapshot().conversations).toEqual([]);
     expect(
       controls(channel).filter((packet) => packet.type === "file-start"),
+    ).toHaveLength(2);
+    expect(
+      controls(channel).filter((packet) => packet.type === "file-end"),
     ).toHaveLength(1);
+    expect(engine.hasPendingTransfers()).toBe(false);
   });
   it("keeps a deleted outgoing message removed when its acknowledgment arrives during deletion", async () => {
     const { engine, storage, channel, socket } = await setup();
@@ -1676,7 +1684,7 @@ describe("forwarding saved messages", () => {
         engine.forwardMessage(original, recipient.id),
       ).rejects.toThrow(/已被删除|尚未接收完成|尚未完成/);
       expect(await storage.getMessages(recipient.id)).toEqual([]);
-      expect(targetChannel.sent).toEqual([]);
+      expect(controls(targetChannel)).toEqual([]);
       expect(engine.getSnapshot().activePeerId).toBe(peer.id);
     },
   );
@@ -1728,7 +1736,7 @@ describe("forwarding saved messages", () => {
     expect(await storage.getAttachment(original.id)).toBeDefined();
   });
 
-  it("rejects a queued forward when the recipient disconnects before its transfer starts", async () => {
+  it("offers a forward alongside a pending file and fails both when the recipient disconnects", async () => {
     const { engine, storage, socket, targetChannel } = await withRecipient();
     const original = savedMessage({
       kind: "file",
@@ -1759,20 +1767,24 @@ describe("forwarding saved messages", () => {
       expect(queued).toBeDefined();
       expect(engine.getSnapshot().transfers[queued!.id]).toBe(0);
     });
+    await vi.waitFor(() =>
+      expect(controls(targetChannel).filter((p) => p.type === "file-start")).toHaveLength(2),
+    );
     socket.receive({ type: "peer_left", id: recipient.id });
     targetChannel.dispatchEvent(new Event("close"));
 
     expect(await first).toBeInstanceOf(Error);
     expect(await result).toMatchObject({
-      message: expect.stringContaining("转发未完成"),
+      message: expect.stringContaining("已离线"),
     });
     expect(controls(targetChannel)).toEqual([
       expect.objectContaining({ type: "file-start", fileName: "first.txt" }),
+      expect.objectContaining({ type: "file-start", fileName: "queued.txt" }),
     ]);
     expect(await storage.getMessages(peer.id)).toEqual([original]);
   });
 
-  it("rejects an offline recipient and offline local device without writing forwarded messages", async () => {
+  it("records a failed offline forward while respecting the local offline choice", async () => {
     const { engine, storage, socket, targetChannel } = await withRecipient();
     const original = savedMessage();
     await storage.saveMessage(original);
@@ -1780,12 +1792,12 @@ describe("forwarding saved messages", () => {
     await expect(engine.forwardMessage(original, recipient.id)).rejects.toThrow(
       "对方当前离线",
     );
-    expect(await storage.getMessages(recipient.id)).toEqual([]);
+    expect(await storage.getMessages(recipient.id)).toEqual([expect.objectContaining({ status: "failed", text: original.text })]);
     engine.setAvailability("offline");
     await expect(engine.forwardMessage(original, peer.id)).rejects.toThrow(
       "请先上线",
     );
     expect(await storage.getMessages(peer.id)).toEqual([original]);
-    expect(targetChannel.sent).toEqual([]);
+    expect(controls(targetChannel)).toEqual([]);
   });
 });

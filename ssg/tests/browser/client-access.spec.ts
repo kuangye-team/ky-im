@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { expectNoHorizontalOverflow } from "./helpers";
 
+const manifestURL = process.env.VITE_API_LATEST || "**/api/latest";
+
 const manifest = {
   version: "1.2.3",
   platforms: {
@@ -15,7 +17,7 @@ test("客户端入口按系统推荐下载，悬浮区可进入，键盘与关�
     Object.defineProperty(navigator, "userAgentData", { value: { platform: "Windows" } });
   });
   let requests = 0;
-  await page.route("**/api/latest", (route) => { requests++; return route.fulfill({ json: manifest }); });
+  await page.route(manifestURL, (route) => { requests++; return route.fulfill({ json: manifest }); });
   await page.goto("/");
   const trigger = page.getByRole("button", { name: "打开客户端", exact: true });
   const panel = page.getByRole("dialog", { name: "下载蜂鸟客户端" });
@@ -52,7 +54,7 @@ test("下载失败可重试，手机可点击查看下载且不会横向溢出",
     Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)" });
   });
   let requests = 0;
-  await page.route("**/api/latest", (route) => ++requests === 1 ? route.fulfill({ status: 503 }) : route.fulfill({ json: manifest }));
+  await page.route(manifestURL, (route) => ++requests === 1 ? route.fulfill({ status: 503 }) : route.fulfill({ json: manifest }));
   await page.goto("/");
   await page.getByRole("button", { name: "打开客户端", exact: true }).click();
   const panel = page.getByRole("dialog", { name: "下载蜂鸟客户端" });
