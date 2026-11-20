@@ -1,4 +1,4 @@
-const storageKey = "hummingbird.chat-drafts";
+const storageKey = "hummingbird.v2.chat-drafts";
 function readDrafts(): Record<string, string> {
   try {
     const saved: unknown = JSON.parse(
@@ -16,6 +16,7 @@ function readDrafts(): Record<string, string> {
   return {};
 }
 let drafts = readDrafts();
+let resetting = false;
 const listeners = new Set<() => void>();
 export const getChatDrafts = () => drafts;
 export function subscribeChatDrafts(listener: () => void) {
@@ -25,6 +26,7 @@ export function subscribeChatDrafts(listener: () => void) {
   };
 }
 export function saveChatDrafts() {
+  if (resetting) return true;
   try {
     if (Object.keys(drafts).length)
       sessionStorage.setItem(storageKey, JSON.stringify(drafts));
@@ -35,8 +37,19 @@ export function saveChatDrafts() {
   }
 }
 export function setChatDraft(peerId: string, text: string) {
+  if (resetting) return;
   drafts = { ...drafts, [peerId]: text };
   if (!text) delete drafts[peerId];
   saveChatDrafts();
   listeners.forEach((listener) => listener());
+}
+export function clearChatDrafts() {
+  drafts = {};
+  saveChatDrafts();
+  listeners.forEach((listener) => listener());
+}
+
+export function stopDraftsForReset() {
+  resetting = true;
+  clearChatDrafts();
 }

@@ -1,4 +1,5 @@
-import { SIGNALING_CONFIG } from "../../config";
+import { CONNECTION_CONFIG, SIGNALING_CONFIG } from "../../config";
+import { validateIceServers, type IceServer } from "../../ice-servers";
 
 export type SignalServer = {
   id: string;
@@ -8,13 +9,15 @@ export type SignalServer = {
   authorization?: string;
   relay?: boolean;
   relaySupported?: boolean;
+  extend?: Record<string, unknown>;
 };
 export type NetworkSettings = {
+  iceServers: IceServer[];
   servers: SignalServer[];
   discovery: { signaling: boolean; mdns: boolean };
   transport: { tcp: boolean; webrtc: boolean };
 };
-export const NETWORK_SETTINGS_KEY = "hummingbird.network.v1";
+export const NETWORK_SETTINGS_KEY = "hummingbird.network";
 export const DEFAULT_SERVER_ID = "default";
 export const isDesktop = () => Boolean(import.meta.env.VITE_DESKTOP);
 
@@ -27,6 +30,7 @@ export function defaultSettings(desktop = isDesktop()): NetworkSettings {
       ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/ws`
       : "ws://127.0.0.1:8080/api/ws";
   return {
+    iceServers: CONNECTION_CONFIG.rtc.iceServers.map((server) => ({ ...server })),
     servers: [
       {
         id: DEFAULT_SERVER_ID,
@@ -94,6 +98,7 @@ export function validateSettings(
       typeof server.url !== "string" ||
       server.url.length > 2048 ||
       typeof server.enabled !== "boolean" ||
+      (server.extend !== undefined && (!server.extend || typeof server.extend !== "object" || Array.isArray(server.extend))) ||
       (server.relay !== undefined && typeof server.relay !== "boolean") ||
       (server.relaySupported !== undefined &&
         typeof server.relaySupported !== "boolean")
@@ -146,13 +151,14 @@ export function validateSettings(
     return {
       ...server,
       name: server.name.trim(),
-      authorization: server.authorization?.trim(),
+      authorization: server.authorization?.trim() ?? (server.id === DEFAULT_SERVER_ID ? builtIn.authorization : undefined),
       url: server.id === DEFAULT_SERVER_ID ? builtIn.url : url,
     };
   });
   if (value.discovery.signaling && !servers.some((server) => server.enabled))
     throw new Error("使用在线查找时，请至少启用一个服务器");
   return {
+    iceServers: validateIceServers(value.iceServers),
     servers,
     discovery: { ...value.discovery },
     transport: { ...value.transport },
@@ -164,33 +170,6 @@ export function readSettings(desktop = isDesktop()): NetworkSettings {
     const raw = localStorage.getItem(NETWORK_SETTINGS_KEY);
     if (raw) {
       const stored = JSON.parse(raw) as NetworkSettings;
-      if (Array.isArray(stored?.servers)) {
-        // Older versions allowed editing/removing the built-in entry. Restore its
-        // build-time address on load while retaining the user's enabled choice.
-        const previous = stored.servers.find(
-          (server) => server?.id === DEFAULT_SERVER_ID,
-        );
-        const builtIn = defaultSettings(desktop).servers[0];
-        stored.servers = [
-          {
-            ...builtIn,
-            enabled:
-              typeof previous?.enabled === "boolean"
-                ? previous.enabled
-                : builtIn.enabled,
-            ...(previous?.url === builtIn.url
-              ? {
-                  authorization: previous.authorization ?? builtIn.authorization,
-                  relay: previous.relay,
-                  relaySupported: previous.relaySupported,
-                }
-              : {}),
-          },
-          ...stored.servers.filter(
-            (server) => server?.id !== DEFAULT_SERVER_ID,
-          ),
-        ];
-      }
       return validateSettings(stored, desktop);
     }
   } catch {

@@ -20,8 +20,9 @@ async function instrument(page: Page) {
     const OriginalPeer = window.RTCPeerConnection;
     window.RTCPeerConnection = class extends OriginalPeer {
       constructor(config?: RTCConfiguration) {
-        super(config);
-        state.__rtc.push(this);
+        super({ ...config, iceServers: [] });
+        // Local SCTP size probes have no ICE configuration and never dial another device.
+        if (config?.iceServers) state.__rtc.push(this);
       }
     };
     const OriginalSocket = window.WebSocket;
@@ -44,7 +45,7 @@ async function instrument(page: Page) {
   });
 }
 
-test("列表在首次检查前保持在线，任一方可立即发起，双方同时打开也能收发", async ({
+test("列表在首次检查前显示已发现，任一方可立即发起，双方同时打开也能收发", async ({
   browser,
   baseURL,
 }) => {
@@ -57,6 +58,8 @@ test("列表在首次检查前保持在线，任一方可立即发起，双方�
   try {
     for (const [n, page] of pages.entries()) {
       page.on("pageerror", (error) => errors.push(error.message));
+      // Keep the scheduled list probe outside this user-initiated negotiation.
+      await page.clock.setFixedTime(new Date());
       await instrument(page);
       await page.goto(baseURL!);
       await setProfile(page, names[n]!);
@@ -73,7 +76,7 @@ test("列表在首次检查前保持在线，任一方可立即发起，双方�
       .getByRole("button", { name: "在线设备", exact: true })
       .click();
     await expect(pages[2]!.locator(".device-card-online").first()).toHaveText(
-      "在线",
+      "已发现",
     );
     // Start from the higher ID while the other side remains on discovery.
     const identities = await Promise.all(

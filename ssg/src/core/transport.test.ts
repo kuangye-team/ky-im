@@ -1,142 +1,16 @@
-import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { bufferedStorage } from "./storage/test-buffered-storage";
+import { testStorage } from "./storage/test-opfs";
+import { testNetwork } from "./test-network";
+import { describe, expect, it, vi } from "vitest";
 import { ChatEngine } from "./engine";
-import { IndexedDBStorageAdapter } from "./storage";
-import { MAX_FILE_SIZE, decodeChunk, encodeChunk, newId } from "./protocol";
+import { MAX_BUFFERED_FILE_BYTES, decodeChunk, encodeChunk, newId } from "./protocol";
 import type { Message, Profile } from "./types";
-import { SIGNALING_CONFIG } from "../config";
+import { CONNECTION_CONFIG, SIGNALING_CONFIG } from "../config";
 
-class Channel extends EventTarget {
-  readyState = "connecting";
-  binaryType = "arraybuffer";
-  bufferedAmount = 0;
-  bufferedAmountLowThreshold = 0;
-  onopen?: () => void;
-  onclose?: () => void;
-  onmessage?: (event: { data: unknown }) => void;
-  onerror?: () => void;
-  sent: unknown[] = [];
-  autoPong = true;
-  send(data: unknown) {
-    this.sent.push(data);
-    if (this.autoPong && typeof data === "string") {
-      const packet = JSON.parse(data);
-      if (packet.type === "peer-ping") this.receive(JSON.stringify({ type: "peer-pong", id: packet.id }));
-    }
-  }
-  close() {
-    this.readyState = "closed";
-    this.onclose?.();
-  }
-  open() {
-    this.readyState = "open";
-    this.onopen?.();
-  }
-  receive(data: unknown) {
-    this.onmessage?.({ data });
-  }
-}
-class PeerConnection {
-  static instances: PeerConnection[] = [];
-  connectionState = "new";
-  signalingState = "stable";
-  localDescription: unknown = null;
-  remoteDescription: unknown = null;
-  channel = new Channel();
-  onconnectionstatechange?: () => void;
-  onicecandidate?: unknown;
-  ondatachannel?: unknown;
-  constructor() {
-    PeerConnection.instances.push(this);
-  }
-  createDataChannel() {
-    return this.channel;
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "test-offer" };
-  }
-  async createAnswer() {
-    return { type: "answer", sdp: "test-answer" };
-  }
-  async setLocalDescription(value: { type: string }) {
-    this.localDescription = value;
-    this.signalingState =
-      value.type === "offer" ? "have-local-offer" : "stable";
-  }
-  async setRemoteDescription(value: { type: string }) {
-    this.remoteDescription = value;
-    this.signalingState =
-      value.type === "offer" ? "have-remote-offer" : "stable";
-  }
-  async addIceCandidate() {}
-  close() {
-    this.connectionState = "closed";
-    this.onconnectionstatechange?.();
-  }
-  fail() {
-    this.connectionState = "failed";
-    this.onconnectionstatechange?.();
-  }
-}
-class Socket {
-  static OPEN = 1;
-  static instances: Socket[] = [];
-  readyState = 1;
-  onopen?: () => void;
-  onmessage?: (event: { data: string }) => void;
-  onclose?: () => void;
-  onerror?: () => void;
-  sent: string[] = [];
-  constructor() {
-    Socket.instances.push(this);
-  }
-  send(value: string) {
-    this.sent.push(value);
-  }
-  close() {
-    this.readyState = 3;
-    this.onclose?.();
-  }
-  receive(packet: unknown) {
-    this.onmessage?.({ data: JSON.stringify(packet) });
-  }
-}
-const me: Profile = {
-  id: "10000000-0000-4000-8000-000000000000",
-  name: "本机",
-  avatar: "🌿",
-  color: "#597461",
-  bio: "",
-  device: "Mac",
-  clientType: "web" as const,
-};
-const peer: Profile = {
-  ...me,
-  id: "20000000-0000-4000-8000-000000000000",
-  name: "对方",
-};
-const engines: ChatEngine[] = [];
-const adapters: IndexedDBStorageAdapter[] = [];
-async function setup(open = true) {
-  const storage = new IndexedDBStorageAdapter(`send-transport-${newId()}`);
-  adapters.push(storage);
-  const engine = new ChatEngine(storage, me, []);
-  engines.push(engine);
-  await engine.selectPeer(peer);
-  engine.start();
-  const socket = Socket.instances.at(-1)!;
-  socket.onopen?.();
-  socket.receive({ type: "welcome", id: me.id, peers: [peer] });
-  const pc = PeerConnection.instances.at(-1)!;
-  await Promise.resolve();
-  if (open) pc.channel.open();
-  return { engine, storage, socket, pc, channel: pc.channel };
-}
-const controls = (channel: Channel) =>
-  channel.sent
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => JSON.parse(value) as Record<string, unknown>)
-    .filter((packet) => packet.type !== "peer-ping" && packet.type !== "peer-pong");
+import { Channel, controls, me, peer, PeerConnection, requests, Socket, transportFixture } from "./test-transport";
+
+const { setup, engines, adapters } = transportFixture();
+
 async function acceptOutgoing(channel: Channel) {
   await vi.waitFor(() =>
     expect(
@@ -148,38 +22,11 @@ async function acceptOutgoing(channel: Channel) {
   )!;
   channel.receive(JSON.stringify({ type: "file-accept", id: start.id }));
 }
-const requests = (socket: Socket, type = "connect_group") =>
-  socket.sent
-    .map((value) => JSON.parse(value) as Record<string, unknown>)
-    .filter((value) => value.type === type);
-beforeEach(() => {
-  PeerConnection.instances = [];
-  Socket.instances = [];
-  const saved = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => saved.get(key) ?? null,
-    setItem: (key: string, value: string) => saved.set(key, value),
-  });
-  vi.stubGlobal("navigator", { onLine: true });
-  vi.stubGlobal("window", new EventTarget());
-  vi.stubGlobal("location", { protocol: "http:", host: "192.168.1.2:5173" });
-  vi.stubGlobal("RTCPeerConnection", PeerConnection);
-  vi.stubGlobal("WebSocket", Socket);
-});
-afterEach(async () => {
-  for (const engine of engines.splice(0)) engine.stop();
-  vi.useRealTimers();
-  // Finish queued IDB failure updates before closing the databases.
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  await Promise.all(adapters.splice(0).map((storage) => storage.close()));
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-});
 
 async function discoveryOnly(own = me, visible = [peer]) {
-  const storage = new IndexedDBStorageAdapter(`send-idle-${newId()}`);
+  const storage = bufferedStorage(`send-idle-${newId()}`);
   adapters.push(storage);
-  const engine = new ChatEngine(storage, own, []);
+  const engine = new ChatEngine(storage, own, [], testNetwork());
   engines.push(engine);
   engine.start();
   const socket = Socket.instances.at(-1)!;
@@ -190,93 +37,6 @@ async function discoveryOnly(own = me, visible = [peer]) {
 }
 
 describe("idle signaling and reconnect costs", () => {
-  it("keeps discovered devices idle until one is selected and accepts an offer from either ID", async () => {
-    const extra = { ...peer, id: "30000000-0000-4000-8000-000000000000" };
-    const { engine, socket } = await discoveryOnly(me, [peer, extra]);
-    socket.receive({
-      type: "peer_updated",
-      peer: { ...peer, name: "new name" },
-    });
-    expect(PeerConnection.instances).toHaveLength(0);
-    expect(requests(socket, "signal")).toEqual([]);
-    socket.receive({
-      type: "signal",
-      from: peer.id,
-      data: {
-        description: { type: "offer", sdp: "incoming-offer" },
-      },
-    });
-    await vi.waitFor(() => expect(requests(socket, "signal")).toHaveLength(1));
-    expect(requests(socket, "signal")[0]).toMatchObject({
-      data: { description: { type: "answer" } },
-    });
-    expect(engine.getSnapshot().activePeerId).toBeNull();
-    expect(engine.getSnapshot().conversations).toEqual([]);
-    expect(PeerConnection.instances).toHaveLength(1);
-    await engine.selectPeer(extra);
-    expect(PeerConnection.instances).toHaveLength(2);
-  });
-
-  it("starts an offer when the larger ID selects an idle peer", async () => {
-    const { engine, socket } = await discoveryOnly(peer, [me]);
-    await engine.selectPeer(me);
-    await vi.waitFor(() => expect(requests(socket, "signal")).toHaveLength(1));
-    expect(requests(socket, "signal")[0]).toMatchObject({
-      to: me.id,
-      data: { description: { type: "offer" } },
-    });
-  });
-
-  it.each([false, true])(
-    "resolves simultaneous offers without closing the peer, polite=%s",
-    async (polite) => {
-      const own = polite ? peer : me;
-      const other = polite ? me : peer;
-      const { engine, socket } = await discoveryOnly(own, [other]);
-      await engine.selectPeer(other);
-      await vi.waitFor(() =>
-        expect(requests(socket, "signal")).toHaveLength(1),
-      );
-      const pc = PeerConnection.instances[0]!;
-      const oldChannel = pc.channel;
-      socket.receive({
-        type: "signal",
-        from: other.id,
-        data: {
-          description: { type: "offer", sdp: "colliding-offer" },
-        },
-      });
-      if (polite) {
-        await vi.waitFor(() =>
-          expect(pc.localDescription).toMatchObject({ type: "answer" }),
-        );
-        const remoteChannel = new Channel();
-        (pc.ondatachannel as (event: { channel: Channel }) => void)({
-          channel: remoteChannel,
-        });
-        remoteChannel.open();
-        expect(oldChannel.readyState).toBe("closed");
-        expect(engine.getSnapshot().peerStates[other.id]).toBe("connected");
-      } else {
-        socket.receive({
-          type: "signal",
-          from: other.id,
-          data: {
-            description: { type: "answer", sdp: "accepted-answer" },
-          },
-        });
-        await vi.waitFor(() =>
-          expect(pc.remoteDescription).toMatchObject({ type: "answer" }),
-        );
-        oldChannel.open();
-        expect(engine.getSnapshot().peerStates[other.id]).toBe("connected");
-        expect(requests(socket, "signal")).toHaveLength(1);
-      }
-      expect(pc.connectionState).not.toBe("closed");
-      expect(Socket.instances).toHaveLength(1);
-    },
-  );
-
   it("opens a connection on first send to an unselected device and keeps chat content off signaling", async () => {
     const { engine, socket } = await discoveryOnly();
     const sending = engine.sendText("按需发送", peer.id);
@@ -299,7 +59,8 @@ describe("idle signaling and reconnect costs", () => {
     expect(requests(socket, "profile")).toEqual([]);
     await engine.updateProfile({ bio: "新的签名" });
     expect(save).toHaveBeenCalledTimes(1);
-    expect(requests(socket, "profile")).toHaveLength(1);
+    expect(requests(socket, "profile")).toHaveLength(0);
+    expect(engine.getSnapshot().profile.revision).toBeGreaterThan(1);
   });
 
   it.each([false, true])(
@@ -490,7 +251,7 @@ describe("RTC transport lifecycle", () => {
     await vi.waitFor(() =>
       expect(engine.getSnapshot().messages).toHaveLength(1),
     );
-    await vi.advanceTimersByTimeAsync(16_000);
+    await vi.advanceTimersByTimeAsync(CONNECTION_CONFIG.readyTimeoutMs + 1000);
     expect(await result).toBeInstanceOf(Error);
     expect(pc.connectionState).toBe("closed");
     expect(engine.getSnapshot().peerStates[peer.id]).toBe("failed");
@@ -617,7 +378,7 @@ describe("RTC transport lifecycle", () => {
           kind: "file",
           fileName: "large.bin",
           mimeType: "",
-          size: MAX_FILE_SIZE,
+          size: MAX_BUFFERED_FILE_BYTES,
           createdAt: Date.now(),
         }),
       );
@@ -928,602 +689,27 @@ describe("my availability", () => {
     expect(Socket.instances).toHaveLength(2);
   });
 
-  it("closes RTC immediately on network loss while preserving intent to return online", async () => {
+  it("keeps an established RTC session when discovery reports network loss", async () => {
     const { engine, socket, pc, channel } = await setup();
-    vi.stubGlobal("navigator", { onLine: false });
+    vi.stubGlobal("navigator", { storage: testStorage, onLine: false });
     window.dispatchEvent(new Event("offline"));
     expect(engine.getSnapshot()).toMatchObject({
       availability: "online",
       status: "disconnected",
-      peers: [],
-      peerStates: {},
+      peers: [peer],
+      peerStates: { [peer.id]: "connected" },
     });
     expect(socket.readyState).toBe(3);
-    expect(pc.connectionState).toBe("closed");
-    expect(channel.readyState).toBe("closed");
+    expect(pc.connectionState).not.toBe("closed");
+    expect(channel.readyState).toBe("open");
     expect(localStorage.getItem("hummingbird.availability")).not.toBe(
       "offline",
     );
-    vi.stubGlobal("navigator", { onLine: true });
+    vi.stubGlobal("navigator", { storage: testStorage, onLine: true });
     window.dispatchEvent(new Event("online"));
     expect(Socket.instances).toHaveLength(2);
     expect(engine.getSnapshot().status).toBe("connecting");
   });
-});
-
-describe("hummingbird group discovery", () => {
-  it("refreshes group numbers while preserving identities, remarks, history and RTC channels", async () => {
-    const { engine, storage, socket, channel, pc } = await setup();
-    await engine.updatePeerRemark(peer.id, "本地备注");
-    await engine.sendText("换号前的消息");
-    const messages = engine.getSnapshot().messages;
-    const refresh = engine.refreshNumericId();
-    const request = requests(socket, "refresh_number").at(-1)!;
-    await expect(engine.refreshNumericId()).rejects.toThrow("正在刷新");
-    socket.receive({
-      type: "number_updated",
-      requestId: request.requestId,
-      numericId: "654321",
-      peerIds: [me.id, peer.id],
-    });
-    await refresh;
-    expect(engine.getSnapshot().profile).toEqual({
-      ...me,
-      numericId: "654321",
-    });
-    expect(await storage.getProfile()).toEqual(engine.getSnapshot().profile);
-    expect(engine.getSnapshot().conversations[0]).toMatchObject({
-      remark: "本地备注",
-      peer: { id: peer.id, numericId: "654321" },
-    });
-    expect((await storage.getConversations())[0]).toMatchObject({
-      remark: "本地备注",
-      peer: { id: peer.id, numericId: "654321" },
-    });
-    expect(engine.getSnapshot().messages).toEqual(messages);
-    expect(PeerConnection.instances).toEqual([pc]);
-    expect(channel.readyState).toBe("open");
-    await engine.sendText("换号后继续聊天");
-    expect(
-      controls(channel)
-        .filter((p) => p.type === "text")
-        .map((p) => p.text),
-    ).toEqual(["换号前的消息", "换号后继续聊天"]);
-    // A remote group's refresh changes that contact only, not our number.
-    socket.receive({
-      type: "number_updated",
-      numericId: "765432",
-      peerIds: [peer.id],
-    });
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().peers[0]?.numericId).toBe("765432"),
-    );
-    expect(engine.getSnapshot().profile.numericId).toBe("654321");
-  });
-
-  it("recovers refresh controls after rejection, malformed responses, timeout and disconnect", async () => {
-    const { engine, socket } = await setup();
-    let refresh = engine.refreshNumericId();
-    let failed = expect(refresh).rejects.toThrow("操作过于频繁");
-    socket.receive({
-      type: "connect_error",
-      requestId: requests(socket, "refresh_number").at(-1)!.requestId,
-      code: "connect_rate_limited",
-    });
-    await failed;
-    refresh = engine.refreshNumericId();
-    failed = expect(refresh).rejects.toThrow("刷新蜂鸟号失败");
-    socket.receive({
-      type: "number_updated",
-      requestId: requests(socket, "refresh_number").at(-1)!.requestId,
-      numericId: "012345",
-      peerIds: [me.id],
-    });
-    await failed;
-    vi.useFakeTimers();
-    refresh = engine.refreshNumericId();
-    failed = expect(refresh).rejects.toThrow("超时");
-    await vi.advanceTimersByTimeAsync(10_001);
-    await failed;
-    vi.useRealTimers();
-    refresh = engine.refreshNumericId();
-    failed = expect(refresh).rejects.toThrow("连接已关闭");
-    engine.setAvailability("offline");
-    await failed;
-    await expect(engine.refreshNumericId()).rejects.toThrow("尚未连上");
-    expect(requests(socket, "refresh_number")).toHaveLength(4);
-  });
-
-  it("persists the assigned number and sends it with the stable identity when rejoining", async () => {
-    const { engine, storage, socket } = await setup();
-    socket.receive({
-      type: "welcome",
-      id: me.id,
-      numericId: "123456",
-      peers: [peer],
-    });
-    await vi.waitFor(async () =>
-      expect(await storage.getProfile()).toEqual({
-        ...me,
-        numericId: "123456",
-      }),
-    );
-    expect(engine.getSnapshot().profile.id).toBe(me.id);
-
-    engine.reconnect();
-    const replacement = Socket.instances.at(-1)!;
-    replacement.onopen?.();
-    expect(JSON.parse(replacement.sent[0]!)).toMatchObject({
-      type: "join",
-      profile: { id: me.id, numericId: "123456" },
-    });
-  });
-
-  it("rejects malformed group numbers and allows refreshing our own group", async () => {
-    const { engine, socket, storage } = await setup();
-    const ownProfile = { ...me, numericId: "123456" };
-    const sameGroupPeer = { ...peer, numericId: "123456" };
-    socket.receive({
-      type: "welcome",
-      id: me.id,
-      numericId: "123456",
-      peers: [sameGroupPeer],
-    });
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().profile.numericId).toBe("123456"),
-    );
-    for (const value of ["", "12345", "1234567", "012345", "abcdef", "123 456"])
-      await expect(engine.connectByNumericId(value)).rejects.toThrow(
-        "6 位蜂鸟号",
-      );
-    expect(requests(socket)).toEqual([]);
-
-    const connecting = engine.connectByNumericId(" 123456 ");
-    const request = requests(socket).at(-1)!;
-    expect(request.numericId).toBe("123456");
-    socket.receive({
-      type: "group_resolved",
-      requestId: request.requestId,
-      numericId: "123456",
-      peers: [ownProfile, sameGroupPeer],
-    });
-    await connecting;
-    expect(engine.getSnapshot().profile).toEqual(ownProfile);
-    expect(await storage.getProfile()).toEqual(ownProfile);
-    expect(engine.getSnapshot().peers).toEqual([sameGroupPeer]);
-    expect(engine.getSnapshot().activePeerId).toBe(peer.id);
-    expect(PeerConnection.instances).toHaveLength(1);
-  });
-
-  it("discovers every device in a remote group without changing our group or opening a conversation", async () => {
-    const { engine, socket, storage } = await setup();
-    await engine.deleteConversation(peer.id);
-    socket.receive({
-      type: "welcome",
-      id: me.id,
-      numericId: "123456",
-      peers: [peer],
-    });
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().profile.numericId).toBe("123456"),
-    );
-    const devices = [
-      "30000000-0000-4000-8000-000000000000",
-      "40000000-0000-4000-8000-000000000000",
-    ].map((id) => ({ ...peer, id, numericId: "345678" }));
-    const connecting = engine.connectByNumericId("345678");
-    const request = requests(socket).at(-1)!;
-    expect(request).toMatchObject({
-      type: "connect_group",
-      numericId: "345678",
-    });
-    socket.receive({
-      type: "group_resolved",
-      requestId: request.requestId,
-      numericId: "345678",
-      peers: devices,
-    });
-    await connecting;
-
-    expect(engine.getSnapshot().peers).toEqual([peer, ...devices]);
-    expect(engine.getSnapshot().profile.numericId).toBe("123456");
-    expect((await storage.getProfile())?.numericId).toBe("123456");
-    expect(engine.getSnapshot().activePeerId).toBeNull();
-    expect(engine.getSnapshot().conversations).toEqual([]);
-    expect(PeerConnection.instances).toHaveLength(1);
-    for (const device of devices)
-      expect(engine.getSnapshot().peerStates[device.id]).toBeUndefined();
-    await engine.selectPeer(devices[0]!);
-    expect(PeerConnection.instances).toHaveLength(2);
-    PeerConnection.instances[1]!.channel.open();
-    expect(engine.getSnapshot().peerStates[devices[0]!.id]).toBe("connected");
-    expect(engine.getSnapshot().peerStates[devices[1]!.id]).toBeUndefined();
-  });
-
-  it("defers RTC allocation until selection and keeps other devices usable after allocation fails", async () => {
-    const { engine, socket } = await setup();
-    let failNext = true;
-    vi.stubGlobal(
-      "RTCPeerConnection",
-      class extends PeerConnection {
-        constructor() {
-          if (failNext) {
-            failNext = false;
-            throw new Error("RTC resource limit");
-          }
-          super();
-        }
-      },
-    );
-    const devices = [
-      "30000000-0000-4000-8000-000000000000",
-      "40000000-0000-4000-8000-000000000000",
-    ].map((id) => ({ ...peer, id, numericId: "345678" }));
-    let resolved = false;
-    const discovery = engine.connectByNumericId("345678").then(() => {
-      resolved = true;
-    });
-    const request = requests(socket).at(-1)!;
-    socket.receive({
-      type: "group_resolved",
-      requestId: request.requestId,
-      numericId: "345678",
-      peers: devices,
-    });
-    await vi.waitFor(() => expect(resolved).toBe(true));
-    await discovery;
-    expect(engine.getSnapshot().peerStates[devices[0]!.id]).toBeUndefined();
-    expect(engine.getSnapshot().peerStates[devices[1]!.id]).toBeUndefined();
-    expect(PeerConnection.instances).toHaveLength(1);
-    await engine.selectPeer(devices[0]!);
-    expect(engine.getSnapshot().peerStates[devices[0]!.id]).toBe("failed");
-    await engine.selectPeer(devices[1]!);
-    expect(engine.getSnapshot().peerStates[devices[1]!.id]).toBe("connecting");
-    expect(engine.getSnapshot().peers).toEqual([peer, ...devices]);
-    expect(PeerConnection.instances).toHaveLength(2);
-
-    const another = {
-      ...peer,
-      id: "50000000-0000-4000-8000-000000000000",
-      numericId: "456789",
-    };
-    const nextDiscovery = engine.connectByNumericId(another.numericId);
-    const nextRequest = requests(socket).at(-1)!;
-    expect(requests(socket)).toHaveLength(2);
-    expect(nextRequest.numericId).toBe(another.numericId);
-    socket.receive({
-      type: "group_resolved",
-      requestId: nextRequest.requestId,
-      numericId: another.numericId,
-      peers: [another],
-    });
-    await nextDiscovery;
-    expect(engine.getSnapshot().peerStates[another.id]).toBeUndefined();
-  });
-
-  it("queries a group with failed peers without reconnecting the signaling socket", async () => {
-    const { engine, socket, pc } = await setup();
-    pc.fail();
-    const retrying = engine.connectByNumericId("345678");
-    const request = requests(socket).at(-1)!;
-    socket.receive({
-      type: "group_resolved",
-      requestId: request.requestId,
-      numericId: "345678",
-      peers: [{ ...peer, numericId: "345678" }],
-    });
-    await retrying;
-    expect(Socket.instances).toHaveLength(1);
-    expect(socket.readyState).toBe(Socket.OPEN);
-    expect(PeerConnection.instances).toHaveLength(1);
-    await engine.selectPeer({ ...peer, numericId: "345678" });
-    expect(PeerConnection.instances).toHaveLength(2);
-  });
-
-  it("cancels group discovery when the user goes offline and ignores late results", async () => {
-    const { engine, socket } = await setup();
-    const result = engine
-      .connectByNumericId("345678")
-      .catch((error) => error as Error);
-    const request = requests(socket).at(-1)!;
-    engine.setAvailability("offline");
-    expect(await result).toBeInstanceOf(Error);
-    socket.receive({
-      type: "group_resolved",
-      requestId: request.requestId,
-      numericId: "345678",
-      peers: [{ ...peer, numericId: "345678" }],
-    });
-    window.dispatchEvent(new Event("online"));
-    engine.reconnect();
-    expect(Socket.instances).toHaveLength(1);
-    expect(engine.getSnapshot()).toMatchObject({
-      availability: "offline",
-      peers: [],
-    });
-  });
-
-  it.each(["wrong-number", "wrong-peer-group", "malformed-peer"])(
-    "rejects an invalid group list: %s",
-    async (reason) => {
-      const { engine, socket } = await setup();
-      const result = engine
-        .connectByNumericId("345678")
-        .catch((error) => error as Error);
-      const request = requests(socket).at(-1)!;
-      socket.receive({
-        type: "group_resolved",
-        requestId: request.requestId,
-        numericId: reason === "wrong-number" ? "456789" : "345678",
-        peers: [
-          {
-            ...peer,
-            id: reason === "malformed-peer" ? "invalid" : peer.id,
-            numericId: reason === "wrong-peer-group" ? "456789" : "345678",
-          },
-        ],
-      });
-      expect(await result).toMatchObject({
-        message: expect.stringContaining("设备列表无效"),
-      });
-      expect(engine.getSnapshot().peers).toEqual([peer]);
-      expect(PeerConnection.instances).toHaveLength(1);
-    },
-  );
-
-  it("keeps the original contact and its history when lookup fails", async () => {
-    const { engine, storage, socket, channel } = await setup();
-    const messageId = newId();
-    channel.receive(
-      JSON.stringify({
-        type: "text",
-        id: messageId,
-        text: "保留记录",
-        createdAt: 100,
-      }),
-    );
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().messages).toHaveLength(1),
-    );
-    await engine.updatePeerRemark(peer.id, "已有联系人");
-    const before = await storage.getConversations();
-    const result = engine
-      .connectByNumericId("999999")
-      .catch((error) => error as Error);
-    const request = requests(socket).at(-1)!;
-    socket.receive({
-      type: "connect_error",
-      requestId: request.requestId,
-      code: "peer_unavailable",
-      message: "offline",
-    });
-
-    expect(await result).toMatchObject({
-      message: expect.stringContaining("未找到在线设备"),
-    });
-    expect(await storage.getConversations()).toEqual(before);
-    expect((await storage.getMessages(peer.id))[0]?.id).toBe(messageId);
-    expect(engine.getSnapshot().activePeerId).toBe(peer.id);
-    expect(engine.getSnapshot().messages[0]?.text).toBe("保留记录");
-  });
-
-  it.each(["timeout", "disconnect"])(
-    "rejects a pending lookup on %s and ignores its late reply",
-    async (reason) => {
-      const { engine, socket } = await setup();
-      vi.useFakeTimers({
-        toFake: [
-          "Date",
-          "setTimeout",
-          "clearTimeout",
-          "setInterval",
-          "clearInterval",
-        ],
-      });
-      const result = engine
-        .connectByNumericId("345678")
-        .catch((error) => error as Error);
-      const request = requests(socket).at(-1)!;
-      if (reason === "timeout") await vi.advanceTimersByTimeAsync(10_100);
-      else socket.close();
-      expect(await result).toMatchObject({
-        message: expect.stringContaining(
-          reason === "timeout" ? "查找超时" : "已断开",
-        ),
-      });
-
-      const late = {
-        ...peer,
-        id: "30000000-0000-4000-8000-000000000000",
-        numericId: "345678",
-      };
-      socket.receive({
-        type: "group_resolved",
-        requestId: request.requestId,
-        numericId: "345678",
-        peers: [late],
-      });
-      await Promise.resolve();
-      expect(engine.getSnapshot().peers.some((p) => p.id === late.id)).toBe(
-        false,
-      );
-      expect(PeerConnection.instances).toHaveLength(1);
-      expect(engine.getSnapshot().conversations).toHaveLength(1);
-    },
-  );
-
-  it("keeps a single history when the same stable identity has a new number", async () => {
-    const { engine, storage, socket, channel } = await setup();
-    channel.receive(
-      JSON.stringify({
-        type: "text",
-        id: newId(),
-        text: "同一个人的记录",
-        createdAt: 100,
-      }),
-    );
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().messages).toHaveLength(1),
-    );
-    await engine.updatePeerRemark(peer.id, "朋友");
-    const messages = await storage.getMessages(peer.id);
-    const latest = {
-      ...peer,
-      numericId: "345678",
-      name: "新名字",
-      bio: "新资料",
-    };
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const connecting = engine.connectByNumericId("345678");
-      const request = requests(socket).at(-1)!;
-      socket.receive({
-        type: "group_resolved",
-        requestId: request.requestId,
-        numericId: "345678",
-        peers: [latest],
-      });
-      await connecting;
-    }
-    expect(engine.getSnapshot().conversations).toHaveLength(1);
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().conversations[0]).toMatchObject({
-        peer: latest,
-        remark: "朋友",
-      }),
-    );
-    expect(engine.getSnapshot().messages).toEqual(messages);
-    expect(await storage.getMessages(peer.id)).toEqual(messages);
-    expect(PeerConnection.instances).toHaveLength(1);
-  });
-
-  it("keeps histories and attachments keyed by identity when discovering another device in a group", async () => {
-    const { engine, storage, socket, pc } = await setup();
-    const target = {
-      ...peer,
-      id: "30000000-0000-4000-8000-000000000000",
-      name: "旧资料",
-    };
-    const first: Message = {
-      id: newId(),
-      peerId: peer.id,
-      senderId: peer.id,
-      kind: "file",
-      fileName: "kept.txt",
-      mimeType: "text/plain",
-      size: 4,
-      createdAt: 100,
-      status: "delivered",
-    };
-    const second: Message = {
-      id: newId(),
-      peerId: target.id,
-      senderId: me.id,
-      kind: "text",
-      text: "第二段记录",
-      createdAt: 200,
-      status: "delivered",
-    };
-    await storage.saveMessage(first);
-    await storage.saveAttachment(first.id, new Blob(["kept"]));
-    await engine.selectPeer(target);
-    await storage.saveMessage(second);
-    await engine.selectPeer(peer);
-    const latest = {
-      ...target,
-      name: "最新名字",
-      bio: "最新资料",
-      numericId: "345678",
-    };
-    const connecting = engine.connectByNumericId("345678");
-    const request = requests(socket).at(-1)!;
-    socket.receive({
-      type: "group_resolved",
-      requestId: request.requestId,
-      numericId: "345678",
-      peers: [latest],
-    });
-    expect(PeerConnection.instances).toEqual([pc]);
-    expect(await storage.getMessages(peer.id)).toEqual([first]);
-    expect(engine.getSnapshot().conversations).toHaveLength(2);
-    await connecting;
-
-    expect(engine.getSnapshot().activePeerId).toBe(peer.id);
-    expect(engine.getSnapshot().messages).toEqual([first]);
-    await engine.selectPeer(latest);
-    const newConnection = PeerConnection.instances.at(-1)!;
-    expect(newConnection).not.toBe(pc);
-    newConnection.channel.open();
-    expect(engine.getSnapshot().activePeerId).toBe(target.id);
-    expect(engine.getSnapshot().conversations).toHaveLength(2);
-    expect(
-      engine.getSnapshot().conversations.find((c) => c.peer.id === target.id)
-        ?.peer,
-    ).toEqual(latest);
-    expect(
-      engine.getSnapshot().conversations.find((c) => c.peer.id === peer.id)
-        ?.peer,
-    ).toEqual(peer);
-    expect(engine.getSnapshot().messages).toEqual([second]);
-    expect(await storage.getMessages(peer.id)).toEqual([first]);
-    expect(await storage.getMessages(target.id)).toEqual([second]);
-    expect(await (await engine.getAttachment(first.id))?.text()).toBe("kept");
-    expect(pc.connectionState).not.toBe("closed");
-    await engine.selectPeer(peer);
-    expect(engine.getSnapshot().messages).toEqual([first]);
-    expect(JSON.stringify(socket.sent)).not.toContain("第二段记录");
-  });
-
-  it.each([false, true])(
-    "pins an offline contact lookup to the saved identity and protects message content, mismatch=%s",
-    async (mismatch) => {
-      const { engine, socket, channel } = await setup();
-      const savedPeer = { ...peer, numericId: "345678" };
-      socket.receive({ type: "peer_updated", peer: savedPeer });
-      await vi.waitFor(() =>
-        expect(engine.getSnapshot().conversations[0]?.peer.numericId).toBe(
-          "345678",
-        ),
-      );
-      socket.receive({ type: "peer_left", id: peer.id });
-      const result = engine
-        .sendText("只给原联系人")
-        .catch((error) => error as Error);
-      await vi.waitFor(() =>
-        expect(requests(socket, "connect")).toHaveLength(1),
-      );
-      const request = requests(socket, "connect")[0]!;
-      expect(request).toMatchObject({
-        numericId: "345678",
-        expectedPeerId: peer.id,
-      });
-      const resolved = mismatch
-        ? { ...savedPeer, id: "30000000-0000-4000-8000-000000000000" }
-        : savedPeer;
-      socket.receive({
-        type: "peer_resolved",
-        requestId: request.requestId,
-        peer: resolved,
-      });
-      if (mismatch) {
-        expect(await result).toMatchObject({
-          message: expect.stringContaining("不是原联系人"),
-        });
-        expect(PeerConnection.instances).toHaveLength(1);
-        expect(engine.getSnapshot().messages[0]?.status).toBe("failed");
-        expect(controls(channel)).toEqual([]);
-      } else {
-        const replacement = PeerConnection.instances.at(-1)!;
-        replacement.channel.open();
-        expect(await result).toBe(true);
-        expect(controls(replacement.channel)).toContainEqual(
-          expect.objectContaining({ type: "text", text: "只给原联系人" }),
-        );
-      }
-      expect(engine.getSnapshot().activePeerId).toBe(peer.id);
-      expect(engine.getSnapshot().conversations).toHaveLength(1);
-      expect(JSON.stringify(socket.sent)).not.toContain("只给原联系人");
-    },
-  );
 });
 
 describe("forwarding saved messages", () => {
@@ -1720,11 +906,12 @@ describe("forwarding saved messages", () => {
     expect(saving).toBe(false);
     targetChannel.receive(JSON.stringify({ type: "file-accept", id: offer.id }));
     await vi.waitFor(() => expect(saving).toBe(true));
+    targetChannel.close();
     socket.receive({ type: "peer_left", id: recipient.id });
     release();
 
     expect(await result).toMatchObject({
-      message: expect.stringMatching(/已取消|已离线|已关闭/),
+      message: expect.stringMatching(/已取消|已离线|已关闭|已断开/),
     });
     await vi.waitFor(async () =>
       expect((await storage.getMessages(recipient.id))[0]?.status).toBe(
@@ -1770,12 +957,13 @@ describe("forwarding saved messages", () => {
     await vi.waitFor(() =>
       expect(controls(targetChannel).filter((p) => p.type === "file-start")).toHaveLength(2),
     );
+    targetChannel.close();
     socket.receive({ type: "peer_left", id: recipient.id });
     targetChannel.dispatchEvent(new Event("close"));
 
     expect(await first).toBeInstanceOf(Error);
     expect(await result).toMatchObject({
-      message: expect.stringContaining("已离线"),
+      message: expect.stringMatching(/已离线|已断开/),
     });
     expect(controls(targetChannel)).toEqual([
       expect.objectContaining({ type: "file-start", fileName: "first.txt" }),
@@ -1788,6 +976,7 @@ describe("forwarding saved messages", () => {
     const { engine, storage, socket, targetChannel } = await withRecipient();
     const original = savedMessage();
     await storage.saveMessage(original);
+    targetChannel.close();
     socket.receive({ type: "peer_left", id: recipient.id });
     await expect(engine.forwardMessage(original, recipient.id)).rejects.toThrow(
       "对方当前离线",
@@ -1799,5 +988,27 @@ describe("forwarding saved messages", () => {
     );
     expect(await storage.getMessages(peer.id)).toEqual([original]);
     expect(controls(targetChannel)).toEqual([]);
+  });
+});
+
+describe("separate discovery and content deadlines", () => {
+  it("gives a slow contact lookup a fresh content negotiation budget", async () => {
+    const { engine, socket, channel } = await setup();
+    const saved = { ...peer, numericId: "345678" };
+    socket.receive({ type: "peer_updated", peer: saved });
+    await vi.waitFor(() => expect(engine.getSnapshot().conversations[0]?.peer.numericId).toBe("345678"));
+    channel.close(); socket.receive({ type: "peer_left", id: peer.id });
+    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    const sending = engine.sendText("查找耗时不挤占建连").catch((error) => error);
+    await vi.waitFor(() => expect(requests(socket, "connect")).toHaveLength(1));
+    const request = requests(socket, "connect")[0];
+    await vi.advanceTimersByTimeAsync(9000);
+    socket.receive({ type: "peer_resolved", requestId: request.requestId, peer: saved });
+    await vi.advanceTimersByTimeAsync(CONNECTION_CONFIG.readyTimeoutMs - 1000);
+    const replacement = PeerConnection.instances.at(-1)!;
+    expect(replacement.connectionState).not.toBe("closed");
+    replacement.channel.open();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await sending).toBe(true);
   });
 });

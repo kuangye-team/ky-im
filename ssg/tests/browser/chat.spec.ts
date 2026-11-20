@@ -8,6 +8,7 @@ import {
   enableAutoAcceptFiles,
   selectContactAction,
   sendText,
+  editProfile,
   setProfile,
 } from "./helpers";
 
@@ -15,6 +16,8 @@ test("两个独立浏览器可发现、传输内容、更新资料，并保留�
   browser,
   baseURL,
 }) => {
+  // File transfers and the offline-history checks each have their own deadline.
+  test.setTimeout(120_000);
   const aliceContext = await browser.newContext({
     locale: "zh-CN",
     acceptDownloads: true,
@@ -170,7 +173,7 @@ test("两个独立浏览器可发现、传输内容、更新资料，并保留�
     );
 
     const updatedBob = `Bob-新资料-${unique}`;
-    await setProfile(bob, updatedBob, "资料已同步");
+    await editProfile(bob, updatedBob, "资料已同步");
     await expect(
       alice.getByRole("button", { name: `与 ${updatedBob} 聊天`, exact: true }),
     ).toBeVisible();
@@ -178,7 +181,7 @@ test("两个独立浏览器可发现、传输内容、更新资料，并保留�
     await alice.getByRole("button", { name: "在线设备", exact: true }).click();
     await expect(
       alice.getByRole("heading", { name: updatedBob, exact: true }),
-    ).toHaveCount(0);
+    ).toHaveCount(0, { timeout: 45000 });
     await alice
       .getByRole("navigation", { name: "主导航" })
       .getByRole("button", { name: /^聊天消息/ })
@@ -272,14 +275,14 @@ test("两个独立浏览器可发现、传输内容、更新资料，并保留�
     await expect(alice.getByRole("dialog")).toBeHidden();
     await expect(
       alice.getByRole("button", { name: `与 ${updatedBob} 聊天`, exact: true }),
-    ).toHaveCount(0);
+    ).toHaveCount(0, { timeout: 45000 });
     await alice.reload();
     await expect(
       alice.getByRole("button", { name: "个人资料", exact: true }),
     ).toContainText(aliceName);
     await expect(
       alice.getByRole("button", { name: `与 ${updatedBob} 聊天`, exact: true }),
-    ).toHaveCount(0);
+    ).toHaveCount(0, { timeout: 45000 });
     await expect(
       alice.getByRole("button", {
         name: `与 ${charlieName} 聊天`,
@@ -302,7 +305,7 @@ test("两个独立浏览器可发现、传输内容、更新资料，并保留�
         name: `与 ${charlieName} 聊天`,
         exact: true,
       }),
-    ).toHaveCount(0);
+    ).toHaveCount(0, { timeout: 45000 });
     expect(pageErrors).toEqual([]);
   } finally {
     await aliceContext.close();

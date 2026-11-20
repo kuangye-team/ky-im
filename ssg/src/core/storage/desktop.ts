@@ -1,3 +1,5 @@
+import { fullProfile, publicProfile, storedProfile } from "../profile-wire";
+import { transferMetrics as metrics } from "../transferMetrics";
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AttachmentSource,
@@ -8,8 +10,10 @@ import type {
   Profile,
   StorageAdapter,
   StorageInfo,
+  StorageMove,
+  StorageUsage,
 } from "../types";
-import { MAX_FILE_SIZE, STORAGE_CONFIG } from "../../config";
+import { MAX_BUFFERED_FILE_BYTES, STORAGE_CONFIG } from "../../config";
 
 const BLOCK = STORAGE_CONFIG.chunkBytes;
 type NativeAttachment = {
@@ -21,6 +25,7 @@ type NativeAttachment = {
 type Request = { op: string; [key: string]: unknown };
 export type StorageInvoke = <T>(request: Request) => Promise<T>;
 const native: StorageInvoke = async <T>(request: Request) => {
+  const started = metrics.start();
   try {
     if (request.op === "write")
       return await invoke<T>("storage_write", request.data as ArrayBuffer, {
@@ -33,17 +38,34 @@ const native: StorageInvoke = async <T>(request: Request) => {
     return await invoke<T>("storage_request", { request });
   } catch (error) {
     throw error instanceof Error ? error : new Error(String(error));
+  } finally {
+    metrics.finish(`storage.${request.op}`, started, request.data instanceof ArrayBuffer ? request.data.byteLength : Number(request.length || 0));
   }
 };
 /** Metadata is in SQLite; payloads are read/written in bounded IPC blocks. */
 export class DesktopStorageAdapter implements StorageAdapter {
   readonly name = "SQLite + 本地文件系统";
   constructor(private readonly call: StorageInvoke = native) {}
+  async getIdentity() {
+    const key = await this.call<number[] | null>({ op: "getIdentity" });
+    return key ? new Uint8Array(key) : undefined;
+  }
+  async saveIdentity(key: Uint8Array) {
+    await this.call({ op: "saveIdentity", value: [...key] });
+  }
   async getProfile() {
-    return (await this.call<Profile | null>({ op: "getProfile" })) ?? undefined;
+    const record = await this.call<Profile | null>({ op: "getProfile" });
+    return storedProfile(record);
   }
   async saveProfile(value: Profile) {
-    await this.call({ op: "saveProfile", value });
+    await this.call({ op: "saveProfile", value: value.revision ? publicProfile(value) : value });
+  }
+  async getPeerProfiles() {
+    const rows = await this.call<unknown[]>({op: "getPeerProfiles"});
+    return rows.map(fullProfile).filter((p): p is Profile => !!p);
+  }
+  async savePeerProfile(profile: Profile) {
+    await this.call({op: "savePeerProfile", value: publicProfile(profile)});
   }
   getConversations() {
     return this.call<Conversation[]>({ op: "getConversations" });
@@ -69,11 +91,20 @@ export class DesktopStorageAdapter implements StorageAdapter {
   async clearHistory() {
     await this.call({ op: "clearHistory" });
   }
+  async resetData() {
+    await this.call({ op: "resetData" });
+  }
   getStorageInfo() {
     return this.call<StorageInfo>({ op: "info" });
   }
+  getCachedUsage() {
+    return this.call<StorageUsage | null>({ op: "cachedUsage" });
+  }
+  scanUsage(previous?: number) {
+    return this.call<StorageUsage>({ op: "scanUsage", previous });
+  }
   moveStorage(directory: string) {
-    return this.call<StorageInfo>({ op: "move", directory });
+    return this.call<StorageMove>({ op: "move", directory });
   }
 
   private async begin(
@@ -92,6 +123,11 @@ export class DesktopStorageAdapter implements StorageAdapter {
   private writer(token: string, entry = false): FileDestination {
     let closed = false;
     return {
+      nativeToken: token,
+      copyPrefixTo: async (target) => {
+        if (!target.nativeToken) throw new Error("请重新选择保存位置");
+        await this.call({ op: "copyToExternal", saved: false, from: token, to: target.nativeToken });
+      },
       write: async (blob) => {
         if (closed) throw new Error("文件已关闭");
         for (let offset = 0; offset < blob.size; offset += BLOCK) {
@@ -112,12 +148,17 @@ export class DesktopStorageAdapter implements StorageAdapter {
       },
     };
   }
+  async createExternalFileDestination(message: Message, path: string) {
+    const token = await this.call<string>({ op: "beginExternal", id: message.id, size: message.size, destination: path });
+    return this.writer(token);
+  }
   async createFileDestination(message: Message) {
     return this.writer(await this.begin(message, false));
   }
   async createFolderDestination(message: Message): Promise<FolderDestination> {
     const token = await this.begin(message, true);
     return {
+      nativeToken: token,
       createDirectory: async (path) => {
         await this.call({ op: "directory", token, path });
       },
@@ -161,6 +202,7 @@ export class DesktopStorageAdapter implements StorageAdapter {
     });
     if (!attachment || attachment.folder) return undefined;
     return {
+      nativeSource: { attachmentId: id },
       size: attachment.size,
       type: attachment.mime,
       name: attachment.name,
@@ -184,14 +226,20 @@ export class DesktopStorageAdapter implements StorageAdapter {
   async getAttachment(id: string): Promise<Blob | undefined> {
     const source = await this.getAttachmentSource(id);
     if (!source) return undefined;
-    if (source.size > MAX_FILE_SIZE)
+    if (source.size > MAX_BUFFERED_FILE_BYTES)
       throw new Error("大文件请使用另存为或转发");
     const chunks: ArrayBuffer[] = [];
     for (let offset = 0; offset < source.size; offset += BLOCK)
       chunks.push(await source.slice(offset, offset + BLOCK).arrayBuffer());
     return new Blob(chunks, { type: source.type });
   }
-  async exportAttachment(message: Message) {
+  async exportAttachment(message: Message, target?: FileDestination) {
+    if (target) {
+      if (!target.nativeToken) throw new Error("请重新选择保存位置");
+      await this.call({ op: "copyToExternal", saved: true, from: message.id, to: target.nativeToken });
+      await target.close();
+      return;
+    }
     const { save, open } = await import("@tauri-apps/plugin-dialog");
     const attachment = await this.call<NativeAttachment | null>({
       op: "attachment",
@@ -233,7 +281,6 @@ export function createDesktopStorage() {
 }
 async function initializeDesktopStorage() {
   const storage = new DesktopStorageAdapter();
-  await storage.getStorageInfo();
   await storage.resetTransfers();
   return storage;
 }

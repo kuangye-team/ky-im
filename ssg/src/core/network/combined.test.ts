@@ -1,3 +1,4 @@
+import { localRuntime } from "../capabilities";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CombinedDiscoveryAdapter } from "./combined";
 import { SIGNALING_CONFIG } from "../../config";
@@ -11,8 +12,8 @@ const peer = (id: string, numericId?: string): Profile => ({
   avatar: "🌿",
   bio: "",
   color: "#123abc",
-  device: "Desktop",
-  clientType: "web" as const,
+  device: "Linux",
+  clientType: "web" as const, ...localRuntime(true),
 });
 class Session implements DiscoverySession {
   readyState = 0;
@@ -20,6 +21,7 @@ class Session implements DiscoverySession {
   onclose: DiscoverySession["onclose"] = null;
   onerror: DiscoverySession["onerror"] = null;
   onmessage: DiscoverySession["onmessage"] = null;
+  onactivity?: () => void;
   sent: any[] = [];
   send(raw: string) {
     this.sent.push(JSON.parse(raw));
@@ -77,6 +79,38 @@ async function setup(names = ["signaling", "mdns"]) {
   return { session, central, lan, a, b, received };
 }
 describe("combined discovery", () => {
+  it("forwards an explicit rejoin while another source still lists the same device", async () => {
+    const { a, b, received } = await setup();
+    const device = peer("20000000-0000-4000-8000-000000000000");
+    a.receive({ type: "welcome", peers: [device] });
+    b.receive({ type: "welcome", peers: [device] });
+    received.length = 0;
+    a.receive({ type: "peer_left", id: device.id });
+    b.receive({ type: "peer_updated", peer: device });
+    expect(received).toEqual([]);
+    a.receive({ type: "peer_joined", peer: device });
+    expect(received).toEqual([{ type: "peer_joined", peer: device }]);
+  });
+  it("merges discovery updates and retains the latest recent numbers for source reconnects", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"] });
+    const { session, central, a, b, received } = await setup();
+    const id = "20000000-0000-4000-8000-000000000000";
+    a.receive({ type: "welcome", peers: [peer(id, "234567")] });
+    b.receive({ type: "welcome", peers: [peer(id, "234567")] });
+    session.send(JSON.stringify({ type: "discover", recentNumericIds: ["234567", "345678"] }));
+    expect(a.sent.at(-1).recentNumericIds).toEqual(["234567", "345678"]);
+    expect(b.sent.at(-1).type).toBe("discover");
+    a.receive({ type: "discovery_updated", peers: [], removedPeerIds: [id] });
+    expect(received.some((packet) => packet.type === "peer_left")).toBe(false);
+    const remote = peer("30000000-0000-4000-8000-000000000000", "345678");
+    a.receive({ type: "discovery_updated", peers: [remote], removedPeerIds: [] });
+    expect(received.filter((packet) => packet.type === "peer_joined").at(-1).peer).toEqual(remote);
+    a.close();
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.reconnectInitialDelayMs);
+    const replacement = central.sessions.at(-1)!;
+    replacement.open();
+    expect(replacement.sent[0]).toMatchObject({ type: "join", recentNumericIds: ["234567", "345678"] });
+  });
   it("keeps authentication errors when no discovery source is connected", async () => {
     const { session, a, b } = await setup();
     const error = Object.assign(new Event("error"), { message: "访问密钥不正确" });
@@ -107,7 +141,7 @@ describe("combined discovery", () => {
     });
     expect(received.filter((p) => p.type === "welcome")).toHaveLength(1);
     expect(
-      received.filter((p) => p.type === "peer_updated").map((p) => p.peer.id),
+      received.filter((p) => p.type === "peer_joined").map((p) => p.peer.id),
     ).toEqual([
       "20000000-0000-4000-8000-000000000000",
       "30000000-0000-4000-8000-000000000000",
@@ -125,7 +159,7 @@ describe("combined discovery", () => {
       { type: "peer_left", id: "20000000-0000-4000-8000-000000000000" },
     ]);
   });
-  it("clears server-specific numbers when only nearby discovery remains", async () => {
+  it("retains device numbers when only nearby discovery remains", async () => {
     const { a, b, received } = await setup();
     const id = "20000000-0000-4000-8000-000000000000";
     a.receive({
@@ -133,14 +167,12 @@ describe("combined discovery", () => {
       numericId: "123456",
       peers: [peer(id, "123456")],
     });
-    b.receive({ type: "welcome", peers: [peer(id)] });
+    b.receive({ type: "welcome", peers: [peer(id, "123456")] });
     a.close();
     expect(
-      received.filter((p) => p.type === "peer_updated").at(-1).peer.numericId,
-    ).toBeUndefined();
-    expect(
-      received.filter((p) => p.type === "discovery_number").at(-1).numericId,
-    ).toBeUndefined();
+      received.filter((p) => p.type === "peer_joined").at(-1).peer.numericId,
+    ).toBe("123456");
+    expect(received.filter((p) => p.type === "discovery_number")).toEqual([]);
     expect(received.some((p) => p.type === "peer_left")).toBe(false);
   });
   it("retries failed services independently while LAN discovery stays online", async () => {
@@ -219,7 +251,7 @@ describe("combined discovery", () => {
     );
     expect(a.sent.at(-1).to).toBe("40000000-0000-4000-8000-000000000000");
   });
-  it("keeps the displayed number and refresh on the chosen server, switching on loss", async () => {
+  it("does not publish server-owned numbers when choosing or losing a server", async () => {
     const a = source("one"),
       b = source("two");
     const session = new CombinedDiscoveryAdapter([a, b]).open();
@@ -239,17 +271,12 @@ describe("combined discovery", () => {
     b.sessions[0].open();
     b.sessions[0].receive({ type: "welcome", peers: [], numericId: "222222" });
     a.sessions[0].receive({ type: "welcome", peers: [], numericId: "111111" });
-    session.send(
-      JSON.stringify({ type: "refresh_number", requestId: "refresh" }),
-    );
-    expect(b.sessions[0].sent.at(-1).type).toBe("refresh_number");
-    expect(a.sessions[0].sent.at(-1).type).toBe("join");
     b.sessions[0].close();
     expect(
       received
         .filter((p) => p.type === "discovery_number")
         .map((p) => p.numericId),
-    ).toEqual(["222222", "111111"]);
+    ).toEqual([]);
   });
 });
 
@@ -304,7 +331,7 @@ describe("multi-server number lookups", () => {
     expect(received.filter((p) => p.type === "group_resolved")).toHaveLength(1);
     b.receive(resolved([alice, bob]));
     expect(
-      received.filter((p) => p.type === "peer_updated").map((p) => p.peer),
+      received.filter((p) => p.type === "peer_joined").map((p) => p.peer),
     ).toEqual([alice, bob]);
     expect(received.filter((p) => p.type === "group_resolved")).toHaveLength(1);
     a.receive({ type: "peer_left", id: alice.id });
@@ -374,7 +401,7 @@ describe("multi-server number lookups", () => {
     expect(received).toEqual([]);
     b.receive(resolved([bob]));
     expect(
-      received.filter((p) => p.type === "peer_updated").map((p) => p.peer),
+      received.filter((p) => p.type === "peer_joined").map((p) => p.peer),
     ).toEqual([bob]);
     expect(received.filter((p) => p.type === "group_resolved")).toEqual([
       resolved([bob]),
@@ -398,7 +425,7 @@ describe("multi-server number lookups", () => {
       { type: "peer_resolved", requestId: request.requestId, peer: alice },
     ]);
     expect(
-      received.filter((p) => p.type === "peer_updated").map((p) => p.peer),
+      received.filter((p) => p.type === "peer_joined").map((p) => p.peer),
     ).toEqual([alice]);
   });
 
@@ -415,9 +442,76 @@ describe("multi-server number lookups", () => {
     expect(received).toEqual([{ ...other, type: "group_resolved", peers: [] }]);
     await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.lookupTimeoutMs + 1);
     b.receive(resolved([bob]));
-    expect(received.some((p) => p.type === "peer_updated")).toBe(false);
+    expect(received.some((p) => p.type === "peer_joined")).toBe(false);
     session.send(JSON.stringify({ ...request, requestId: "closing" }));
     session.close();
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+it("defers pings per upstream for presence and relay traffic, but sends when idle", async () => {
+  vi.useFakeTimers();
+  const { a, b } = await setup(["one", "two"]);
+  for (const socket of [a, b]) socket.receive({ type: "welcome", peers: [] });
+  await vi.advanceTimersByTimeAsync(15000);
+  a.receive({type: "peer_joined", peer: peer("20000000-0000-4000-8000-000000000000")});
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(a.sent.filter(p => p.type === "ping")).toHaveLength(0);
+  expect(b.sent.filter(p => p.type === "ping")).toHaveLength(1);
+  a.onactivity?.();
+  await vi.advanceTimersByTimeAsync(15000);
+  b.onactivity?.();
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(a.sent.filter(p => p.type === "ping")).toHaveLength(1);
+  expect(b.sent.filter(p => p.type === "ping")).toHaveLength(1);
+});
+
+it("gives each resumed source a reply grace", async () => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+  const { a, b, central, lan } = await setup();
+  a.receive({ type: "welcome", peers: [] }); b.receive({ type: "welcome", peers: [] });
+  vi.setSystemTime(Date.now() + 120_000);
+  await vi.advanceTimersByTimeAsync(20_000);
+  expect(a.readyState).toBe(1); expect(b.readyState).toBe(1);
+  expect(a.sent.at(-1)).toEqual({ type: "ping" });
+  a.receive({ type: "pong" });
+  await vi.advanceTimersByTimeAsync(9999);
+  expect(b.readyState).toBe(1);
+  await vi.advanceTimersByTimeAsync(1002);
+  expect(b.readyState).toBe(3);
+  expect(central.sessions).toHaveLength(1);
+  expect(lan.sessions).toHaveLength(2);
+});
+
+it("tries a visible alternate source when the pinned signaling route throws", async () => {
+  const { session, a, b } = await setup(["one", "two"]);
+  const id = "20000000-0000-4000-8000-000000000000";
+  a.receive({ type: "welcome", peers: [peer(id)] }); b.receive({ type: "welcome", peers: [peer(id)] });
+  const signal = JSON.stringify({ type: "signal", to: id, data: { candidate: { candidate: "candidate:1" } } });
+  session.send(signal);
+  vi.spyOn(a, "send").mockImplementation(() => { throw Error("gone"); });
+  expect(() => session.send(signal)).not.toThrow();
+  expect(b.sent.at(-1)).toEqual(JSON.parse(signal));
+  expect(a.readyState).toBe(3);
+});
+
+it("keeps the coordinator alive while every upstream reconnects", async () => {
+  const { session, a, b, received } = await setup(["one", "two"]);
+  a.receive({ type: "welcome", peers: [] }); b.receive({ type: "welcome", peers: [] });
+  a.close(); b.close();
+  session.send('{"type":"ping"}');
+  await Promise.resolve();
+  expect(received.at(-1)).toEqual({ type: "pong" });
+  expect(session.readyState).toBe(1);
+});
+
+it("moves a failed native negotiation onto an available online route", async () => {
+  const { session, a, b } = await setup();
+  const id = "20000000-0000-4000-8000-000000000000";
+  const data = { description: { type: "offer", sdp: "v=0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n" } };
+  a.receive({ type: "welcome", peers: [peer(id)] }); b.receive({ type: "welcome", peers: [peer(id)] });
+  b.receive({ type: "signal", from: id, data: { candidate: {} } });
+  session.send(JSON.stringify({ type: "signal", to: id, data }));
+  b.receive({ type: "signal_error", to: id, data });
+  expect(a.sent.at(-1)).toEqual({ type: "signal", to: id, data });
 });

@@ -1,5 +1,20 @@
 /** 核心层继续保存稳定的原始错误；只在界面展示时翻译，历史错误也可随语言切换。 */
 export const errorEnglish: Record<string, string> = {
+  "当前浏览器无法保存文件，请更新浏览器并使用安全连接后重试": "This browser cannot save files. Update it and open a secure connection, then try again.",
+  "浏览器可用空间不足，请清理文件后重试": "There is not enough browser storage. Remove some saved files and try again.",
+  "文件大小无法读取，请重新选择": "The file size could not be read. Select it again.",
+  "文件大小发生变化，请重新发送": "The file size has changed. Send it again.",
+  "文件尚未接收完整，请重新发送": "The file is incomplete. Send it again.",
+  "文件夹尚未接收完整，请重新发送": "The folder is incomplete. Send it again.",
+
+  "重置未完成，请检查文件权限和磁盘连接后重试": "Check file permissions and reconnect the storage drive, then try the reset again",
+  "请关闭其他蜂鸟页面后重试": "Close other Hummingbird tabs and try again",
+  "无法确认应用数据的位置，请检查存储目录后重试": "Check the storage location and try again",
+  "暂时无法连接": "Unable to connect",
+  "对方暂时没有回应，请稍后重试": "The other person is not responding. Try again shortly.",
+  "等待恢复已超时，请重新发送": "The connection could not be restored in time. Send the file again.",
+  "文件已取消或无法继续接收，请重新发送": "This file was cancelled or can no longer be received. Send it again.",
+  "文件进度无法确认，请重新发送": "The received part of the file could not be confirmed. Send it again.",
   "访问密钥格式不正确，请重新填写":
     "The access key format is invalid. Please enter it again.",
   "访问密钥不正确或无权访问，请检查后重试":

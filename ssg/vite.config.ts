@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
-import { LANGUAGE_CONFIG, LOADING_CONFIG } from "./src/config";
+import { LANGUAGE_CONFIG, LOADING_CONFIG, rtcMessageSizeFromEnv } from "./src/config";
 import { THEME_CONFIG } from "./src/theme-config";
 import { minify } from "html-minifier-terser";
 import { VitePWA } from "vite-plugin-pwa";
@@ -15,6 +15,11 @@ export default defineConfig(({ mode }) => {
   const root = fileURLToPath(new URL(".", import.meta.url));
   const env: Record<string, string> = cloudflare ? {} : loadEnv(mode, root, "");
   const cloudflareConfig = cloudflare ? cloudflareEnv(root) : {};
+  rtcMessageSizeFromEnv(cloudflare
+    ? JSON.parse(cloudflareConfig.define?.["import.meta.env.VITE_RTC_MAX_MESSAGE_SIZE"] ?? "null")
+    : env.VITE_RTC_MAX_MESSAGE_SIZE);
+  const releaseVersion = String(process.env.RELEASE_VERSION || env.RELEASE_VERSION || JSON.parse(cloudflareConfig.define?.["import.meta.env.RELEASE_VERSION"] || '"0.1.0"')).trim().replace(/^v/, "");
+  if (!/^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(releaseVersion)) throw new Error("Invalid RELEASE_VERSION");
   const port = desktop ? 1420 : Number(env.WEB_PORT || 5173);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("WEB_PORT 必须是 1–65535 之间的整数");
@@ -23,7 +28,12 @@ export default defineConfig(({ mode }) => {
     root,
     ...cloudflareConfig,
     cacheDir: fileURLToPath(new URL(`../temp/cache/vite/${mode}`, import.meta.url)),
-    define: { ...cloudflareConfig.define, "import.meta.env.VITE_DESKTOP": JSON.stringify(desktop) },
+    define: {
+      ...cloudflareConfig.define,
+      "import.meta.env.VITE_DESKTOP": JSON.stringify(desktop),
+      "import.meta.env.TAURI_ENV_PLATFORM": JSON.stringify(desktop ? process.env.TAURI_ENV_PLATFORM || "" : ""),
+      "import.meta.env.RELEASE_VERSION": JSON.stringify(releaseVersion),
+    },
     plugins: [
       // Cached dependencies now live outside node_modules; skip React transforms for them.
       react({ exclude: [/\/node_modules\//, /\/temp\/cache\//] }),
@@ -36,6 +46,7 @@ export default defineConfig(({ mode }) => {
         // The entry bundle supplies the manifest and its Data URL icons.
         manifest: false,
         workbox: {
+          cacheId: "hummingbird",
           // Control first-time visits too, while updated workers still wait for consent.
           clientsClaim: true,
           globPatterns: ["**/*.{js,css,html,svg,png,woff2}"],

@@ -37,12 +37,12 @@ registerStorageAdapter("browser", () => {
   return history;
 });` });
     });
-    // Lower only the browser persistence boundary for the transfer exercise.
+    // Lower only the buffered/preview threshold for the transfer exercise.
     // The first offer still carries the exact reported 600 MiB size.
     for (const context of [sender, receiver])
       await context.route("**/src/config.ts", async (route) => {
         const response = await route.fetch();
-        const body = (await response.text()).replace(/MAX_FILE_SIZE = [^;]+/, "MAX_FILE_SIZE = 1048576");
+        const body = (await response.text()).replace(/MAX_BUFFERED_FILE_BYTES = [^;]+/, "MAX_BUFFERED_FILE_BYTES = 1048576");
         await route.fulfill({ response, body });
       });
     await sender.addInitScript(() => {
@@ -50,7 +50,7 @@ registerStorageAdapter("browser", () => {
       Object.assign(window, { binaryFrameSizes: frames });
       const send = RTCDataChannel.prototype.send;
       RTCDataChannel.prototype.send = function (data) {
-        if (data instanceof ArrayBuffer) frames.push(data.byteLength);
+        if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) frames.push(data.byteLength);
         return send.call(this, data);
       };
       document.addEventListener("change", (event) => {
@@ -60,13 +60,6 @@ registerStorageAdapter("browser", () => {
           file.slice = () => { throw new Error("Content read before acceptance"); };
         }
       }, true);
-    });
-    await receiver.addInitScript(() => {
-      Object.defineProperty(window, "showSaveFilePicker", {
-        configurable: true,
-        value: async () => (await navigator.storage.getDirectory())
-          .getFileHandle("desktop-received.bin", { create: true }),
-      });
     });
     const alice = await sender.newPage();
     const bob = await receiver.newPage();
@@ -81,7 +74,7 @@ registerStorageAdapter("browser", () => {
     await alice.getByLabel("选择文件", { exact: true }).setInputFiles({
       name: "600MiB.bin", mimeType: "application/octet-stream", buffer: Buffer.from("metadata only"),
     });
-    await expect(bob.getByRole("button", { name: "接收并保存", exact: true })).toBeVisible();
+    await expect(bob.getByRole("button", { name: "接收", exact: true })).toBeVisible();
     await expect(alice.getByText("等待对方确认", { exact: true })).toBeVisible();
     expect(await calls()).toEqual([]);
     await bob.screenshot({ path: resolve("../temp/screenshot/desktop-600MiB-receive-request.png"), fullPage: true });
@@ -94,11 +87,17 @@ registerStorageAdapter("browser", () => {
     await alice.getByLabel("选择文件", { exact: true }).setInputFiles({
       name: "并行保存.bin", mimeType: "application/octet-stream", buffer: bytes,
     });
-    await bob.getByRole("button", { name: "接收并保存", exact: true }).click();
+    await bob.getByRole("button", { name: "接收", exact: true }).click();
     await expect(alice.getByText("已送达", { exact: true })).toBeVisible();
-    expect(await alice.evaluate(() =>
-      (window as unknown as { binaryFrameSizes: number[] }).binaryFrameSizes))
-      .toEqual([...Array(32).fill(128 * 1024 + 44), 17 + 44]);
+    const sizes = await alice.evaluate(() => (window as unknown as { binaryFrameSizes: number[] }).binaryFrameSizes);
+    expect(sizes.length).toBeGreaterThan(0);
+    const limit = await alice.evaluate(async () => {
+      const { rtcMessageLimit } = await import("/src/core/network/libp2p/rtc-limits.ts");
+      return rtcMessageLimit;
+    });
+    expect(Math.max(...sizes)).toBeLessThanOrEqual(limit);
+    // RTC frames carry encrypted libp2p framing, not individual application
+    // packets. Verify payload completeness from both saved copies below.
     expect(await calls()).toEqual([
       { op: "begin", bytes: 0 },
       { op: "write", bytes: 2 * 1024 * 1024 },
@@ -108,8 +107,11 @@ registerStorageAdapter("browser", () => {
     ]);
     const expected = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)));
     const remote = await bob.evaluate(async () => {
-      const file = await (await (await navigator.storage.getDirectory())
-        .getFileHandle("desktop-received.bin")).getFile();
+      const { IndexedDBStorageAdapter } = await import("/src/core/storage.ts");
+      const store = new IndexedDBStorageAdapter();
+      const message = (await store.getFiles()).find((entry) => entry.fileName === "并行保存.bin");
+      const file = await store.getAttachment(message.id);
+      await store.close();
       return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", await file.arrayBuffer())));
     });
     expect(remote).toEqual(expected);

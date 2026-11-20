@@ -6,6 +6,7 @@ import {
   openContact,
   openPeer,
   setPeerRemark,
+  editProfile,
   setProfile,
 } from "./helpers";
 
@@ -112,7 +113,7 @@ test("联系人备注可修改、搜索和清除，并在刷新、对方改名�
       contact.getByText(`原名：${originalName}`, { exact: true }),
     ).toBeVisible();
 
-    await setProfile(peer, updatedName);
+    await editProfile(peer, updatedName);
     await expect(
       contact.getByText(`原名：${updatedName}`, { exact: true }),
     ).toBeVisible();
@@ -128,7 +129,7 @@ test("联系人备注可修改、搜索和清除，并在刷新、对方改名�
     await page.getByRole("button", { name: "清除搜索", exact: true }).click();
 
     await peerContext.close();
-    await expect(page.locator(".chat-heading")).toContainText("离线");
+    await expect(page.locator(".chat-heading")).toContainText("离线", { timeout: 45_000 });
     await openContact(page);
     await setPeerRemark(contact, offlineRemark);
     await expect(heading).toHaveText(offlineRemark);

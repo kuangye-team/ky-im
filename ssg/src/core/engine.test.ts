@@ -1,3 +1,5 @@
+import { testNetwork } from "./test-network";
+import { localRuntime } from "./capabilities";
 import "fake-indexeddb/auto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createChatEngine, MAX_REMARK_LENGTH } from "./engine";
@@ -18,7 +20,7 @@ const peer = (): Profile => ({
   avatar: "🌙",
   color: "#597461",
   device: "Mac",
-  clientType: "web" as const,
+  clientType: "web" as const, ...localRuntime(true),
 });
 
 describe("local automatic file receiving", () => {
@@ -210,6 +212,47 @@ afterEach(async () => {
 });
 
 describe("chat engine persistence and offline behavior", () => {
+  it("waits for a running save, resets identity and fences off late writes", async () => {
+    vi.stubGlobal("window", new EventTarget());
+    const storage = adapter();
+    const engine = await createChatEngine(storage);
+    const original = engine.getSnapshot().profile;
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    const save = storage.saveProfile.bind(storage);
+    vi.spyOn(storage, "saveProfile").mockImplementationOnce(async (profile) => {
+      entered();
+      await pending;
+      await save(profile);
+    });
+    const saving = engine.updateProfile({ name: "正在保存" });
+    await started;
+    const resetting = engine.resetData();
+    release();
+    await saving;
+    await resetting;
+    expect(await storage.getProfile()).toBeUndefined();
+    await expect(engine.updateProfile({ name: "迟到的旧资料" })).rejects.toThrow("正在重置");
+    expect(await storage.getProfile()).toBeUndefined();
+    const next = await createChatEngine(storage);
+    expect(next.getSnapshot().profile.id).not.toBe(original.id);
+  });
+
+  it("reports reset storage failure and keeps old writes stopped", async () => {
+    vi.stubGlobal("window", new EventTarget());
+    const storage = adapter();
+    const engine = await createChatEngine(storage);
+    const start = vi.spyOn(engine, "start").mockImplementation(() => {});
+    const original = engine.getSnapshot().profile;
+    vi.spyOn(storage, "resetData").mockRejectedValueOnce(new Error("disk unavailable"));
+    await expect(engine.resetData()).rejects.toThrow("disk unavailable");
+    expect(start).not.toHaveBeenCalled();
+    expect(await storage.getProfile()).toEqual(original);
+    await engine.resetData();
+    expect(await storage.getProfile()).toBeUndefined();
+  });
   it("creates a stable identity without seeded peers or conversations", async () => {
     const storage = adapter();
     const first = await createChatEngine(storage);
@@ -362,6 +405,7 @@ describe("chat engine persistence and offline behavior", () => {
         Socket.instances.push(this);
       }
       send(value: string) {
+        if (JSON.parse(value).type === "capabilities") { this.onmessage?.({ data: JSON.stringify({ type: "capabilities", ...localRuntime() }) }); return; }
         this.sent.push(value);
       }
       close() {
@@ -372,7 +416,7 @@ describe("chat engine persistence and offline behavior", () => {
     vi.stubGlobal("window", new EventTarget());
     vi.stubGlobal("location", { protocol: "http:", host: "192.168.1.2:5173" });
     vi.stubGlobal("WebSocket", Socket);
-    const engine = await createChatEngine(adapter());
+    const engine = await createChatEngine(adapter(), testNetwork());
     vi.useFakeTimers();
     engine.start();
     const socket = Socket.instances[0]!;

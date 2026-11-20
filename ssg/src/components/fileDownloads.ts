@@ -105,6 +105,17 @@ export async function chooseFileDestination(
   return handle.createWritable();
 }
 
+export async function chooseIncomingFileDestination(storage: StorageAdapter, message: Message) {
+  const name = message.fileName || "附件";
+  if (storage.createExternalFileDestination) {
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    const path = await save({ defaultPath: name.replace(/[/\\\\]/g, "_") });
+    if (!path) throw new DOMException("Cancelled", "AbortError");
+    return storage.createExternalFileDestination(message, path);
+  }
+  return chooseFileDestination(name);
+}
+
 export function readableSize(size = 0) {
   if (size < 1024) return `${size} B`;
   if (size < 1024 ** 2) return `${(size / 1024).toFixed(1)} KB`;

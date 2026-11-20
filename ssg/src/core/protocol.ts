@@ -1,7 +1,9 @@
+import { isRuntimeInfo } from "./capabilities";
+import { isClientType, isDevice } from "../device-platform";
 import type { Profile } from "./types";
 import { validFolderName, validPath } from "./folders";
 import {
-  CHUNK_SIZE,
+  MAX_FILE_CHUNK_BYTES,
   FOLDER_CONFIG,
   MAX_CONTROL_BYTES,
   MAX_TRANSFER_SIZE,
@@ -12,7 +14,7 @@ import {
 export {
   CHUNK_SIZE,
   MAX_CONTROL_BYTES,
-  MAX_FILE_SIZE,
+  MAX_BUFFERED_FILE_BYTES,
   MAX_TEXT_BYTES,
 } from "../config";
 // 以下为线协议布局，不是部署配置；修改需要同时升级通信双方。
@@ -36,7 +38,8 @@ export function newId(): string {
 }
 
 export type ControlPacket =
-  | { type: "peer-ping" | "peer-pong"; id: string }
+  | { type: "receipt-query"; id: string }
+  | { type: "receipt"; id: string; status: "unknown" | "receiving" | "complete" }
   | {
       type: "folder-start";
       id: string;
@@ -46,7 +49,6 @@ export type ControlPacket =
       directoryCount: number;
       createdAt: number;
     }
-  | { type: "folder-supported"; id: string }
   | { type: "folder-end"; id: string }
   | {
       type: "folder-entry";
@@ -73,6 +75,9 @@ export type ControlPacket =
     }
   | { type: "file-end"; id: string }
   | { type: "file-accept"; id: string; streaming?: boolean }
+  | { type: "file-resume"; id: string; request: string }
+  | { type: "file-resumed"; id: string; request: string; received: number; sequence: number; folder?: { index: number; offset?: number }; complete?: true }
+  | { type: "file-hold"; id: string; active: boolean }
   | { type: "file-progress"; id: string; received: number }
   | { type: "ack"; id: string }
   | { type: "transfer-error"; id: string; message: string };
@@ -92,9 +97,10 @@ export function parseControlPacket(raw: string): ControlPacket | null {
   if (!packet || typeof packet !== "object") return null;
   const p = packet as Record<string, unknown>;
   if (typeof p.id !== "string" || !uuidPattern.test(p.id)) return null;
-  if (p.type === "peer-ping" || p.type === "peer-pong")
-    return { type: p.type, id: p.id };
-  if (p.type === "folder-supported" || p.type === "folder-end")
+  if (p.type === "receipt-query") return { type: p.type, id: p.id };
+  if (p.type === "receipt" && ["unknown", "receiving", "complete"].includes(String(p.status)))
+    return { type: p.type, id: p.id, status: p.status as "unknown" | "receiving" | "complete" };
+  if (p.type === "folder-end")
     return { type: p.type, id: p.id };
   if (
     typeof p.index === "number" &&
@@ -126,6 +132,30 @@ export function parseControlPacket(raw: string): ControlPacket | null {
         kind: p.kind,
         size: p.size,
       };
+  }
+  if (p.type === "file-hold" && typeof p.active === "boolean")
+    return { type: p.type, id: p.id, active: p.active };
+  if ((p.type === "file-resume" || p.type === "file-resumed") &&
+      typeof p.request === "string" && uuidPattern.test(p.request)) {
+    if (p.type === "file-resume") return { type: p.type, id: p.id, request: p.request };
+    if (typeof p.received === "number" && Number.isSafeInteger(p.received) &&
+        p.received >= 0 && p.received <= MAX_TRANSFER_SIZE &&
+        typeof p.sequence === "number" && Number.isInteger(p.sequence) &&
+        p.sequence >= 0 && p.sequence <= 2 ** 32) {
+      let folder: { index: number; offset?: number } | undefined;
+      if (p.folder !== undefined) {
+        const entry = p.folder as Record<string, unknown>;
+        if (!entry || typeof entry.index !== "number" || !Number.isSafeInteger(entry.index) ||
+          entry.index < 0 || entry.index > FOLDER_CONFIG.maxEntries) return null;
+        const offset = entry.offset;
+        if (offset !== undefined && (typeof offset !== "number" || !Number.isSafeInteger(offset) ||
+          offset < 0 || offset > p.received)) return null;
+        folder = { index: entry.index, ...(offset === undefined ? {} : { offset }) };
+      }
+      return { type: p.type, id: p.id, request: p.request, received: p.received,
+        sequence: p.sequence, ...(folder ? { folder } : {}), ...(p.complete === true ? { complete: true } : {}) };
+    }
+    return null;
   }
   if (p.type === "file-accept")
     return {
@@ -217,32 +247,33 @@ export function parseControlPacket(raw: string): ControlPacket | null {
 export function encodeChunk(
   id: string,
   sequence: number,
-  data: ArrayBuffer,
+  data: ArrayBuffer | Uint8Array<ArrayBuffer>,
 ): ArrayBuffer {
   if (
     !uuidPattern.test(id) ||
     !Number.isInteger(sequence) ||
     sequence < 0 ||
     sequence >= 2 ** 32 ||
-    data.byteLength > CHUNK_SIZE ||
+    data.byteLength > MAX_FILE_CHUNK_BYTES ||
     !data.byteLength
   )
     throw new Error("无效的数据块");
   const buffer = new ArrayBuffer(HEADER_SIZE + data.byteLength);
   const view = new DataView(buffer);
   view.setUint32(0, MAGIC);
-  new Uint8Array(buffer, 4, 36).set(encoder.encode(id));
+  encoder.encodeInto(id, new Uint8Array(buffer, 4, 36));
   view.setUint32(40, sequence);
-  new Uint8Array(buffer, HEADER_SIZE).set(new Uint8Array(data));
+  new Uint8Array(buffer, HEADER_SIZE).set(data instanceof Uint8Array ? data : new Uint8Array(data));
   return buffer;
 }
 
+/** The receiver owns this complete frame. Keep the payload view until the file writer consumes it. */
 export function decodeChunk(
   buffer: ArrayBuffer,
 ): { id: string; sequence: number; data: Uint8Array<ArrayBuffer> } | null {
   if (
     buffer.byteLength <= HEADER_SIZE ||
-    buffer.byteLength > HEADER_SIZE + CHUNK_SIZE
+    buffer.byteLength > HEADER_SIZE + MAX_FILE_CHUNK_BYTES
   )
     return null;
   const view = new DataView(buffer);
@@ -252,7 +283,7 @@ export function decodeChunk(
   return {
     id,
     sequence: view.getUint32(40),
-    data: new Uint8Array(buffer.slice(HEADER_SIZE)),
+    data: new Uint8Array(buffer, HEADER_SIZE),
   };
 }
 
@@ -260,12 +291,15 @@ export function isProfile(value: unknown): value is Profile {
   if (!value || typeof value !== "object") return false;
   const p = value as Record<string, unknown>;
   return (
+    isRuntimeInfo(p) &&
     typeof p.id === "string" &&
-    uuidPattern.test(p.id) &&
+    (uuidPattern.test(p.id) || /^12D3KooW[1-9A-HJ-NP-Za-km-z]{44}$/.test(p.id)) &&
+    (p.revision === undefined || Number.isSafeInteger(p.revision) && (p.revision as number) > 0) &&
+    (p.extend === undefined || (p.extend !== null && typeof p.extend === "object" && !Array.isArray(p.extend))) &&
     (p.numericId === undefined || isNumericId(p.numericId)) &&
     typeof p.name === "string" &&
     p.name.trim().length > 0 &&
-    p.name.length <= 40 &&
+    Array.from(p.name).length <= 48 &&
     typeof p.bio === "string" &&
     p.bio.length <= PROFILE_BIO_MAX_LENGTH &&
     typeof p.color === "string" &&
@@ -273,9 +307,8 @@ export function isProfile(value: unknown): value is Profile {
     typeof p.avatar === "string" &&
     p.avatar.length > 0 &&
     p.avatar.length <= 16 &&
-    typeof p.device === "string" &&
-    p.device.length <= 64 &&
-    (p.clientType === "web" || p.clientType === "app")
+    (p.device === undefined || isDevice(p.device)) &&
+    isClientType(p.clientType)
   );
 }
 

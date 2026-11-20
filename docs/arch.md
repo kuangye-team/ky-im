@@ -1,68 +1,89 @@
-# 通信架构
+# Communication architecture
 
-发现、存活、通道和送达分别判断。在线状态仅作提示：对方离线也可尝试发送，界面提醒可能接收不到；通道打开即可发送，无需等待 pong。消息以对端保存后的 ack 为送达依据。
+English | [简体中文](arch.zh.md) · [Project overview](../README.md)
 
-## 发现与传输
+## Layers and data flow
+
+```mermaid
+flowchart TB
+    UI["React interface<br/>Browser / desktop WebView"]
+    Chat["ChatEngine<br/>Contacts, connections, history"]
+    Tasks["TransferService<br/>Acceptance, progress, save receipts"]
+    Web["Browser runtime<br/>BrowserTransferBackend + js-libp2p"]
+    Native["Desktop runtime<br/>NativeTransferBackend → Rust file tasks + rust-libp2p"]
+    BrowserStore["Browser storage<br/>IndexedDB records / OPFS attachments"]
+    Disk["Desktop storage<br/>SQLite records / managed attachments"]
+    Peer["Peer device"]
+    UI <-->|Commands and state| Chat
+    UI -->|Send, receive, cancel| Tasks
+    Chat <-->|Connections and history| Tasks
+    Tasks --> Web
+    Tasks --> Native
+    Web --> BrowserStore
+    Native --> Disk
+    Web <-->|WebTransport, WebRTC or encrypted relay| Peer
+    Native <-->|TCP, QUIC, WebTransport, WebRTC or encrypted relay| Peer
+```
+
+A device's identity is its PeerId, derived from a persistent Ed25519 key. Its six-digit Hummingbird number is used for discovery. Several devices can share a number and still have distinct identities. The two peers handle messages, attachments, and save receipts. Each keeps its own offline history.
+
+## Discovery and connections
+
+| Stage | How it works |
+| --- | --- |
+| Discovery | Each device registers over a WebSocket with each enabled signaling server by signing a challenge. Servers group devices by namespace and source IP and support number lookups. Desktop clients also advertise LAN addresses over mDNS. Clients merge discoveries by PeerId. |
+| Connection setup | libp2p authenticates the peer and opens business streams. TCP, WebRTC and WebSocket tunnels use Noise and Yamux. QUIC provides authentication and multiplexing. ICE selects a direct or TURN-relayed path. When WebRTC is needed, the browser exchanges SDP on `/hummingbird/rtc-signal/2.0.0` over an authenticated WebTransport connection. If there is no carrier or stream negotiation fails, it sends `session` and `description` in `signal.data` through the server. A failed stream attempt gets a fresh session ID on fallback. |
+| Browser to desktop | A desktop includes a reverse-dial request in its pinned address announcement. Discovery and listener updates share a 100 ms debounce per peer, with address sets deduplicated per server session. In a secure context the browser tries up to four peers in the background and backs off on failure. The desktop reuses the connection or asks the browser to dial again when sending. Noise authenticates the first bidirectional stream. Later streams carry chat and files. Each listener rotates its 14-day certificate every seven days. [libp2p WebTransport specification](https://github.com/libp2p/specs/blob/master/webtransport/README.md) |
+| Server relay | If both peers opt in and are visible on the same relay-enabled server, it can forward ciphertext. The server sees discovery summaries, peer identities, timing, and traffic volume. |
+| Presence | Authenticated traffic, receipts, and successful probes confirm presence. Peers exchange profile revisions and fetch changed profiles on demand. A failed probe triggers connection recovery. Rediscovery brings the next check forward. |
+| Server heartbeat | Each server connection tracks its own incoming traffic. Responses, signaling and relay traffic postpone its next ping. The native server probes idle connections and closes unresponsive ones. |
+
+Messages, transfers, and probes reuse a healthy connection to the same PeerId. Each client retains up to ten idle peers, prioritizing recent exchanges. Active transfers and pending receipts keep their connections. Losing a signaling server closes its tunnels and pending negotiations. An established desktop WebRTC connection can continue independently.
+
+The native Axum/Tokio server keeps its online directory in memory. The Cloudflare Worker splits room connections, number memberships and subscriptions, and device session routes across three Durable Object classes. Both share protocol parsing, signature verification, and relay flow control.
+
+## File transfers and data ownership
+
+| Component | Responsibility |
+| --- | --- |
+| `ChatEngine` | Provides connections and conversation history, publishes state to the UI, and tells the transfer service when a connection drops, history is deleted, or the engine stops. |
+| `TransferService` | Handles `engine.transfers` commands. Coordinates acceptance, folder entry order, cancellation, resume negotiation, and final receipts. |
+| `BrowserTransferBackend` | Reads and chunks files in the browser and writes to protocol streams within the send window. Streams incoming attachments into OPFS and stores records in IndexedDB. |
+| `NativeTransferBackend` | Submits file sources and task commands through `FileTaskExecutor` and reports aggregate progress to the WebView. |
+| Rust file tasks and storage | File tasks hold source handles and control read-ahead, chunking, receive order, and resume offsets. Storage manages paths, commits writes, cleans up cancellations, and reads saved attachments. [File tasks](../app/src/p2p/files.rs) · [Storage](../app/src/storage) |
+| Rust networking | Rust handles server WebSockets and relay flow control. The system WebView shares SDP, ICE and DataChannel handling with the browser. Rust can exchange SDP over an authenticated desktop connection. [WebRTC implementation](../ssg/src/core/network/libp2p/bridge.ts) The transport module connects bounded byte pipes to the same Swarm. [Network](../app/src/p2p/network.rs) · [Transport](../app/src/p2p/transport.rs) |
+
+Desktop users grant access to disk files through the native picker or drag and drop. Saved chat attachments are opened by their managed identifiers. WebRTC transfers pass file blocks between Rust and the WebView over bounded binary IPC. TCP, QUIC and WebTransport transfers use native sockets directly. Content originating in the WebView, such as clipboard data, is staged in chunks before it goes to a native task. Concurrent large-file sends share the native scheduling policy until the last active send pauses or ends.
+
+The receiver verifies the size, commits the attachment, and saves the message before sending the final receipt. Peers can resume interrupted transfers within the same running session. For folders, the receiver confirms the entry index, file offset, and next chunk number.
+
+Choosing an external destination during a single-file transfer moves the received prefix before writes continue there. The chat keeps the transfer record. If the attachment was already committed, the client exports a copy.
+
+### WebRTC file channels
+
+Chat messages, folders, and save receipts always use the ordered channel. Once the receiver accepts a single file, the sender selects a path for its contents on the same WebRTC connection.
 
 ```mermaid
 flowchart LR
-    S[多个发现服务器] --> D[按设备 UUID 合并]
-    L[mDNS 本地发现] --> D
-    D --> N[查找与连接协商]
-    N --> T[TCP / WebRTC / 允许的中转]
-    T --> C[联系人内容通道]
-    C --> H[存活检查与重协商]
-    C --> M[消息传输与接收确认]
+    Size{"Single file<br/>over 2 MiB?"}
+    Size -->|No| Ordered["Ordered channel<br/>Noise file stream"]
+    Size -->|Yes| Bound{"Unordered channel supported<br/>and binding confirmed?"}
+    Bound -->|No| Ordered
+    Bound -->|Yes| Bulk["Reliable unordered channel"]
 ```
 
-| 层次 | 规则 |
-| --- | --- |
-| 身份 | UUID 关联联系人和历史；蜂鸟号是分组入口，恢复联系人时必须校验 UUID |
-| 多来源发现 | 各来源独立心跳、重连；按 UUID 合并，一个来源失效不移除其他来源仍能发现的设备 |
-| 协商路由 | 优先沿对端信令来源回复，否则选择能发现目标的可用来源；来源断开后可换路由 |
-| 直接传输 | 网页使用 WebRTC；桌面同时启用时先 TCP，约 4 秒未打开则回退 WebRTC |
-| 中转 | 直连尝试约 10 秒后可回退；要求服务器支持且双方在该服务器允许中转 |
-| 消息 | 一个联系人使用一个选定通道；接收方保存后回复 ack，无确认则按消息超时处理 |
+Peers advertise the unordered channel in SDP and bind it to the authenticated PeerId by checking the RTC session ID and both DTLS certificate fingerprints on the Noise chat stream. If binding fails or times out, the sender uses the ordered stream.
 
-发现服务器的心跳只验证发现服务，不能证明联系人存活。
+For an unordered transfer, the sender splits each block into fragments and sends its descriptor on the ordered file stream. The receiver deduplicates fragments and reassembles blocks in bounded memory before writing them in order. Senders pause when the DataChannel queue fills. On desktop the WebView reads the DTLS fingerprints, sends fragments and reassembles incoming blocks. Rust exchanges binding messages, descriptors and save receipts on the authenticated connection. [File and WebRTC tuning](option.md#file-and-webrtc-tuning)
 
-## 存活与离线
+## Local storage
 
-**连续 3 个探测周期无法确认存活，标记离线。** 每个周期以实际发出的 ping 及其等待期为准，不按定时器执行次数累加。
+| Data | Browser / PWA | Desktop |
+| --- | --- | --- |
+| Identity and message history | `ky-im` IndexedDB database | SQLite at `data/ky-data/history.sqlite` under the app data directory |
+| Attachments | OPFS under `ky-im-files/ky-im/`, subject to the site's quota | `ky-files/` for saved attachments and `ky-cache/` for writes in progress under the selected file location |
+| Settings | Device preferences use the `hummingbird.` prefix | `storage-location.sqlite` in `ky-data/` records the file location. `storage.lock` coordinates exclusive access. |
 
-| 事件 | 状态处理 |
-| --- | --- |
-| 发送消息得到对端 ack、收到对端消息或有效文件数据 | 清零连续失败次数，恢复在线 |
-| 当前探测收到有效 pong，或收到对端合法 ping 等响应 | 同样清零并恢复在线 |
-| 一次探测超时，期间没有有效通信 | 失败次数加一；无在途内容时重协商当前联系人 |
-| 连续第三次无法确认存活 | 标记离线，继续重试，仍允许发送 |
-| 重建通道、重复发现或更新资料 | 不清零计数，不凭通道重新打开恢复在线 |
-| 明确传输失败或所有发现来源报告离开 | 标记离线；保留本地历史 |
-| 应用从休眠恢复 | 清零旧计数并重新探测，不把休眠时间计作失败；已有离线提示等有效响应再恢复 |
+A full reset stops writes before clearing local application data. The desktop acquires storage locks, and the browser waits for the site's database connections to close. Files exported to a user directory are managed by the user.
 
-计数按联系人保存，跨通道重建延续。错误 ID、过期 pong、旧通道的迟到事件不能确认新通道。发送成功指对端确认接收，本机 `send()` 返回只表示数据已交给本机通道。
-
-旧客户端无需支持 ping/pong：正常消息和接收确认同样证明存活。离线标记不取消正在传输的内容；在途消息继续遵守自己的接收同意、进度和确认超时，完成后再处理待重协商。
-
-## 调度
-
-| 项目 | 默认值 |
-| --- | --- |
-| 当前聊天 / 列表检查 | 10 秒 / `VITE_PEER_CHECK_INTERVAL_MS`，默认 10 秒，范围 1–300 秒 |
-| 单次探测等待 | 8 秒；文件传输繁忙时 60 秒 |
-| 建连等待 / 暂时断开宽限 | 15 秒 / 8 秒 |
-| 联系人重试 | 约 1、2、4、8、16、30 秒，带抖动；后台不短于列表检查间隔 |
-| 后台建连并发 | 最多 4 个；显式发送可立即尝试 |
-| 发现服务心跳 / 重连 | 20 秒检查，55 秒无回复失效；重连退避最多 120 秒 |
-| 普通消息确认 | 30 秒；流式传输使用更长等待 |
-
-重连退避、繁忙宽限和系统调度会延长判定时间，“3 个周期”不等于固定 30 秒。本机主动离线会停止网络、探测和重试。
-
-## 当前边界
-
-- 没有服务器离线代收或自动重发；未送达内容保留失败记录。
-- 默认 WebRTC 没有 STUN/TURN，不能保证穿越所有网络限制。
-- 重协商先关闭旧通道，再执行传输选择；尚无无缝切换、跨服务器质量评分或心跳能力协商。
-- 最后一个发现来源移除联系人，或单发现会话整体断开时，当前实现仍会清理相关内容通道。
-
-实现入口：[引擎](../ssg/src/core/engine.ts)、[网络适配器](../ssg/src/core/network/)、[配置](../ssg/src/config.ts)。故障定位见 [排障指南](trouble.md)。
+[Capability negotiation](capabilities.md) · [Configuration reference](option.md)

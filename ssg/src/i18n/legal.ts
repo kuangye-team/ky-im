@@ -5,8 +5,8 @@ export const legalEnglish: Record<string, string> = {
     "The desktop app stores profiles, contacts, and history in SQLite, with attachments in the local data directory. Language, network settings, and online status also stay on this device.",
   "这些内容不会自动同步到其他设备。可在“存储管理”中查看和迁移数据目录，请为重要文件保留备份。":
     "This data does not sync automatically. View or move the data directory in Storage management, and keep backups of important files.",
-  "接收文件默认需要确认。为联系人开启自动接收后，文件和文件夹会直接写入数据目录。未完成内容暂存在缓存目录，接收完整后移入正式文件目录；中断缓存会被清理。":
-    "Receiving files requires consent by default. Enabling automatic receiving for a contact saves their files and folders to the data directory. Incomplete content stays in the cache and moves into file storage only after completion; interrupted caches are removed.",
+  "接收文件默认需要确认。自动接收的文件和文件夹保存在应用数据目录。接收文件时选择另存为，文件会保存在所选位置，聊天只保留传输记录。":
+    "Receiving files requires consent by default. Automatically received files and folders go to the app data directory. Choosing Save As during reception saves the file to your chosen location and leaves a transfer record in chat.",
   "客户端直接传输文件夹并保留目录结构。已接收的文件、文件夹及发送时保存的文件副本由应用管理，删除对应聊天记录也会删除这些副本；另存为到其他位置的内容不受影响。":
     "The desktop app transfers folders with their structure intact. The app manages received files and folders and saved copies of sent files. Deleting their chat records deletes these copies; exports saved elsewhere are unaffected.",
   "清空聊天记录会删除本机存储中的消息、附件和联系人备注，保留个人资料。另存为的文件及对方的副本需分别管理。":
@@ -16,10 +16,10 @@ export const legalEnglish: Record<string, string> = {
     "The app finds devices through online servers or the local network and tries direct transfers first. If both devices enable relay and direct connections fail, a supporting server forwards content. Direct TCP transfers are currently unencrypted; use a trusted network.",
   "客户端在线时会在本地网络发布设备标识、昵称、头像、个性签名、设备名称和连接地址，帮助附近设备发现彼此。可发现你的设备也能看到这些公开资料。":
     "While online, the app advertises its device ID, name, avatar, bio, device type and connection address on the local network. Nearby devices can see this public profile.",
-  "小文件夹会在发送方设备上打包为 ZIP，按普通附件保存。直接接收的文件夹保存在你选择的位置，双方浏览器只保留名称、大小、文件数量和传输结果。中断后已完成的文件会保留，删除聊天记录不会删除它们。":
-    "Small folders are packed into ZIP files on the sender's device and saved as regular attachments. Folders received directly are saved to your chosen location; both browsers keep only the name, size, file count and transfer result. Completed files remain after an interruption. Deleting chat history does not delete them.",
-  "超过 {{limit}} MB 的文件需接收方确认，并直接保存到接收方选择的位置。双方浏览器仅保留文件名、大小、时间和传输结果，不保存文件内容。删除聊天记录不会删除已保存到设备上的文件。":
-    "Files over {{limit}} MB require acceptance and are saved directly to the recipient's chosen location. Both browsers keep only the filename, size, time and transfer result, without the file contents. Deleting chat history does not delete files saved to your device.",
+  "文件夹传输会保留目录结构。删除聊天记录也会删除浏览器中保存的对应文件和文件夹；已下载到其他位置的副本不受影响。不支持保存目录的浏览器会将文件夹导出为 ZIP。":
+    "Folder transfers preserve their structure. Deleting chat records also deletes their files and folders from this browser; copies downloaded elsewhere are unaffected. Browsers without directory saving export folders as ZIP files.",
+  "接收文件默认需要确认。自动接收的文件和文件夹保存在当前浏览器中，受浏览器可用空间限制。支持选择保存位置的浏览器还可在接收文件时另存为，聊天只保留传输记录。":
+    "Receiving files requires consent by default. Automatically received files and folders use this browser’s available storage. Browsers with a save picker can save an incoming file to your chosen location and keep only its transfer record in chat.",
   网站说明: "About this website",
   开源许可: "Open-source licenses",
   隐私协议: "Privacy policy",

@@ -6,8 +6,8 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=.env.local ../scripts/dev-api.mjs",
-    "build": "node ../scripts/rust.mjs build --release --locked",
-    "build:worker": "worker-build --no-panic-recovery --release --locked",
+    "build": "node --env-file-if-exists=.env.production ../scripts/rust.mjs build --release --locked",
+    "build:worker": "worker-build --profile worker --locked",
     "deploy": "wrangler deploy",
     "preview": "node --env-file-if-exists=.env.production ../scripts/dev-api.mjs --release",
     "test": "node ../scripts/rust.mjs test --locked"

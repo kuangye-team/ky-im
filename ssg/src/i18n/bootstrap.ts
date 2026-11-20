@@ -1,4 +1,6 @@
 export const bootstrapEnglish: Record<string, string> = {
+  "另一页面正在重置蜂鸟数据，完成后将重新打开。": "Another tab is resetting Hummingbird. This page will reopen when it finishes.",
+  "正在重置…": "Resetting…",
   暂时无法打开蜂鸟: "Unable to open Hummingbird",
   "浏览器暂时无法保存或读取聊天记录。":
     "Your browser could not save or read your chat history.",

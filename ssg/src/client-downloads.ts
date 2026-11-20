@@ -1,21 +1,15 @@
+import { detectDevice, type DeviceHints } from "./device-platform";
+
 export type DesktopPlatform = "windows" | "macos";
 export type ClientRelease = {
   version: string;
   downloads: Partial<Record<DesktopPlatform, string>>;
 };
 
-export function detectDesktopPlatform(device: {
-  userAgent: string;
-  platform?: string;
-  maxTouchPoints?: number;
-  userAgentData?: { platform: string };
-}): DesktopPlatform | undefined {
-  const platform = device.userAgentData?.platform || device.platform || "";
-  // iPadOS can advertise itself as a Mac; mobile devices have no desktop client.
-  if (/Android|iPhone|iPad|iPod/i.test(device.userAgent) ||
-      (/Mac/i.test(platform) && (device.maxTouchPoints || 0) > 1)) return;
-  if (/Win/i.test(platform) || /Windows/i.test(device.userAgent)) return "windows";
-  if (/Mac/i.test(platform) || /Macintosh/i.test(device.userAgent)) return "macos";
+export function detectDesktopPlatform(device: DeviceHints): DesktopPlatform | undefined {
+  const platform = detectDevice(device);
+  if (platform === "Win") return "windows";
+  if (platform === "Mac") return "macos";
 }
 
 function record(value: unknown): Record<string, unknown> {

@@ -49,6 +49,7 @@ test("多个文件同时等待确认，可追加、独立拒收、交错接收�
     await expect(row(bob, "回复.txt").getByText("已送达", { exact: true })).toBeVisible();
     await row(bob, files[0].name).getByRole("button", { name: "接收", exact: true }).click();
     await expect(row(alice, files[0].name).getByText("已送达", { exact: true })).toBeVisible();
+    await bob.screenshot({ path: "../temp/screenshot/concurrent-files-completed.png", fullPage: true });
     expect(errors).toEqual([]);
   } finally {
     await a.close();

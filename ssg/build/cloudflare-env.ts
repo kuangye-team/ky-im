@@ -15,7 +15,7 @@ export function cloudflareEnv(root: string): Pick<UserConfig, "envDir" | "envPre
     throw new Error("ssg/wrangler.jsonc 的 vars 必须是对象。");
   const define: Record<string, string> = {};
   for (const [key, value] of Object.entries(vars)) {
-    if (!/^VITE_[A-Za-z0-9_]+$/.test(key)) continue;
+    if (key !== "RELEASE_VERSION" && !/^VITE_[A-Za-z0-9_]+$/.test(key)) continue;
     if (value !== null && !["string", "boolean", "number"].includes(typeof value))
       throw new Error(`ssg/wrangler.jsonc 的 ${key} 必须是字符串、数字、布尔值或 null。`);
     define[`import.meta.env.${key}`] = JSON.stringify(value === null ? "" : String(value));

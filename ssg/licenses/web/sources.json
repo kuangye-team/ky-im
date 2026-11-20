@@ -1,6 +1,439 @@
 {
   "react-remove-scroll-bar@2.3.8": {
     "source": "https://github.com/theKashey/react-remove-scroll-bar/blob/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE",
-    "note": "Installed package declares MIT but omits LICENSE. Full text copied from upstream commit; not a corresponding-source claim."
+    "note": "Installed package declares MIT but omits LICENSE. Full text copied from upstream commit; not a corresponding-source claim.",
+    "file": "react-remove-scroll-bar-2.3.8.txt"
+  },
+  "@chainsafe/libp2p-noise@17.0.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/ChainSafe/js-libp2p-noise/aa8247f35005312a0cf32dd53952cbaa8d7cb68e/LICENSE-MIT",
+      "https://raw.githubusercontent.com/ChainSafe/js-libp2p-noise/aa8247f35005312a0cf32dd53952cbaa8d7cb68e/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@multiformats/dns@1.0.15": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/multiformats/js-dns/7715bbbc94a6630a739926e3cd6e3e06fc9144ba/LICENSE-MIT",
+      "https://raw.githubusercontent.com/multiformats/js-dns/7715bbbc94a6630a739926e3cd6e3e06fc9144ba/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "progress-events@1.1.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/progress-events/6782b21c8d9eee2f27f71b38bd7887d9a5ec24b2/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/progress-events/6782b21c8d9eee2f27f71b38bd7887d9a5ec24b2/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "uint8arrays@6.1.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/uint8arrays/4756683ff96a52f463e9b3514d49a0dceec7ca9c/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/uint8arrays/4756683ff96a52f463e9b3514d49a0dceec7ca9c/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/crypto@5.2.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/interface@3.4.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/2ca00af7ef79d1cd54e1b284f41ded62cbf894ac/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/2ca00af7ef79d1cd54e1b284f41ded62cbf894ac/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/peer-id@6.0.18": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "uint8arraylist@3.0.2": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/uint8arraylist/cc9aa9caac15ecf3a2fe127777f9c40a77710279/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/uint8arraylist/cc9aa9caac15ecf3a2fe127777f9c40a77710279/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "main-event@1.0.5": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/main-event/70285e87c435746aa37251e21a680dd4b75e0bbc/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/main-event/70285e87c435746aa37251e21a680dd4b75e0bbc/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@multiformats/multiaddr@13.0.3": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/multiformats/js-multiaddr/35cc0d9d7ba94626fa9f5bd4d672b5f616afad3e/LICENSE-MIT",
+      "https://raw.githubusercontent.com/multiformats/js-multiaddr/35cc0d9d7ba94626fa9f5bd4d672b5f616afad3e/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "uint8-varint@3.0.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/uint8-varint/99ef35b50db2c4313bad0d0a70db4bd3f9329d14/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/uint8-varint/99ef35b50db2c4313bad0d0a70db4bd3f9329d14/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/logger@6.2.16": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "protons-runtime@7.1.2": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/ipfs/protons/7b3bf06a48223684791e70f480331f9c89e7362a/LICENSE-MIT",
+      "https://raw.githubusercontent.com/ipfs/protons/7b3bf06a48223684791e70f480331f9c89e7362a/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/utils@7.4.5": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "interface-datastore@10.0.1": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/ipfs/js-stores/f2b78bd258160814546fdd93cbc86e206267cfd9/LICENSE-MIT",
+      "https://raw.githubusercontent.com/ipfs/js-stores/f2b78bd258160814546fdd93cbc86e206267cfd9/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "abort-error@1.0.2": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/abort-error/1586d68ad7c97be5fd4e05f8db767dd73a7b3211/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/abort-error/1586d68ad7c97be5fd4e05f8db767dd73a7b3211/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "interface-store@8.0.0": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/ipfs/js-stores/f225bcfdc6fb6706c486cc78b1407757414920e3/LICENSE-MIT",
+      "https://raw.githubusercontent.com/ipfs/js-stores/f225bcfdc6fb6706c486cc78b1407757414920e3/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@multiformats/multiaddr-matcher@3.0.2": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/multiformats/js-multiaddr-matcher/805490b0ce6bb4c7a94d77abee9922e7e363a478/LICENSE-MIT",
+      "https://raw.githubusercontent.com/multiformats/js-multiaddr-matcher/805490b0ce6bb4c7a94d77abee9922e7e363a478/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "weald@1.1.3": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/weald/262dd18d86c44968bcaa1676d30bc97ed5d90aab/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/weald/262dd18d86c44968bcaa1676d30bc97ed5d90aab/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "any-signal@4.2.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/jacobheun/any-signal/5b8f5fcf9621373d686b3624275a689df9bbe81b/LICENSE-MIT",
+      "https://raw.githubusercontent.com/jacobheun/any-signal/5b8f5fcf9621373d686b3624275a689df9bbe81b/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-length-prefixed@11.0.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/alanshaw/it-length-prefixed/6f51b27794ca9703f4f931d731a2ae2079c1dd71/LICENSE-MIT",
+      "https://raw.githubusercontent.com/alanshaw/it-length-prefixed/6f51b27794ca9703f4f931d731a2ae2079c1dd71/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-reader@7.0.0": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/alanshaw/it-reader/5683682dc5870432dce85843e87310f86ed86ebb/LICENSE-MIT",
+      "https://raw.githubusercontent.com/alanshaw/it-reader/5683682dc5870432dce85843e87310f86ed86ebb/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-stream-types@2.0.4": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it-stream-types/ded7024e683a81c20f05617ef8d31c22859b3606/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it-stream-types/ded7024e683a81c20f05617ef8d31c22859b3606/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-merge@3.0.15": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/b7c51ff2f8a1db866adb65429f4a6253d4732102/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/b7c51ff2f8a1db866adb65429f4a6253d4732102/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "race-signal@2.0.2": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/race-signal/482de082caedf989d1e41d283277505785ae60fc/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/race-signal/482de082caedf989d1e41d283277505785ae60fc/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-queueless-pushable@2.0.5": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/92987b8b49c825d46db92c9161d8112b09972b81/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/92987b8b49c825d46db92c9161d8112b09972b81/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-pushable@3.2.4": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/alanshaw/it-pushable/a78b307db5d6650893dc02215eefc4c1f46e11ae/LICENSE-MIT",
+      "https://raw.githubusercontent.com/alanshaw/it-pushable/a78b307db5d6650893dc02215eefc4c1f46e11ae/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "uint8-varint@2.0.5": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/uint8-varint/c1d43b6c614d72cb0e3fc29ed4f13b6608ee58fd/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/uint8-varint/c1d43b6c614d72cb0e3fc29ed4f13b6608ee58fd/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "uint8arrays@5.1.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/uint8arrays/f8983fae082a53fd073b7c03a5e3a761e6483ffb/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/uint8arrays/f8983fae082a53fd073b7c03a5e3a761e6483ffb/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/interface-internal@3.2.2": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/peer-collections@7.0.32": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/gossipsub@17.2.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "uint8arraylist@2.4.9": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/uint8arraylist/b12ce3e1b6cd04fb16cd8251704208f11056616c/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/uint8arraylist/b12ce3e1b6cd04fb16cd8251704208f11056616c/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@chainsafe/libp2p-yamux@8.0.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/ChainSafe/js-libp2p-yamux/7dca09b6e70077b892f497a3358995ed44009ec7/LICENSE-MIT",
+      "https://raw.githubusercontent.com/ChainSafe/js-libp2p-yamux/7dca09b6e70077b892f497a3358995ed44009ec7/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/identify@4.1.18": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/webtransport@6.0.44": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/noise@17.0.7": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/peer-record@9.0.19": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/9f08ba198a231200813037b602f07a16ac486a95/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/ping@3.1.17": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/multistream-select@7.0.32": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "@libp2p/peer-store@12.0.32": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "libp2p@3.5.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-MIT",
+      "https://raw.githubusercontent.com/libp2p/js-libp2p/d41cc9fdd9b92596246deba0d4b8ad0078adfc69/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-drain@3.0.12": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/5110263d23e268666219fa6005e394d6a51e66b4/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/5110263d23e268666219fa6005e394d6a51e66b4/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-parallel@3.0.16": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/ba365b629543f3f9d05a9826a4fffd9e628e21cf/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/ba365b629543f3f9d05a9826a4fffd9e628e21cf/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-all@3.0.11": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/f4cb77ba150419427f6edf3de2743fe7f24b4651/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/f4cb77ba150419427f6edf3de2743fe7f24b4651/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "mortice@3.3.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/mortice/51a28dc8e354afd755147904746d6b469c5a7492/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/mortice/51a28dc8e354afd755147904746d6b469c5a7492/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-queue@1.1.4": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/de707e7e387207f2714e2fa6895c716be7ca5c34/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/de707e7e387207f2714e2fa6895c716be7ca5c34/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "race-event@1.6.1": {
+    "file": "upstream-d5d8a7b6e5fc4b93.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/race-event/d1dc2d3318dfe46ac71836b3277f0f691c27af8b/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/race-event/d1dc2d3318dfe46ac71836b3277f0f691c27af8b/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-filter@3.1.6": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/9b07d77a8a58365b45944b8e11232eb4fba7897f/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/9b07d77a8a58365b45944b8e11232eb4fba7897f/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "datastore-core@12.0.1": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/ipfs/js-stores/b03562e11217c481cb5271e91443ab2a76955cc1/LICENSE-MIT",
+      "https://raw.githubusercontent.com/ipfs/js-stores/b03562e11217c481cb5271e91443ab2a76955cc1/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-map@3.1.6": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/61ad5b19fedc1dda5980ed7a61ff985ad00691f6/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/61ad5b19fedc1dda5980ed7a61ff985ad00691f6/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-sort@3.0.11": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/f5a4e124941c7c8f49689969bcea693ed2df3668/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/f5a4e124941c7c8f49689969bcea693ed2df3668/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-peekable@3.0.10": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/64586a73c942eced6df3991469387813f659ea2b/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/64586a73c942eced6df3991469387813f659ea2b/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
+  "it-take@3.0.11": {
+    "file": "upstream-c75d26794531b2dd.txt",
+    "sources": [
+      "https://raw.githubusercontent.com/achingbrain/it/1844d046a44543e422dfff801e9fa96fe0d76174/LICENSE-MIT",
+      "https://raw.githubusercontent.com/achingbrain/it/1844d046a44543e422dfff801e9fa96fe0d76174/LICENSE-APACHE"
+    ],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
   }
 }

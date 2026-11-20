@@ -8,6 +8,7 @@ type CopyProbe = Window & {
 
 for (const mode of ["clipboard", "unavailable", "denied"] as const) {
   test(`我的蜂鸟号可在资料与邀请朋友中复制（${mode}）`, async ({ page }) => {
+    await page.clock.install();
     // Intercept both copy paths so tests never replace the user's clipboard.
     await page.addInitScript((copyMode) => {
       const state = window as CopyProbe;
@@ -60,7 +61,9 @@ for (const mode of ["clipboard", "unavailable", "denied"] as const) {
       .toEqual([expectedNumber]);
     await expect(profile).toBeVisible();
     await expect(profileCopy).toBeFocused();
-    await expect(page.locator('.toast[role="status"]')).toContainText("已复制");
+    const toast = page.locator('.toast[role="status"]');
+    await expect(toast).toContainText("已复制");
+    await page.clock.fastForward(3000);
     await profile.getByRole("button", { name: "取消", exact: true }).click();
 
     await page.getByRole("button", { name: "在线设备", exact: true }).click();
@@ -82,6 +85,10 @@ for (const mode of ["clipboard", "unavailable", "denied"] as const) {
       .toEqual([expectedNumber, expectedNumber]);
     await expect(connectCopy).toBeFocused();
     await expect(connect).toBeVisible();
+    await page.clock.fastForward(2000);
+    await expect(toast).toContainText("已复制");
+    await page.clock.fastForward(2500);
+    await expect(toast).toHaveCount(0);
     expect(
       await page.evaluate(() => (window as CopyProbe).__fallbackInDialog),
     ).toEqual(mode === "clipboard" ? [] : [true, true]);

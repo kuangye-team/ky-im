@@ -41,14 +41,21 @@ jobs:
       - name: Install browser for real WebRTC regression tests
         working-directory: ssg
         run: npx playwright install --with-deps chromium
-      - name: Verify discovery, negotiation and file transfers
-        run: npm --prefix ssg run test:browser -- chat.spec.ts on-demand.spec.ts settings.spec.ts hybrid-network.spec.ts --project=desktop
+      - name: Verify STUN and TURN settings
+        run: npm --prefix ssg run test:browser -- ice-servers.spec.ts turn-servers.spec.ts --project=desktop
         env:
           PLAYWRIGHT_CHANNEL: chromium
+      - name: Verify discovery, negotiation and file transfers
+        run: npm --prefix ssg run test:browser -- chat.spec.ts on-demand.spec.ts settings.spec.ts capabilities.spec.ts --project=desktop
+        env:
+          PLAYWRIGHT_CHANNEL: chromium
+          # All peers run on this machine. Host ICE candidates exercise real WebRTC.
+          VITE_ICE_SERVERS: ''
       - name: Verify optional relay fallback and consent
         run: npm --prefix ssg run test:relay
         env:
           PLAYWRIGHT_CHANNEL: chromium
+          VITE_ICE_SERVERS: ''
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

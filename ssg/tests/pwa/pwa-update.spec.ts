@@ -37,11 +37,11 @@ test("真实新版就绪后显示顶部提示，点击后刷新到新版，草�
   await page.evaluate(async () => {
     // An existing conversation and draft, as they would be before a deployment.
     sessionStorage.setItem(
-      "hummingbird.chat-drafts",
+      "hummingbird.v2.chat-drafts",
       JSON.stringify({ "pwa-peer": "这段文字更新后继续写" }),
     );
     const db = await new Promise<IDBDatabase>((resolve) => {
-      const request = indexedDB.open("send-chat");
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
     });
     await new Promise<void>((resolve) => {

@@ -2,13 +2,20 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ky-im-api",
   "main": "build/index.js",
-  "build": { "command": "npm run build:worker", "watch_dir": ["src", "shared"] },
+  "build": { "command": "npm run build:worker", "watch_dir": ["src", "../shared"] },
   "compatibility_date": "2026-10-24",
   "dev": { "port": 8080 },
   "durable_objects": {
-    "bindings": [{ "name": "SIGNALING", "class_name": "SignalingHub" }],
+    "bindings": [
+      { "name": "ROOMS", "class_name": "DiscoveryRoom" },
+      { "name": "NUMBERS", "class_name": "NumberDirectory" },
+      { "name": "ROUTES", "class_name": "PeerRoute" }
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SignalingHub"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["SignalingHub"] },
+    { "tag": "v2", "renamed_classes": [{"from":"SignalingHub","to":"DiscoveryRoom"}], "new_sqlite_classes":["NumberDirectory","PeerRoute"] }
+  ],
   "vars": {
     "LATEST_JSON_URL": "https://github.com/kuangye-team/ky-im/releases/latest/download/latest.json",
     "RELAY_ENABLED": "false",

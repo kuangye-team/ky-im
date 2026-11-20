@@ -3,7 +3,8 @@ import { readLanguagePreference, resolveLanguage } from "../i18n/language";
 import type { Profile } from "./types";
 
 export function deviceLabel(profile: Pick<Profile, "device" | "clientType">) {
-  return `${profile.device} · ${profile.clientType === "app" ? "App" : "Web"}`;
+  const label = { web: "Web", desktop: "Desktop", mobile: "Mobile" }[profile.clientType];
+  return profile.device ? `${profile.device} · ${label}` : label;
 }
 
 function randomIndex(length: number) {

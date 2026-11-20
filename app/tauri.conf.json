@@ -20,7 +20,7 @@
       "height": 820,
       "minWidth": 800,
       "minHeight": 600,
-      "dragDropEnabled": false
+      "dragDropEnabled": true
     }],
     "security": { "csp": null }
   },

@@ -26,13 +26,29 @@ async function add(entry, text) {
 
 // Include the frontend's runtime dependency tree, including nested package versions.
 const visited = new Set();
+const snapshots = await json(resolve(root, "licenses/web/sources.json"));
 async function collect(name, parent) {
   const require = createRequire(parent);
   let directory;
   try {
     directory = dirname(require.resolve(`${name}/package.json`));
   } catch {
-    directory = dirname(require.resolve(name));
+    try {
+      directory = dirname(require.resolve(name));
+    } catch {
+      // Import-only ESM packages may export neither package.json nor a CommonJS
+      // entry. Resolve their installed package metadata using Node's search order.
+      for (const base of require.resolve.paths(name) || []) {
+        const candidate = resolve(base, name);
+        try {
+          if ((await json(resolve(candidate, "package.json"))).name === name) {
+            directory = candidate;
+            break;
+          }
+        } catch { /* Try the next ancestor node_modules directory. */ }
+      }
+      if (!directory) throw new Error(`Cannot locate package ${name}`);
+    }
   }
   let pkg;
   while (true) {
@@ -50,12 +66,13 @@ async function collect(name, parent) {
   if (visited.has(key)) return;
   visited.add(key);
   const files = (await readdir(directory))
-    .filter((file) => /^(licen[cs]e|copying|notice)(\.|$)/i.test(file))
+    .filter((file) => /^(licen[cs]e|copying|notice)([.-]|$)/i.test(file))
     .sort();
-  // This package declares MIT but omits LICENSE. See licenses/web/sources.json
-  // for the upstream license snapshot; this is not a source-version assertion.
-  const fallback =
-    key === "react-remove-scroll-bar@2.3.8"
+  // Some upstream ESM packages omit license files from their npm tarballs.
+  // Version-specific upstream snapshots and provenance are tracked in sources.json.
+  const fallback = snapshots[key]?.file
+    ? resolve(root, "licenses/web", snapshots[key].file)
+    : key === "react-remove-scroll-bar@2.3.8"
       ? resolve(root, "licenses/web/react-remove-scroll-bar-2.3.8.txt")
       : null;
   if (!files.length && !fallback)

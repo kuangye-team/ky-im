@@ -14,7 +14,7 @@ use protocol::{ClientMessage, MAX_MESSAGE_BYTES, ServerMessage};
 use serde_json::{Map, Value, json};
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::{Arc, atomic::Ordering},
+    sync::Arc,
     time::Duration,
 };
 use tokio::{
@@ -43,9 +43,9 @@ pub fn router(state: Arc<AppState>) -> Result<Router, String> {
     let app = Router::new()
         .route("/api/latest", get(crate::native_release::latest))
         .route("/api/health", get(health))
+        .route("/api/capabilities", get(health))
         .route("/api/health/details", get(health_details))
         .route("/api/ws", any(websocket))
-        .route("/api/ws/ticket", get(websocket_ticket))
         .route("/api/{*path}", any(api_not_found))
         .route("/api", any(api_not_found))
         .fallback_service(static_files)
@@ -70,8 +70,8 @@ async fn health(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     Json(json!({
         "ok": true,
         "service": "im-api",
-        "relay": state.config.relay_enabled,
-        "version": env!("CARGO_PKG_VERSION"),
+        "capabilities": crate::protocol::capabilities::server_runtime(state.config.relay_enabled).capabilities,
+        "version": crate::protocol::capabilities::RELEASE_VERSION,
     }))
 }
 
@@ -88,8 +88,8 @@ async fn health_details(State(state): State<Arc<AppState>>, headers: HeaderMap) 
     Json(json!({
         "ok": true,
         "service": "im-api",
-        "relay": state.config.relay_enabled,
-        "version": env!("CARGO_PKG_VERSION"),
+        "capabilities": crate::protocol::capabilities::server_runtime(state.config.relay_enabled).capabilities,
+        "version": crate::protocol::capabilities::RELEASE_VERSION,
         "rooms": hub.rooms.len(),
         "peers": hub.rooms.values().map(|peers| peers.len()).sum::<usize>(),
         "headers": headers_json(&headers),
@@ -123,22 +123,6 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
-async fn websocket_ticket(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Response {
-    if !crate::auth::authorized(
-        &state.config.authorization,
-        headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok()),
-    ) {
-        return unauthorized();
-    }
-    (
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(json!({"ticket": crate::auth::ticket(&state.config.authorization, hub::now_ms())})),
-    )
-        .into_response()
-}
-
 async fn api_not_found() -> impl IntoResponse {
     (StatusCode::NOT_FOUND, Json(json!({"error": "not_found"})))
 }
@@ -153,16 +137,9 @@ async fn websocket(
     if !origin_allowed(&state.config, &headers) {
         return (StatusCode::FORBIDDEN, "WebSocket origin is not allowed").into_response();
     }
-    if !crate::auth::websocket_authorized(
-        &state.config.authorization,
-        headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok()),
-        query.as_deref().unwrap_or_default(),
-        hub::now_ms(),
-    ) {
-        return unauthorized();
-    }
+    let Some(room) = crate::auth::room(query.as_deref().unwrap_or_default()) else {
+        return (StatusCode::BAD_REQUEST, "Invalid room").into_response();
+    };
     let Ok(permit) = Arc::clone(&state.connections).try_acquire_owned() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "Connection limit reached").into_response();
     };
@@ -176,7 +153,7 @@ async fn websocket(
         .max_write_buffer_size(MAX_MESSAGE_BYTES + state.config.max_connections * 16 * 1024)
         .on_upgrade(move |socket| async move {
             let _permit = permit;
-            session(socket, state, source_ip).await;
+            session(socket, state, source_ip, room).await;
         })
 }
 
@@ -275,7 +252,10 @@ async fn send(socket: &mut WebSocket, message: Message) -> bool {
 }
 
 async fn send_json(socket: &mut WebSocket, message: ServerMessage) -> bool {
-    // All server messages contain only JSON-serializable data and strings.
+    if let Some(raw) = protocol::encode_relay_binary(&message) {
+        return send(socket, Message::Binary(raw.into())).await;
+    }
+    // All other server messages contain JSON-serializable data.
     send(
         socket,
         Message::Text(
@@ -287,13 +267,11 @@ async fn send_json(socket: &mut WebSocket, message: ServerMessage) -> bool {
     .await
 }
 
-async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr) {
+async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr, room: String) {
+    let mut authenticated = false;
     let (outgoing, mut messages) = mpsc::channel(QUEUE_CAPACITY);
     let (close, mut close_rx) = watch::channel::<Option<hub::CloseReason>>(None);
-    let generation = state
-        .next_generation
-        .fetch_add(1, Ordering::Relaxed)
-        .to_string();
+    let generation = uuid::Uuid::new_v4().to_string();
     let transport: Arc<dyn Transport> = Arc::new(NativeTransport {
         outgoing: outgoing.clone(),
         close: close.clone(),
@@ -324,7 +302,8 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr)
                     send_json(&mut socket, ServerMessage::error("idle_timeout", "Heartbeat timed out")).await;
                     break;
                 }
-                if !send(&mut socket, Message::Ping(Vec::new().into())).await { break; }
+                if last_seen.elapsed() >= state.config.heartbeat_interval
+                    && !send(&mut socket, Message::Ping(Vec::new().into())).await { break; }
             }
             outgoing = messages.recv() => {
                 let Some(message) = outgoing else { break; };
@@ -332,31 +311,48 @@ async fn session(mut socket: WebSocket, state: Arc<AppState>, source_ip: IpAddr)
             }
             incoming = socket.recv() => {
                 let Some(Ok(message)) = incoming else { break; };
-                last_seen = Instant::now();
                 let parsed = match &message {
                     Message::Text(text) => serde_json::from_str::<ClientMessage>(text).ok(),
+                    Message::Binary(bytes) => protocol::decode_relay_binary(bytes),
                     _ => None,
                 };
                 let relay = state.config.relay_enabled && matches!(parsed, Some(ClientMessage::Relay { .. }));
-                if !rate.allow(hub::now_ms(), relay, match &message { Message::Text(s) => s.len(), _ => 0 }) {
+                if !rate.allow(hub::now_ms(), relay, match &message { Message::Text(s) => s.len(), Message::Binary(bytes) => bytes.len(), _ => 0 }) {
                     send_json(&mut socket, ServerMessage::error("rate_limited", "Too many messages; reconnect shortly")).await;
                     break;
                 }
                 match message {
-                    Message::Text(_) => {
+                    Message::Text(_) | Message::Binary(_) => {
+                        if !authenticated {
+                            let Some(response) = crate::auth::authenticate(&state.config.authorization, parsed.as_ref(), &generation, state.config.relay_enabled) else {
+                                send_json(&mut socket, ServerMessage::error("unauthorized", "Authentication required")).await;
+                                break;
+                            };
+                            authenticated = true;
+                            last_seen = Instant::now();
+                            if !send_json(&mut socket, response).await { break; }
+                            continue;
+                        }
+                        if matches!(&parsed, Some(ClientMessage::Join { room: requested, .. }) if requested != &room) {
+                            if !send_json(&mut socket, ServerMessage::error("invalid_room", "Room does not match upgrade")).await { break; }
+                            continue;
+                        }
                         let result = match parsed {
                             Some(message) => process_message(&state, message, source_ip, &mut identity, &generation, &transport),
-                            None => Err(ServerMessage::error("invalid_message", "Expected a valid JSON protocol message")),
+                            None => Err(ServerMessage::error(if matches!(message, Message::Binary(_)) { "unsupported_message" } else { "invalid_message" }, "Expected a valid protocol message")),
                         };
-                        if let Err(message) = result
-                            && !send_json(&mut socket, message).await { break; }
+                        match result {
+                            Ok(()) => last_seen = Instant::now(),
+                            Err(message) => if !send_json(&mut socket, message).await { break; },
+                        }
                     }
-                    Message::Ping(payload) => { if !send(&mut socket, Message::Pong(payload)).await { break; } }
-                    Message::Pong(_) => {}
+                    Message::Ping(payload) => {
+                        last_seen = Instant::now();
+                        if !send(&mut socket, Message::Pong(payload)).await { break; }
+                    }
+                    Message::Pong(_) => last_seen = Instant::now(),
                     Message::Close(_) => break,
-                    Message::Binary(_) => {
-                        if !send_json(&mut socket, ServerMessage::error("unsupported_message", "Send JSON protocol frames")).await { break; }
-                    }
+
                 }
             }
         }
@@ -396,8 +392,20 @@ mod tests {
         let (outgoing, mut messages) = mpsc::channel(QUEUE_CAPACITY);
         let (close, _) = watch::channel(None);
         let mut identity = None;
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use sha2::{Digest, Sha256};
+        let key =
+            libp2p_identity::Keypair::ed25519_from_bytes(Sha256::digest(id.as_bytes())).unwrap();
+        let generation = uuid::Uuid::new_v4().to_string();
+        let proof = protocol::IdentityProof {
+            public_key: STANDARD.encode(key.public().encode_protobuf()),
+            signature: STANDARD.encode(
+                key.sign(protocol::challenge(&generation).as_bytes())
+                    .unwrap(),
+            ),
+        };
         let profile = serde_json::from_value(json!({
-            "id": id, "name": id, "numericId": preferred_number, "clientType": "web",
+            "id": key.public().to_peer_id().to_string(), "name": id, "numericId": preferred_number, "clientType":"web", "capabilities": ["capabilities.query.v1", "discovery.v1", "signaling.v1", "transfer.webrtc.v1", "transport.ws-relay.v1", "transfer.relay-split.v1", "chat.v1", "file.v1"],
         }))
         .unwrap();
         process_message(
@@ -405,13 +413,12 @@ mod tests {
             ClientMessage::Join {
                 room: room.into(),
                 profile,
+                proof,
+                recent_numeric_ids: Vec::new(),
             },
             source_ip.parse().unwrap(),
             &mut identity,
-            &state
-                .next_generation
-                .fetch_add(1, Ordering::Relaxed)
-                .to_string(),
+            &generation,
             &(Arc::new(NativeTransport { outgoing, close }) as Arc<dyn Transport>),
         )
         .unwrap();
@@ -426,8 +433,8 @@ mod tests {
         let (_, _, second) = join_at(&state, "bob", "local", "::ffff:192.0.2.1", "654321");
         assert_eq!(first["room"], "local@192.0.2.1");
         assert_eq!(second["room"], first["room"]);
-        assert_eq!(first["numericId"], second["numericId"]);
-        assert_eq!(second["peers"][0]["id"], "alice");
+        assert_ne!(first["numericId"], second["numericId"]);
+        assert_eq!(second["peers"][0]["name"], "alice");
     }
 
     #[test]
@@ -437,18 +444,18 @@ mod tests {
         let (_, mut bob, second) = join_at(&state, "bob", "local", "192.0.2.1", "654321");
         assert_eq!(first["room"], "local@192.0.2.1");
         assert_eq!(second["room"], first["room"]);
-        assert_eq!(first["numericId"], second["numericId"]);
-        assert_eq!(second["peers"][0]["id"], "alice");
+        assert_ne!(first["numericId"], second["numericId"]);
+        assert_eq!(second["peers"][0]["name"], "alice");
         assert!(matches!(
             alice.try_recv().unwrap(),
             ServerMessage::PeerJoined { .. }
         ));
         let (carol, mut carol_messages, third) =
-            join_at(&state, "carol", "local", "192.0.2.2", "123456");
+            join_at(&state, "carol", "local", "192.0.2.2", "234567");
         assert_eq!(third["room"], "local@192.0.2.2");
         assert_ne!(first["numericId"], third["numericId"]);
         assert_eq!(third["peers"], json!([]));
-        let (_, _, fourth) = join_at(&state, "dan", "private", "192.0.2.1", "123456");
+        let (_, _, fourth) = join_at(&state, "dan", "private", "192.0.2.1", "345678");
         assert_eq!(fourth["room"], "private@192.0.2.1");
         assert_ne!(first["numericId"], fourth["numericId"]);
         assert_eq!(fourth["peers"], json!([]));
@@ -459,12 +466,11 @@ mod tests {
             .unwrap();
         let resolved = serde_json::to_value(carol_messages.try_recv().unwrap()).unwrap();
         assert_eq!(resolved["type"], "group_resolved");
-        assert_eq!(resolved["peers"].as_array().unwrap().len(), 2);
-        for receiver in [&mut alice, &mut bob] {
-            let joined = serde_json::to_value(receiver.try_recv().unwrap()).unwrap();
-            assert_eq!(joined["peer"]["id"], "carol");
-            assert_eq!(joined["peer"]["numericId"], third["numericId"]);
-        }
+        assert_eq!(resolved["peers"].as_array().unwrap().len(), 1);
+        let joined = serde_json::to_value(alice.try_recv().unwrap()).unwrap();
+        assert_eq!(joined["peer"]["name"], "carol");
+        assert_eq!(joined["peer"]["numericId"], third["numericId"]);
+        assert!(bob.try_recv().is_err());
     }
 
     #[test]

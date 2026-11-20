@@ -24,7 +24,7 @@ async function seedSharedFile(page: Page) {
   await setProfile(page, fixture.owner);
   await page.evaluate(async (file) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("send-chat", 1);
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -74,8 +74,11 @@ async function seedSharedFile(page: Page) {
         createdAt: Date.now() + 1,
         status: "delivered",
       });
-      tx.objectStore("attachments").put(blob, id);
       await done;
+      const { IndexedDBStorageAdapter } = await import("/src/core/storage.ts");
+      const storage = new IndexedDBStorageAdapter();
+      await storage.saveAttachment(id, blob);
+      await storage.close();
     } finally {
       db.close();
     }
@@ -258,7 +261,7 @@ test("共享文件删除可取消，手机确认后清除附件并保留其他�
   await expect(page.getByRole("log")).toContainText(fixture.retainedText);
   const attachmentCount = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("send-chat", 1);
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });

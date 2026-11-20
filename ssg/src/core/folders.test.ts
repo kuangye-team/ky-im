@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { BlobReader, TextWriter, ZipReader } from "@zip.js/zip.js";
-import { FOLDER_CONFIG, MAX_FILE_SIZE } from "../config";
+import { FOLDER_CONFIG, MAX_BUFFERED_FILE_BYTES } from "../config";
 import {
   compressFolder,
   inspectFolder,
@@ -20,10 +20,10 @@ describe("folder selection and packing", () => {
     const entries: FolderEntry[] = Array.from({ length: 256 }, (_, i) => ({
       kind: "file",
       path: `${i}.bin`,
-      file: fakeFile(i ? 0 : MAX_FILE_SIZE),
+      file: fakeFile(i ? 0 : MAX_BUFFERED_FILE_BYTES),
     }));
     expect(inspectFolder({ name: "资料", entries })).toMatchObject({
-      size: MAX_FILE_SIZE,
+      size: MAX_BUFFERED_FILE_BYTES,
       fileCount: 256,
       compress: true,
     });
@@ -43,7 +43,7 @@ describe("folder selection and packing", () => {
           {
             kind: "file",
             path: "large.bin",
-            file: fakeFile(MAX_FILE_SIZE + 1),
+            file: fakeFile(MAX_BUFFERED_FILE_BYTES + 1),
           },
         ],
       }).compress,

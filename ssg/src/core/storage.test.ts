@@ -1,5 +1,8 @@
+import { localRuntime } from "./capabilities";
 import "fake-indexeddb/auto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { openDB } from "idb";
+import { attachmentDirectory, folderEntries } from "./storage/opfs";
 import {
   IndexedDBStorageAdapter,
   LARGE_FILE_BYTES,
@@ -12,11 +15,12 @@ import type { Message, Profile } from "./types";
 const profile = (id = newId()): Profile => ({
   id,
   name: "测试设备",
+  numericId: "123456",
   avatar: "🌿",
   color: "#597461",
   bio: "你好",
-  device: "浏览器",
-  clientType: "web" as const,
+  device: "Linux",
+  clientType: "web" as const, ...localRuntime(true),
 });
 const adapters: IndexedDBStorageAdapter[] = [];
 function adapter(name = `send-test-${newId()}`) {
@@ -26,6 +30,7 @@ function adapter(name = `send-test-${newId()}`) {
 }
 afterEach(async () => {
   await Promise.all(adapters.splice(0).map((value) => value.close()));
+  vi.restoreAllMocks();
 });
 async function conversation(
   storage: IndexedDBStorageAdapter,
@@ -58,6 +63,87 @@ async function conversation(
 }
 
 describe("browser storage adapter", () => {
+  it("stores metadata only, commits complete streams, and cancels writes when their message is deleted", async () => {
+    const name = `opfs-${newId()}`, storage = adapter(name), id = newId();
+    const writer = await storage.createFileDestination({ id, size: 6, fileName: "保留.txt", mimeType: "text/plain" });
+    await writer.write(new Blob(["abc"]));
+    expect(await storage.getAttachment(id)).toBeUndefined();
+    await expect(writer.close()).rejects.toThrow("尚未接收完整");
+    await writer.write(new Blob(["def"]));
+    await writer.close();
+    const db = await openDB(name);
+    const record = await db.get("attachments", id);
+    expect(record).toMatchObject({ size: 6, name: "保留.txt", mimeType: "text/plain", folder: false });
+    expect(record).not.toBeInstanceOf(Blob);
+    expect(await db.count("pendingAttachments")).toBe(0);
+    expect(await (await storage.getAttachment(id))!.text()).toBe("abcdef");
+    const pendingId = newId();
+    const pending = await storage.createFileDestination({ id: pendingId, size: 3 });
+    await pending.write(new Blob(["abc"]));
+    await storage.deleteMessages([pendingId]);
+    await expect(pending.close()).rejects.toThrow("已取消");
+    expect(await storage.getAttachment(pendingId)).toBeUndefined();
+    expect(await db.count("pendingAttachments")).toBe(0);
+    db.close();
+  });
+  it("preserves nested and empty directories, and removes folder payloads with their history", async () => {
+    const name = `opfs-${newId()}`, storage = adapter(name);
+    const message = await conversation(storage, profile());
+    const folder = await storage.createFolderDestination({ ...message, size: 3, folder: { fileCount: 2, directoryCount: 2 } });
+    await folder.createDirectory("空目录");
+    await folder.createDirectory("子目录");
+    const empty = await folder.createFile("空.txt", 0); await empty.close();
+    const file = await folder.createFile("子目录/内容.txt", 3);
+    await file.write(new Blob(["abc"])); await file.close(); await folder.close!();
+    const db = await openDB(name), record = await db.get("attachments", message.id);
+    const root = await (await attachmentDirectory(name)).getDirectoryHandle(record.path);
+    const paths = []; for await (const entry of folderEntries(root)) paths.push(entry.path);
+    expect(paths.sort()).toEqual(["子目录", "子目录/内容.txt", "空.txt", "空目录"].sort());
+    expect(await storage.getAttachment(message.id)).toBeUndefined();
+    expect((await storage.getFiles())[0].size).toBe(3);
+    await storage.deleteConversation(message.peerId);
+    await expect((await attachmentDirectory(name)).getDirectoryHandle(record.path)).rejects.toMatchObject({ name: "NotFoundError" });
+    expect(await db.count("attachments")).toBe(0); db.close();
+  });
+  it("cleans abandoned staging on reopen but preserves another adapter's active write", async () => {
+    const name = `opfs-${newId()}`, storage = adapter(name), id = newId();
+    const live = await storage.createFileDestination({ id, size: 3 });
+    const db = await openDB(name), root = await attachmentDirectory(name), path = newId();
+    await root.getDirectoryHandle(path, { create: true });
+    await db.put("pendingAttachments", { id: newId(), record: { path, name: "partial", size: 3, folder: false, mimeType: "" } }, path);
+    const reopened = adapter(name);
+    await reopened.saveAttachment(newId(), new Blob(["other"]));
+    await expect(root.getDirectoryHandle(path)).rejects.toMatchObject({ name: "NotFoundError" });
+    await live.write(new Blob(["abc"])); await live.close();
+    expect(await (await reopened.getAttachment(id))!.text()).toBe("abc");
+    expect(await db.count("pendingAttachments")).toBe(0); db.close();
+  });
+  it("reports exhausted quota without publishing attachment metadata", async () => {
+    const name = `opfs-${newId()}`, storage = adapter(name);
+    vi.spyOn(navigator.storage, "estimate").mockResolvedValue({ quota: 10, usage: 9 });
+    await expect(storage.saveAttachment(newId(), new Blob(["full"]))).rejects.toThrow("可用空间不足");
+    const db = await openDB(name);
+    expect(await db.count("attachments")).toBe(0);
+    expect(await db.count("pendingAttachments")).toBe(0); db.close();
+  });
+  it("resets identity, contacts, history and orphan attachments across reopen", async () => {
+    const name = `send-test-${newId()}`;
+    const storage = adapter(name);
+    const me = profile();
+    const target = profile();
+    await storage.saveProfile(me);
+    await conversation(storage, target);
+    const orphan = newId();
+    await storage.saveAttachment(orphan, new Blob(["orphan"]));
+    await storage.resetData();
+    await storage.close();
+    const reopened = adapter(name);
+    expect(await reopened.getProfile()).toBeUndefined();
+    expect(await reopened.getConversations()).toEqual([]);
+    expect(await reopened.getMessages(target.id)).toEqual([]);
+    expect(await reopened.getFiles()).toEqual([]);
+    expect(await reopened.getAttachment(orphan)).toBeUndefined();
+  });
   it("restores identity, conversations, ordered messages and binary attachments after reopening", async () => {
     const name = `send-test-${newId()}`;
     const first = adapter(name);

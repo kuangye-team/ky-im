@@ -1,3 +1,4 @@
+import { localRuntime } from "../capabilities";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SignalingDiscoveryAdapter } from "./signaling";
 import { testServer } from "./serverTest";
@@ -22,85 +23,37 @@ afterEach(() => {
 });
 
 describe("authorized signaling", () => {
-  it("sends Authorization only in HTTP headers, then connects, probes, and closes with a ticket", async () => {
+  it("sends the credential in the first socket message", async () => {
     vi.stubGlobal("WebSocket", Socket);
-    const fetcher = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ ticket: "signed-short-ticket" }),
-      });
-    vi.stubGlobal("fetch", fetcher);
-    const result = testServer(
-      "wss://private.test/custom/ws",
-      5000,
-      "Bearer secret",
-    );
-    await vi.waitFor(() => expect(Socket.all).toHaveLength(1));
-    expect(String(fetcher.mock.calls[0][0])).toBe(
-      "https://private.test/custom/ws/ticket",
-    );
-    expect(fetcher.mock.calls[0][1]).toMatchObject({
-      headers: { Authorization: "Bearer secret" },
-      redirect: "error",
-      credentials: "omit",
-    });
+    const result = testServer("wss://private.test/custom/ws",5000,"Bearer secret");
     const socket = Socket.all[0];
-    expect(socket.url).toBe(
-      "wss://private.test/custom/ws?ticket=signed-short-ticket",
-    );
+    expect(socket.url).toBe("wss://private.test/custom/ws?room=local");
     socket.readyState = 1;
     socket.onopen!(new Event("open"));
-    expect(socket.send).toHaveBeenCalledWith('{"type":"capabilities"}');
-    socket.onmessage!({ data: '{"type":"capabilities","relay":true}' });
+    expect(socket.send).toHaveBeenCalledExactlyOnceWith('{"type":"auth","authorization":"Bearer secret"}');
+    socket.onmessage!({ data: JSON.stringify({ type: "capabilities", ...localRuntime() }) });
     await expect(result).resolves.toEqual({ relay: true });
     expect(socket.close).toHaveBeenCalledOnce();
   });
 
-  it("reports a rejected key without opening a WebSocket", async () => {
+  it("reports a rejected first packet", async () => {
     vi.stubGlobal("WebSocket", Socket);
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({ ok: false, status: 401 }),
-    );
-    await expect(
-      testServer("wss://private.test/api/ws", 5000, "wrong"),
-    ).rejects.toThrow("访问密钥不正确");
-    expect(Socket.all).toHaveLength(0);
+    const result = testServer("wss://private.test/api/ws",5000,"wrong");
+    const socket = Socket.all[0];
+    socket.onopen!(new Event("open"));
+    socket.onmessage!({data:JSON.stringify({type:"error",code:"unauthorized"})});
+    await expect(result).rejects.toThrow("访问密钥不正确");
   });
-
-  it("cancels authentication when closed and never opens a late connection", async () => {
+  it("ignores an open event after cancellation", () => {
     vi.stubGlobal("WebSocket", Socket);
-    let resolve!: (response: unknown) => void;
-    const fetcher = vi.fn(
-      (_url: URL, _options: RequestInit) =>
-        new Promise((r) => {
-          resolve = r;
-        }),
-    );
-    vi.stubGlobal("fetch", fetcher);
-    const session = new SignalingDiscoveryAdapter(
-      "wss://private.test/api/ws",
-      undefined,
-      "Bearer secret",
-    ).open();
+    const session = new SignalingDiscoveryAdapter("wss://private.test/api/ws").open();
     session.close();
-    expect(fetcher.mock.calls[0][1].signal?.aborted).toBe(true);
-    resolve({ ok: true, json: async () => ({ ticket: "late-ticket" }) });
-    await new Promise((r) => setTimeout(r, 0));
+    Socket.all[0].onopen!(new Event("open"));
+    expect(Socket.all[0].send).not.toHaveBeenCalled();
     expect(session.readyState).toBe(3);
-    expect(Socket.all).toHaveLength(0);
   });
-
-  it("acquires a fresh ticket on each reconnect and routes normal messages", async () => {
+  it("authenticates each connection before forwarding messages", async () => {
     vi.stubGlobal("WebSocket", Socket);
-    const fetcher = vi
-      .fn()
-      .mockResolvedValue({
-        ok: true,
-        json: async () => ({ ticket: "ticket" }),
-      });
-    vi.stubGlobal("fetch", fetcher);
     const adapter = new SignalingDiscoveryAdapter(
       "wss://private.test/api/ws",
       undefined,
@@ -114,6 +67,7 @@ describe("authorized signaling", () => {
     first.onmessage = message;
     Socket.all[0].readyState = 1;
     Socket.all[0].onopen!(new Event("open"));
+    Socket.all[0].onmessage!({ data: JSON.stringify({ type: "capabilities", ...localRuntime() }) });
     first.send('{"type":"join"}');
     expect(Socket.all[0].send).toHaveBeenCalledWith('{"type":"join"}');
     Socket.all[0].onmessage!({ data: "welcome" });
@@ -122,7 +76,8 @@ describe("authorized signaling", () => {
     first.close();
     const second = adapter.open();
     await vi.waitFor(() => expect(Socket.all).toHaveLength(2));
-    expect(fetcher).toHaveBeenCalledTimes(2);
+    Socket.all[1].onopen!(new Event("open"));
+    expect(Socket.all[1].send).toHaveBeenCalledExactlyOnceWith('{"type":"auth","authorization":"Bearer secret"}');
     second.close();
   });
 });

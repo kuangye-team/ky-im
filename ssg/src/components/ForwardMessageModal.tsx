@@ -63,7 +63,7 @@ export function ForwardMessageModal({
     setSending(true);
     setError("");
     try {
-      await engine.forwardMessage(message, selected.id);
+      await engine.transfers.forwardMessage(message, selected.id);
       onNotice(t("已转发给 {{name}}", { name: selected.displayName }));
       onClose();
     } catch (cause) {

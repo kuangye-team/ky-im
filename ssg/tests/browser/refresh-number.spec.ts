@@ -7,7 +7,7 @@ import {
   setProfile,
 } from "./helpers";
 
-test("刷新蜂鸟号同步同组设备、保留未保存资料和聊天，重新打开后仍使用新号", async ({
+test("设备蜂鸟号各自独立，换号只更新本机并保留草稿与聊天", async ({
   browser,
   page,
 }) => {
@@ -32,9 +32,8 @@ test("刷新蜂鸟号同步同组设备、保留未保存资料和聊天，重�
     });
     const number = dialog.getByLabel("我的蜂鸟号", { exact: true });
     const previous = (await number.textContent())!;
-    await expect(other.getByLabel("我的蜂鸟号", { exact: true })).toHaveText(
-      previous,
-    );
+    const otherNumber = await other.getByLabel("我的蜂鸟号", { exact: true }).textContent();
+    expect(otherNumber).not.toBe(previous);
     await dialog.locator("#profile-name").fill("尚未保存的新昵称");
     await dialog.locator("#profile-bio").fill("换号不能清空这段草稿");
     await dialog.getByRole("button", { name: "头像 🐼", exact: true }).click();
@@ -45,7 +44,7 @@ test("刷新蜂鸟号同步同组设备、保留未保存资料和聊天，重�
     await expect(number).toHaveText(/^[1-9][0-9]{5}$/);
     const refreshed = (await number.textContent())!;
     await expect(other.getByLabel("我的蜂鸟号", { exact: true })).toHaveText(
-      refreshed,
+      otherNumber!,
     );
     await expect(dialog.locator("#profile-name")).toHaveValue(
       "尚未保存的新昵称",
@@ -59,6 +58,7 @@ test("刷新蜂鸟号同步同组设备、保留未保存资料和聊天，重�
     expect(
       await dialog.evaluate((el) => el.scrollHeight <= el.clientHeight + 1),
     ).toBe(true);
+    await page.screenshot({ path: "../temp/screenshot/device-number-refresh.png", animations: "disabled" });
     await capture(page, "profile-wide-refresh.png");
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);

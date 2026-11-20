@@ -12,6 +12,7 @@ import {
 import type { Profile } from "../core/types";
 import { Modal } from "./Modal";
 import { download } from "./fileDownloads";
+import { fileDiagnosticsEnabled, setFileDiagnostics } from "../core/transfers/diagnostics";
 import "./RuntimeLogs.css";
 
 const levels: Record<LogLevel, string> = {
@@ -87,6 +88,7 @@ export function RuntimeLogs({
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const [error, setError] = useState("");
+  const [fileDiagnostics, setDiagnostics] = useState(fileDiagnosticsEnabled);
   const [confirmClear, setConfirmClear] = useState(false);
   const filtered = useMemo(() => {
     const since = period === "all" ? 0 : Date.now() - Number(period);
@@ -175,6 +177,14 @@ export function RuntimeLogs({
           ]}
         />
       </div>
+      <label>
+        <input type="checkbox" checked={fileDiagnostics} onChange={event => {
+          try {
+            setFileDiagnostics(event.target.checked);
+            setDiagnostics(event.target.checked);
+          } catch { setError(t("无法保存设置")); }
+        }} /> {t("记录后续文件传输的性能")}
+      </label>
       <div className="log-toolbar">
         <label className="search-field">
           <Search size={17} />

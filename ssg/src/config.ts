@@ -5,6 +5,8 @@
  * 开发端口、代理和构建选项见 vite.config.ts；测试选项见 tests/config/。
  */
 
+import { iceServersFromEnv } from "./ice-servers";
+
 /** 设备发现与信令；中转协议由独立传输适配器处理，默认不启用。 */
 export const SIGNALING_CONFIG = {
   // 发现命名空间；仍在 join 消息中使用，1–64 位字母、数字、下划线或连字符。
@@ -14,6 +16,8 @@ export const SIGNALING_CONFIG = {
   url: import.meta.env?.VITE_SIGNAL_URL || "",
   // 默认服务器的构建时访问密钥；也适用于留空地址时的同源服务器。
   authorization: (import.meta.env?.VITE_API_AUTH || "").trim(),
+  openTimeoutMs: 15_000, // 等待发现连接打开。
+  joinTimeoutMs: 10_000, // 等待发现服务加入确认。
   heartbeatIntervalMs: 20_000, // 发送心跳的间隔。
   heartbeatTimeoutMs: 55_000, // 超过此时间没有 pong 则断开并重连。
   heartbeatResumeGraceMs: 10_000, // 页面恢复后先探测，给对端回复的宽限时间。
@@ -37,21 +41,37 @@ export const INVITE_CONFIG = {
   fallbackUrl: CLIENT_CONFIG.webUrl,
 } as const;
 
-/** Invalid public configuration falls back to 10 seconds; allow 1 second to 5 minutes. */
+export const MAX_RTC_MESSAGE_BYTES = 128 * 1024;
+
+/** Product cap for one DataChannel write, in bytes. */
+export function rtcMessageSizeFromEnv(raw?: string) {
+  const value = raw?.trim() || "65536";
+  const bytes = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(bytes) || bytes < 1 || bytes > MAX_RTC_MESSAGE_BYTES)
+    throw new Error(`VITE_RTC_MAX_MESSAGE_SIZE must be an integer between 1 and ${MAX_RTC_MESSAGE_BYTES} bytes`);
+  return bytes;
+}
+
+/** Invalid public configuration falls back to 10 seconds. */
 export function listHeartbeatInterval(value: string | undefined): number {
   const interval = Number(value);
   return Number.isSafeInteger(interval) && interval >= 1000 && interval <= 300_000 ? interval : 10_000;
 }
 
+const listHeartbeatIntervalMs = listHeartbeatInterval(import.meta.env?.VITE_PEER_CHECK_INTERVAL_MS);
+
 /** 直连与中转共用的连接时限和本机缓冲。 */
 export const CONNECTION_CONFIG = {
-  rtc: { iceServers: [] } satisfies RTCConfiguration, // 默认仅使用本机 ICE 候选。
-  listHeartbeatIntervalMs: listHeartbeatInterval(import.meta.env?.VITE_PEER_CHECK_INTERVAL_MS),
+  rtc: { iceServers: iceServersFromEnv(import.meta.env?.VITE_ICE_SERVERS) } satisfies RTCConfiguration,
+  listHeartbeatIntervalMs,
+  offlineHeartbeatIntervalMs: Math.max(60_000, 2 * listHeartbeatIntervalMs),
   peerHeartbeatIntervalMs: 10_000, // 已打开的聊天通道双向探测。
   peerHeartbeatTimeoutMs: 8_000, // 单次探测等待；静默且无在途内容时重协商。
   peerHeartbeatMissLimit: 3, // 连续三个探测周期未确认存活则离线，不限制发送。
   peerRetryMaxMs: 30_000, // 当前联系人的独立重试上限。
-  readyTimeoutMs: 15_000, // 等待设备 DataChannel 就绪的时限。
+  maxRetainedPeers: 10, // 空闲业务连接的保留数。拨号与并发连接上限由 libp2p 管理。
+  evictionRetryMs: 60_000,
+  readyTimeoutMs: 25_000, // 等待设备 DataChannel 就绪的时限。
   disconnectGraceMs: 8_000, // 短暂断网的恢复宽限时间。
   pollIntervalMs: 75, // 等待连接状态变化的轮询间隔。
   sendBufferHighBytes: 512 * 1024, // 发送缓冲高于此值时暂停读取下一块。
@@ -62,26 +82,28 @@ export const CONNECTION_CONFIG = {
 } as const;
 
 /** 内容限制：各传输通道共用，修改时要兼顾对端版本和界面提示。 */
-export const MAX_FILE_SIZE = 256 * 1024 ** 2; // 浏览器附件保存上限：256 MiB；自动接收需联系人授权，更大文件需确认并直接保存到磁盘。
+export const MAX_BUFFERED_FILE_BYTES = 256 * 1024 ** 2; // 整块缓冲与图片预览上限；内置存储一律流式落盘，此值不限制文件保存或传输。
 export const FOLDER_CONFIG = {
   maxCompressedFiles: 256,
   maxEntries: 100_000,
   maxPathLength: 4096,
   maxDepth: 128,
   maxMetadataBytes: 16 * 1024 * 1024,
-  supportTimeoutMs: 10_000,
 } as const;
-export const CHUNK_SIZE = 128 * 1024; // 单个文件数据块 128 KiB，不含协议头；WebRTC 可按对端上限缩小。
+export const CHUNK_SIZE = 128 * 1024; // 常规文件流使用的正文大小。
+export const MAX_FILE_CHUNK_BYTES = 1024 * 1024; // 最大文件正文与单文件传输窗口相同。
 export const MAX_TRANSFER_SIZE = CHUNK_SIZE * 2 ** 32; // 32 位数据块序号的协议上限。
 export const MAX_TEXT_BYTES = 32 * 1024; // 单条文字的 UTF-8 字节上限。
 export const MAX_CONTROL_BYTES = 48 * 1024; // DataChannel 控制 JSON 的字节上限。
 export const TRANSFER_CONFIG = {
+  showSpeed: import.meta.env?.VITE_SHOW_TRANSFER_SPEED?.trim().toLowerCase() !== "false",
   timeoutMs: 60_000, // 文件接收或发送缓冲等待超时。
+  resumeTimeoutMs: 5 * 60_000, // 页面保持打开时，断线任务最多等待恢复 5 分钟。
   ackTimeoutMs: 30_000, // 等待对端确认已保存的时限。
   consentTimeoutMs: 5 * 60_000, // 等待接收方选择保存位置。
-  streamWindowBytes: 1024 * 1024, // 大文件每写入 1 MiB 再允许发送下一批。
+  streamWindowBytes: 1024 * 1024, // 流式发送最多领先落盘进度 1 MiB；接收端每约 1/4 窗口写入并补充额度。
   maxIncomingFiles: 8, // 同时接收的附件数。
-  maxReservedBytes: 2 * MAX_FILE_SIZE, // 接收缓存总预算；直接写入磁盘的文件只计一个窗口。
+  maxReservedBytes: 2 * MAX_BUFFERED_FILE_BYTES, // 接收缓存总预算；直接写入磁盘的文件只计一个窗口。
   maxFutureTimestampMs: 60_000, // 对端消息时间最多允许领先本机一分钟。
 } as const;
 
@@ -92,7 +114,7 @@ if (!Number.isSafeInteger(storageChunkBytes) || storageChunkBytes < CHUNK_SIZE |
 
 /** 本地存储：更改 databaseName 会切换资料库，不会迁移既有聊天记录。 */
 export const STORAGE_CONFIG = {
-  databaseName: "send-chat",
+  databaseName: "ky-im",
   chunkBytes: storageChunkBytes, // 本地文件读取和 IPC 写入，默认 2 MiB；独立于网络分块。
   availabilityKey: "hummingbird.availability", // localStorage 中保存上线意图。
 } as const;
@@ -100,7 +122,7 @@ export const LARGE_FILE_BYTES = 10 * 1024 * 1024; // 清理页面的大附件阈
 
 /** 界面输入与头像选项；名称长度按 JavaScript 字符串长度计数。 */
 export const MAX_REMARK_LENGTH = 32;
-export const PROFILE_NAME_MAX_LENGTH = 32; // 编辑表单上限；协议兼容上限为 40。
+export const PROFILE_NAME_MAX_LENGTH = 32; // 编辑表单上限；协议上限为 48 个 Unicode 字符。
 export const PROFILE_BIO_MAX_LENGTH = 160;
 export const COMPOSER_MAX_LENGTH = 16_000; // 输入框字符上限；发送仍校验 UTF-8 字节数。
 export const PROFILE_AVATARS = [
@@ -208,7 +230,6 @@ export const PROFILE_GENERATION_CONFIG = {
         "让想说的话，顺着微风到你身边。",
         "此刻在线，期待一次有趣的相遇。",
       ],
-      browser: "浏览器",
     },
     en: {
       names: [
@@ -231,7 +252,6 @@ export const PROFILE_GENERATION_CONFIG = {
         "Sending a little hello your way.",
         "Here for a friendly chat and a happy discovery.",
       ],
-      browser: "Browser",
     },
   },
 } as const;

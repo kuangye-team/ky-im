@@ -32,6 +32,7 @@ try {
     env.RELEASE_VERSION ||
       JSON.parse(readFileSync(resolve(root, "package.json"))).version,
   );
+  env.RELEASE_VERSION = version;
   const config = { ...updaterConfig(env, command === "build"), version };
   env.VITE_DESKTOP_UPDATER_ENABLED = String(Boolean(config.plugins.updater.pubkey && config.plugins.updater.endpoints.length));
   const options = [command, "--config", JSON.stringify(config)];

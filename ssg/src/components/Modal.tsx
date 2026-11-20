@@ -5,6 +5,7 @@ import { useId, type ReactNode } from "react";
 export function Modal({
   open,
   onClose,
+  onOpenAutoFocus,
   onCloseAutoFocus,
   title,
   description,
@@ -15,6 +16,7 @@ export function Modal({
 }: {
   open: boolean;
   onClose: () => void;
+  onOpenAutoFocus?: () => void;
   onCloseAutoFocus?: () => void;
   title: string;
   description?: string;
@@ -32,6 +34,14 @@ export function Modal({
         <Dialog.Content
           className={`modal ${wide ? "modal-wide" : ""} ${className}`}
           aria-describedby={description ? descriptionId : undefined}
+          onOpenAutoFocus={
+            onOpenAutoFocus
+              ? (event) => {
+                  event.preventDefault();
+                  onOpenAutoFocus();
+                }
+              : undefined
+          }
           onCloseAutoFocus={
             onCloseAutoFocus
               ? (event) => {

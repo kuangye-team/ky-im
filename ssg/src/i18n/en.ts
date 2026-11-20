@@ -18,6 +18,11 @@ export const appEnglish: Record<string, string> = {
   "查看范围": "Scope",
   "与 {{name}} 的连接": "Connection with {{name}}",
   "全部运行日志": "All activity logs",
+  "记录后续文件传输的性能": "Record performance for subsequent file transfers",
+  "文件传输性能": "File transfer performance",
+  "开始记录文件传输性能": "Started recording file transfer performance",
+  "文件处理耗时": "File processing timings",
+  "无法保存设置": "Could not save settings",
   "级别": "Level",
   "类别": "Category",
   "时间": "Time",
@@ -64,6 +69,19 @@ export const appEnglish: Record<string, string> = {
   "已回复对方的检查": "Replied to a connection check",
   "对方已响应": "The other device responded",
   "已确认双方可以通信": "Two-way connection confirmed",
+  "已应答设备探测": "Answered a device check",
+  "底层连接已建立": "Connection established",
+  "底层连接已关闭": "Connection closed",
+  "关闭业务通道": "Closing the chat and file channel",
+  "拨号尝试结束": "Connection attempt ended",
+  "协议流建立失败": "Could not open a protocol stream",
+  "原生连接事件": "Desktop connection event",
+  "RTC 连接状态": "WebRTC connection state",
+  "入站信令处理失败": "Could not process incoming signaling",
+  "连接池释放空闲设备": "Released an idle device connection",
+  "存活探测失败": "Device check failed",
+  "继续接收附件": "Resuming attachment",
+  "附件等待恢复": "Attachment waiting to resume",
   "暂时无法与对方通信": "The other device is not responding",
   "已接收内容": "Content received",
   "发送进度已更新": "Transfer status updated",
@@ -194,14 +212,14 @@ export const appEnglish: Record<string, string> = {
   怎么传送消息和文件: "Send messages and files",
   "同时开启时，先尝试快速直连；连接不成功，再尝试兼容传输。":
     "When both are on, try a direct connection first, then try compatible transfer if it cannot connect.",
-  "快速直连（TCP）": "Direct transfer (TCP)",
-  "适合客户端之间直接传输，需要双方都能使用这种方式。":
-    "Connect apps directly. Both devices need to support this option.",
+  "快速直连": "Direct transfer",
+  "同一网络内的客户端和支持的浏览器可以直接收发。":
+    "Desktop apps and supported browsers can share directly on the same network.",
   "兼容传输（WebRTC）": "Compatible transfer (WebRTC)",
   "支持网页与客户端互传，能否连通取决于双方网络。":
     "Share between browsers and apps. Connectivity depends on both networks.",
-  "网页版使用在线查找和兼容传输；附近查找和快速直连需要安装客户端。":
-    "Browsers use online discovery and compatible transfer. Nearby discovery and direct transfer require the desktop app.",
+  "网页版通过服务器查找设备，并自动选择可用的传输方式。":
+    "The browser finds devices online and automatically selects an available connection.",
   服务器列表: "Servers",
   "连接服务器帮助设备找到彼此。双方都开启同一服务器的中转后，直连失败时可由该服务器转送消息和文件。":
     "Connection servers help devices find each other. If both devices enable relay on the same server, it can forward messages and files when direct connections fail.",
@@ -221,8 +239,8 @@ export const appEnglish: Record<string, string> = {
   添加服务器: "Add server",
   添加: "Add",
   保存: "Save",
-  "修改后自动生效并重新连接。正在传输内容时，请完成后再修改。":
-    "Changes apply automatically and reconnect your device. Finish any transfers before making changes.",
+  "设置生效时会重新连接。正在传输内容时，请完成后再修改。":
+    "Applying settings reconnects your device. Finish any transfers before making changes.",
   "设置已生效。": "Settings applied.",
   "正在应用设置…": "Applying settings…",
   "还有内容正在传输，请完成后再修改设置":
@@ -261,7 +279,6 @@ export const appEnglish: Record<string, string> = {
   "正在统计文件夹…": "Counting files…",
   "正在打包文件夹…": "Packing folder…",
   取消准备: "Cancel preparation",
-  取消传输: "Cancel transfer",
   "{{count}} 个文件": "{{count}} files",
   "不超过 {{limit}} MB 且不超过 {{count}} 个文件的文件夹将打包发送，其他文件夹直接保存到对方设备":
     "Folders up to {{limit}} MB with up to {{count}} files are sent as ZIP files. Larger folders are saved directly to the recipient's device.",
@@ -276,8 +293,15 @@ export const appEnglish: Record<string, string> = {
   接收: "Accept",
   "正在接收…": "Accepting…",
   "正在选择保存位置…": "Choosing a save location…",
+  "正在更改保存位置…": "Changing save location…",
+  另存为: "Save as",
+  已保存到所选位置: "Saved to the selected location",
+  请重新选择保存位置: "Choose a save location again",
+  无法迁移已接收的文件: "Could not move the received data",
+  文件已保存到所选位置: "This file was already saved to the selected location",
   接收并保存: "Accept and save",
   拒收: "Decline",
+  等待重新连接: "Waiting to reconnect",
   等待对方确认: "Awaiting acceptance",
   仅保留传输记录: "Transfer record only",
   网站更新: "App update",

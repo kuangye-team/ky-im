@@ -7,39 +7,22 @@ import {
   selectContactAction,
   sendText,
   setProfile,
+  useRoom,
 } from "./helpers";
 
 type DiscoveryProbe = Window & { __socketCount: number };
 
-async function useRoom(page: Page, room: string) {
-  // Separate discovery rooms model different network groups; all traffic still
-  // uses real WebSockets and WebRTC DataChannels.
-  await page.addInitScript((roomName) => {
+async function countDiscoverySockets(page: Page) {
+  await page.addInitScript(() => {
     const state = window as DiscoveryProbe;
     state.__socketCount = 0;
-    const OriginalSocket = window.WebSocket;
-    window.WebSocket = class extends OriginalSocket {
+    window.WebSocket = class extends WebSocket {
       constructor(...args: ConstructorParameters<typeof WebSocket>) {
         super(...args);
-        if (new URL(String(args[0]), location.href).pathname === "/api/ws")
-          state.__socketCount++;
-      }
-      send(data: Parameters<WebSocket["send"]>[0]) {
-        if (typeof data === "string") {
-          try {
-            const packet = JSON.parse(data);
-            if (packet.type === "join") {
-              super.send(JSON.stringify({ ...packet, room: roomName }));
-              return;
-            }
-          } catch {
-            // Preserve native behavior for non-JSON frames.
-          }
-        }
-        super.send(data);
+        if (new URL(this.url).pathname === "/api/ws") state.__socketCount++;
       }
     };
-  }, room);
+  });
 }
 
 async function invite(page: Page) {
@@ -56,6 +39,28 @@ async function ownNumber(page: Page) {
   const result = (await number.textContent())!;
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   return result;
+}
+
+async function useNumber(page: Page, numericId: string) {
+  // Stop the app before seeding a second device with the same number.
+  await page.goto("/api/health");
+  await page.evaluate(async (number) => {
+    const db = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open("ky-im");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction("settings", "readwrite");
+      const store = tx.objectStore("settings");
+      const request = store.get("profile");
+      request.onsuccess = () => store.put({ ...request.result, numericId: number }, "profile");
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  }, numericId);
+  await page.goto("/");
 }
 
 async function connectTo(page: Page, numericId: string) {
@@ -110,6 +115,7 @@ test("蜂鸟号连接整组及后续设备，保留自己的分组并分别保�
   try {
     for (const [index, page] of pages.entries()) {
       page.on("pageerror", (error) => pageErrors.push(error.message));
+      await countDiscoverySockets(page);
       await useRoom(page, `group-${suffix}-${index === 0 ? "a" : "b"}`);
     }
     for (const [index, page] of [alice, bob, charlie].entries()) {
@@ -119,8 +125,10 @@ test("蜂鸟号连接整组及后续设备，保留自己的分组并分别保�
     const [aliceNumber, bobNumber, charlieNumber] = await Promise.all(
       [alice, bob, charlie].map(ownNumber),
     );
-    expect(bobNumber).toBe(charlieNumber);
+    expect(bobNumber).not.toBe(charlieNumber);
     expect(aliceNumber).not.toBe(bobNumber);
+    await useNumber(charlie, bobNumber!);
+    expect(await ownNumber(charlie)).toBe(bobNumber);
     await expect(
       alice.getByRole("button", { name: `与 ${names[1]} 聊天`, exact: true }),
     ).toHaveCount(0);
@@ -186,6 +194,7 @@ test("蜂鸟号连接整组及后续设备，保留自己的分组并分别保�
     // The lookup remains subscribed to the target group without moving Alice.
     await dora.goto(baseURL!);
     await setProfile(dora, names[3]!, "稍后加入同一网络");
+    await useNumber(dora, bobNumber!);
     expect(await ownNumber(dora)).toBe(bobNumber);
     await alice.getByRole("button", { name: "在线设备", exact: true }).click();
     for (const name of names.slice(1)) {

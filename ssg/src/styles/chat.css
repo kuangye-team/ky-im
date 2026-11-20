@@ -1,0 +1,433 @@
+.chat-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+  position: relative;
+}
+.chat-heading {
+  height: 76px;
+  padding: 0 23px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.chat-heading h2 {
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-heading > div > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8px;
+  color: var(--muted);
+  margin-top: 5px;
+}
+.chat-heading .status-dot {
+  width: 4px;
+  height: 4px;
+}
+.chat-heading-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mobile-back {
+  display: none;
+}
+.messages {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 23px 20px;
+  scroll-behavior: smooth;
+  background: linear-gradient(
+    180deg,
+    var(--surface-soft) 0,
+    var(--surface) 90px
+  );
+}
+.conversation-start {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 5px;
+  font-size: 8px;
+  color: var(--muted);
+  margin: 19px 0 24px;
+}
+.day-divider {
+  text-align: center;
+  margin: 21px 0;
+  color: var(--muted);
+  font-size: 9px;
+}
+.day-divider span {
+  background: var(--surface-soft);
+  border-radius: 4px;
+  padding: 4px 9px;
+}
+.message-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 22px;
+}
+.message-row.mine {
+  flex-direction: row-reverse;
+}
+.message-row > .avatar {
+  width: 31px;
+  height: 31px;
+  font-size: 17px;
+  border-radius: 10px;
+}
+.message-content {
+  max-width: calc(100% - 60px);
+  min-width: 0;
+}
+.text-bubble {
+  font-size: 12px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 11px 15px;
+  border-radius: 0 12px 12px;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  min-width: 40px;
+}
+.mine .text-bubble {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-radius: 12px 0 12px 12px;
+  box-shadow: 0 4px 9px var(--primary-shadow);
+}
+.message-meta {
+  font-size: 8px;
+  display: flex;
+  gap: 8px;
+  color: var(--muted);
+  margin-top: 7px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.message-delete-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 26px;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 10px;
+  cursor: pointer;
+}
+.message-delete-button:hover,
+.message-delete-button:focus-visible {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.message-delete-preview {
+  max-height: 140px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.message-delete-error {
+  margin-top: 12px;
+  color: var(--danger);
+  font-size: 12px;
+}
+@media (pointer: coarse) {
+  .message-delete-button {
+    min-height: 36px;
+    min-width: 48px;
+  }
+}
+.message-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--primary);
+}
+.mine .message-meta {
+  justify-content: flex-end;
+}
+.message-meta .danger-text {
+  color: var(--danger);
+}
+.attachment-bubble {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 13px;
+  max-width: 310px;
+  min-width: 230px;
+  overflow: hidden;
+}
+.file-icon {
+  width: 41px;
+  height: 47px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--primary-subtle);
+  color: var(--primary);
+}
+.attachment-meta {
+  min-width: 0;
+  flex: 1;
+}
+.attachment-meta strong {
+  display: block;
+  font-weight: 500;
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  max-width: 180px;
+}
+.attachment-meta span {
+  font-size: 9px;
+  color: var(--muted);
+  margin-top: 6px;
+  display: block;
+}
+.attachment-bubble > .icon-button {
+  height: 28px;
+  width: 28px;
+  color: var(--primary);
+  background: var(--surface-soft);
+}
+.image-bubble {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  min-width: 190px;
+  padding: 7px;
+  gap: 9px;
+}
+.image-preview {
+  grid-column: 1/-1;
+  padding: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-soft);
+  width: 100%;
+  display: block;
+}
+.image-preview img {
+  display: block;
+  width: 100%;
+  max-height: 250px;
+  object-fit: contain;
+  min-height: 40px;
+  min-width: 140px;
+}
+.image-bubble .attachment-meta {
+  padding: 0 6px 6px;
+}
+.image-bubble > .icon-button {
+  margin-right: 3px;
+}
+.transfer-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--primary-subtle);
+}
+.transfer-progress i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  transition: width 0.2s;
+}
+.composer {
+  border-top: 1px solid var(--line);
+  padding: 12px 22px 16px;
+  position: relative;
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.folder-preparation {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--primary);
+  background: var(--surface);
+}
+.folder-preparation > span {
+  flex: 1;
+  min-width: 0;
+}
+.folder-preparation strong,
+.folder-preparation small {
+  display: block;
+  font-size: 12px;
+}
+.folder-preparation small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+.composer-presence-hint {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.composer-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.composer-tools > div {
+  display: flex;
+  gap: 7px;
+}
+.composer-tools > .icon-button {
+  color: var(--muted);
+}
+.composer-tools > span {
+  font-size: 8px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.composer textarea {
+  display: block;
+  border: 0;
+  width: 100%;
+  resize: none;
+  height: 69px;
+  background: transparent;
+  padding: 10px 2px;
+  font-size: 11px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+}
+.composer textarea::placeholder {
+  color: var(--muted);
+}
+.composer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.composer-bottom > span {
+  font-size: 8px;
+  color: var(--muted);
+}
+.send-button {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-radius: 7px;
+  padding: 9px 14px;
+  font-size: 10px;
+  gap: 13px;
+  min-width: 75px;
+}
+.hidden-input {
+  display: none;
+}
+.emoji-picker {
+  position: absolute;
+  bottom: 145px;
+  left: 20px;
+  z-index: 4;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 6px 30px #39226917;
+  padding: 9px;
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 5px;
+}
+.emoji-picker button {
+  font-size: 21px;
+  padding: 4px;
+  border-radius: 5px;
+}
+.emoji-picker button:hover {
+  background: var(--primary-subtle);
+}
+.message-search {
+  margin: 10px 20px 0;
+  flex-shrink: 0;
+}
+.message-search > span {
+  font-size: 9px;
+  white-space: nowrap;
+}
+.chat-empty {
+  text-align: center;
+  padding: 70px 10px;
+}
+.chat-empty > span {
+  font-size: 36px;
+  display: block;
+  margin-bottom: 20px;
+}
+.chat-empty h3 {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.chat-empty p {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--muted);
+  margin-top: 10px;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 12px;
+  z-index: 10;
+  border: 2px dashed var(--primary-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, transparent);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+  pointer-events: none;
+}
+.drop-overlay h2 {
+  font-size: 22px;
+  margin: 20px 0 12px;
+}
+.drop-overlay p {
+  font-size: 12px;
+  color: var(--muted);
+}

@@ -1,3 +1,4 @@
+import { localRuntime, CAP } from "../capabilities";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { testServer } from "./serverTest";
 class Socket {
@@ -25,10 +26,10 @@ describe("server capability probe", () => {
       const socket = Socket.last;
       socket.onopen!();
       expect(socket.send).toHaveBeenCalledExactlyOnceWith(
-        '{"type":"capabilities"}',
+        '{"type":"auth"}',
       );
       socket.onmessage!({
-        data: JSON.stringify({ type: "capabilities", relay }),
+        data: JSON.stringify({ type: "capabilities", ...localRuntime(), capabilities: localRuntime().capabilities.filter(c => relay || c !== CAP.relay) }),
       });
       await expect(result).resolves.toEqual({ relay });
       expect(socket.close).toHaveBeenCalledOnce();
@@ -41,7 +42,7 @@ describe("server capability probe", () => {
       vi.useFakeTimers();
       vi.stubGlobal("WebSocket", Socket);
       const result = testServer("ws://example.test/ws", 50);
-      const rejected = expect(result).rejects.toThrow("连接失败");
+      const rejected = expect(result).rejects.toThrow(failure === "invalid" ? "暂时无法连接" : "连接失败");
       const socket = Socket.last;
       if (failure === "error") socket.onerror!();
       if (failure === "close") socket.onclose!();

@@ -10,7 +10,7 @@ test("系统配置自动应用，服务器通过弹窗添加和编辑", async ({
   ).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: /附近查找/ })).toBeDisabled();
   await expect(page.getByRole("checkbox", { name: /快速直连/ })).toBeDisabled();
-  const list = page.getByRole("list", { name: "服务器列表" });
+  const list = page.getByRole("list", { name: "信令服务器" });
   await expect(list.getByRole("textbox")).toHaveCount(0);
   await expect(list.getByText("默认服务器", { exact: true })).toBeVisible();
   await expect(
@@ -27,7 +27,7 @@ test("系统配置自动应用，服务器通过弹窗添加和编辑", async ({
   );
   await expect(page.getByLabel("启用服务器 1", { exact: true })).toBeChecked();
 
-  const add = page.getByRole("button", { name: "添加服务器", exact: true });
+  const add = page.getByRole("region", { name: "信令服务器", exact: true }).getByRole("button", { name: "添加服务器", exact: true });
   await add.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("服务器名称", { exact: true })).toBeFocused();
@@ -93,12 +93,13 @@ test("系统配置自动应用，服务器通过弹窗添加和编辑", async ({
     list.getByText("ws://127.0.0.1:9/updated", { exact: true }),
   ).toBeVisible();
 
-  await page.getByLabel("启用服务器 2", { exact: true }).check();
+  const backup = page.getByLabel("启用服务器 2", { exact: true });
+  await backup.click();
+  await expect(backup).toBeChecked();
   await expect(page.getByRole("status")).toHaveText("设置已生效。");
-  await page.getByLabel("启用服务器 1", { exact: true }).uncheck();
-  await expect(
-    page.getByLabel("启用服务器 1", { exact: true }),
-  ).not.toBeChecked();
+  const primary = page.getByLabel("启用服务器 1", { exact: true });
+  await primary.click();
+  await expect(primary).not.toBeChecked();
   await page.reload();
   await expect(
     page.getByLabel("启用服务器 1", { exact: true }),
@@ -109,7 +110,8 @@ test("系统配置自动应用，服务器通过弹窗添加和编辑", async ({
     "使用在线查找时，请至少启用一个服务器",
   );
   await expect(list.getByRole("listitem")).toHaveCount(2);
-  await page.getByLabel("启用服务器 1", { exact: true }).check();
+  await primary.click();
+  await expect(primary).toBeChecked();
   await page.getByRole("button", { name: "删除服务器 2", exact: true }).click();
   await expect(list.getByRole("listitem")).toHaveCount(1);
   await page.reload();
@@ -123,8 +125,9 @@ test("系统配置自动应用，服务器通过弹窗添加和编辑", async ({
 test("应用失败保留原设置，弹窗保留输入以便重试", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(
-      "hummingbird.network.v1",
+      "hummingbird.network",
       JSON.stringify({
+        iceServers: [],
         discovery: { signaling: true, mdns: false },
         transport: { tcp: false, webrtc: true },
         servers: [
@@ -140,7 +143,7 @@ test("应用失败保留原设置，弹窗保留输入以便重试", async ({ pa
     );
     const setItem = Storage.prototype.setItem;
     Storage.prototype.setItem = function (key, value) {
-      if (key === "hummingbird.network.v1")
+      if (key === "hummingbird.network")
         throw new Error("Storage unavailable");
       setItem.call(this, key, value);
     };
@@ -162,12 +165,12 @@ test("应用失败保留原设置，弹窗保留输入以便重试", async ({ pa
   );
   await dialog.getByRole("button", { name: "取消", exact: true }).click();
   await expect(
-    page.getByRole("list", { name: "服务器列表" }).getByText("备用服务器"),
+    page.getByRole("list", { name: "信令服务器" }).getByText("备用服务器"),
   ).toBeVisible();
   expect(
     await page.evaluate(
       () =>
-        JSON.parse(localStorage.getItem("hummingbird.network.v1")!).servers[1],
+        JSON.parse(localStorage.getItem("hummingbird.network")!).servers[1],
     ),
   ).toMatchObject({ name: "备用服务器", enabled: false });
 });
@@ -178,8 +181,9 @@ test("一个服务器连不上时仍能通过另一个服务器发现和聊天",
 }) => {
   await page.addInitScript(() =>
     localStorage.setItem(
-      "hummingbird.network.v1",
+      "hummingbird.network",
       JSON.stringify({
+        iceServers: [],
         discovery: { signaling: true, mdns: false },
         transport: { tcp: false, webrtc: true },
         servers: [
@@ -218,7 +222,7 @@ test("系统配置列表和编辑弹窗在手机宽度下不会横向溢出", as
   await page.goto("/settings");
   const { expectNoHorizontalOverflow } = await import("./helpers");
   await expect(page.getByRole("heading", { name: "系统配置" })).toBeVisible();
-  await page.getByRole("button", { name: "添加服务器", exact: true }).click();
+  await page.getByRole("region", { name: "信令服务器", exact: true }).getByRole("button", { name: "添加服务器", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog
     .getByLabel("服务器名称", { exact: true })
@@ -235,7 +239,7 @@ test("系统配置列表和编辑弹窗在手机宽度下不会横向溢出", as
   await expect(dialog).toBeHidden();
   await expect(
     page
-      .getByRole("list", { name: "服务器列表" })
+      .getByRole("list", { name: "信令服务器" })
       .getByText(address, { exact: true }),
   ).toBeVisible();
   await expectNoHorizontalOverflow(page);
@@ -293,7 +297,7 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
 }) => {
   const authURL = `ws://127.0.0.1:${process.env.PLAYWRIGHT_AUTH_PORT || 4312}/api/ws`;
   await page.goto("/settings");
-  await page.getByRole("button", { name: "添加服务器", exact: true }).click();
+  await page.getByRole("region", { name: "信令服务器", exact: true }).getByRole("button", { name: "添加服务器", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("服务器名称", { exact: true }).fill("我的私有服务器");
   await dialog.getByLabel("服务器地址", { exact: true }).fill(authURL);
@@ -301,7 +305,7 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
   await dialog.getByRole("button", { name: "添加", exact: true }).click();
   await expect(dialog).toBeHidden();
   const server = page
-    .getByRole("list", { name: "服务器列表" })
+    .getByRole("list", { name: "信令服务器" })
     .getByRole("listitem")
     .filter({ has: page.getByText("我的私有服务器", { exact: true }) });
   await server.getByRole("button", { name: "测试服务器 2", exact: true }).click();
@@ -327,9 +331,13 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
   await expect(
     server.getByText("连接成功 · 支持中转", { exact: true }),
   ).toBeVisible();
-  await page.getByLabel("启用服务器 2 的中转", { exact: true }).check();
+  const relay = page.getByLabel("启用服务器 2 的中转", { exact: true });
+  await relay.click();
+  await expect(relay).toBeChecked();
   await expect(page.getByRole("status")).toHaveText("设置已生效。");
-  await page.getByLabel("启用服务器 1", { exact: true }).uncheck();
+  const primary = page.getByLabel("启用服务器 1", { exact: true });
+  await primary.click();
+  await expect(primary).not.toBeChecked();
   await expect(page.getByRole("status")).toHaveText("设置已生效。");
   await page.reload();
   await expect(
@@ -342,11 +350,11 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
   });
 
   const settings = await page.evaluate(
-    () => localStorage.getItem("hummingbird.network.v1")!,
+    () => localStorage.getItem("hummingbird.network")!,
   );
   const context = await browser.newContext({ locale: "zh-CN" });
   await context.addInitScript(
-    (value) => localStorage.setItem("hummingbird.network.v1", value),
+    (value) => localStorage.setItem("hummingbird.network", value),
     settings,
   );
   const other = await context.newPage();

@@ -8,8 +8,9 @@ import type { FolderProgress, FolderSelection } from "../core/folders";
 export async function readDesktopFolder(
   signal: AbortSignal,
   report: (progress: FolderProgress) => void,
+  selectedRoot?: string,
 ): Promise<FolderSelection> {
-  const root = await choose({
+  const root = selectedRoot ?? await choose({
     directory: true,
     multiple: false,
     recursive: true,
@@ -64,6 +65,7 @@ export async function readDesktopFolder(
           kind: "file",
           path,
           file: {
+            nativeSource: { path: absolute },
             name: child.name,
             type: "",
             size: info.size,

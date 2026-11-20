@@ -45,6 +45,11 @@ void i18n.use(initReactI18next).init({
 function updateDocumentLanguage() {
   if (typeof document === "undefined") return;
   document.documentElement.lang = i18n.language;
+  if (import.meta.env.VITE_DESKTOP) {
+    void import("@tauri-apps/api/core")
+      .then(({ invoke }) => invoke("set_window_language", { language: i18n.language }))
+      .catch(error => console.error("Could not update the window language", error));
+  }
   document
     .querySelector('meta[name="description"]')
     ?.setAttribute(

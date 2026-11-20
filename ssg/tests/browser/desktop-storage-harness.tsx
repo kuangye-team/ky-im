@@ -3,6 +3,8 @@ import { useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { mockIPC } from "@tauri-apps/api/mocks";
 import { ChatEngine } from "../../src/core/engine";
+import { localRuntime } from "../../src/core/capabilities";
+import type { Profile } from "../../src/core/types";
 import {
   DesktopStorageAdapter,
   type StorageInvoke,
@@ -24,6 +26,8 @@ let finish: (() => void) | undefined;
 export const moves: string[] = [];
 const info = () => ({ directory, usage: 4096, cacheUsage: 1024 });
 const invoke = (async (request) => {
+  if (request.op === "cachedUsage") return null;
+  if (request.op === "scanUsage") return { info: info(), usage: info().usage, files: [], completedAt: Date.now() };
   if (request.op === "info") return info();
   if (request.op === "getFiles") return [];
   if (request.op === "move") {
@@ -33,7 +37,7 @@ const invoke = (async (request) => {
     });
     if (failure) throw new Error("请选择空文件夹，避免覆盖已有数据");
     directory = String(request.directory);
-    return info();
+    return { directory };
   }
   throw new Error(`Unexpected storage operation: ${request.op}`);
 }) as StorageInvoke;
@@ -41,14 +45,15 @@ mockIPC((command) => {
   if (command === "plugin:dialog|open") return selected;
   throw new Error(`Unexpected command: ${command}`);
 });
-const profile = {
+const profile: Profile = {
+  ...localRuntime(true),
   id: "10000000-0000-4000-8000-000000000000",
   name: "Test",
   avatar: "🌿",
   color: "#123456",
   bio: "",
   device: "Mac",
-  clientType: "app" as const,
+  clientType: "desktop",
 };
 const engine = new ChatEngine(new DesktopStorageAdapter(invoke), profile, []);
 export function completeMove(fail: boolean) {

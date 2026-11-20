@@ -205,37 +205,6 @@ describe("network settings", () => {
       ).servers[0].enabled,
     ).toBe(false);
   });
-  it("restores a previously edited or removed default without losing custom servers", () => {
-    const settings = defaultSettings(false);
-    const custom = {
-      id: "custom",
-      name: "Custom",
-      url: "wss://example.com/api/ws",
-      enabled: true,
-    };
-    for (const servers of [
-      [custom],
-      [
-        {
-          ...settings.servers[0],
-          name: "edited",
-          url: "wss://old.example/api/ws",
-          enabled: false,
-        },
-        custom,
-      ],
-    ]) {
-      vi.stubGlobal("localStorage", {
-        getItem: () => JSON.stringify({ ...settings, servers }),
-      });
-      const restored = readSettings(false);
-      expect(restored.servers).toEqual([
-        { ...settings.servers[0], enabled: servers.length === 1 },
-        custom,
-      ]);
-      expect(validateSettings(restored, false)).toEqual(restored);
-    }
-  });
   it("recovers from corrupt stored data and never reports a failed write as saved", () => {
     vi.stubGlobal("localStorage", {
       getItem: () => "bad json",

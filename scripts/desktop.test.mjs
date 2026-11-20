@@ -81,6 +81,11 @@ test("central configuration covers template variables and generates desktop env 
     assert.equal(compose.VITE_API_LATEST, config.compose.ssg.VITE_API_LATEST);
     assert.equal(frontend.WEB_PORT, undefined);
     assert.equal(frontend.API_HOST, "http://127.0.0.1:8080");
+    assert.equal(frontend.VITE_RTC_MAX_BUFFERED_AMOUNT, "1048576");
+    assert.equal(frontend.VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD, "262144");
+    assert.equal(frontend.VITE_RTC_FILE_CHUNK_SIZE, "262144");
+    assert.equal(frontend.VITE_MACOS_SEND_ACTIVITY, "true");
+    assert.equal(frontend.VITE_WINDOWS_SEND_ACTIVITY, "true");
     assert.equal(frontend.VITE_STORAGE_CHUNK_SIZE, "2097152");
     assert.equal(frontend.TAURI_SIGNING_PRIVATE_KEY, undefined);
     config.desktop.app.RELEASE_VERSION = "2.3.4";
@@ -89,21 +94,12 @@ test("central configuration covers template variables and generates desktop env 
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
-test("desktop commands support CI env and preserve legacy files without desktop sections", () => {
-  const { directory, config } = envFixture();
+test("desktop commands support signing through CI env without a config file", () => {
+  const { directory } = envFixture();
   try {
     const signing = { TAURI_UPDATER_PUBLIC_KEY: "public", TAURI_SIGNING_PRIVATE_KEY: "private" };
     assert.equal(updaterConfig(desktopEnv(directory, signing), true).bundle.createUpdaterArtifacts, true);
     assert.equal(existsSync(join(directory, "app/.env")), false);
-    writeFileSync(join(directory, "app/.env"), "RELEASE_VERSION=1.2.3\n");
-    delete config.desktop;
-    writeFileSync(join(directory, ".env.json"), JSON.stringify(config));
-    initEnv(directory);
-    assert.equal(desktopEnv(directory, {}).RELEASE_VERSION, "1.2.3");
-    assert.equal(existsSync(join(directory, "ssg/.env.desktop")), false);
-    writeFileSync(join(directory, ".env.json"), "bad json");
-    assert.throws(() => desktopEnv(directory, {}), SyntaxError);
-    assert.equal(readFileSync(join(directory, "app/.env"), "utf8"), "RELEASE_VERSION=1.2.3\n");
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 

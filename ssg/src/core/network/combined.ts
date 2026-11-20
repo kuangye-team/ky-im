@@ -1,18 +1,21 @@
 import { runtimeLog } from "../../runtime-logs";
 import { SIGNALING_CONFIG } from "../../config";
-import { isNumericId, isProfile } from "../protocol";
+import { isProfile } from "../protocol";
 import type { Profile } from "../types";
 import type { DiscoveryAdapter, DiscoverySession } from "./types";
+import { confirmsActivity } from "./signaling";
 
 type Source = {
   adapter: DiscoveryAdapter;
   session?: DiscoverySession;
   peers: Map<string, Profile>;
   joined: boolean;
-  numericId?: string;
   retry?: ReturnType<typeof setTimeout>;
   lastSeen: number;
   attempts: number;
+  welcomedAt?: number;
+  timeout?: ReturnType<typeof setTimeout>;
+  probe?: ReturnType<typeof setTimeout>;
 };
 
 type Lookup = {
@@ -49,15 +52,26 @@ class CombinedSession implements DiscoverySession {
   onerror: DiscoverySession["onerror"] = null;
   onclose: DiscoverySession["onclose"] = null;
   private sources: Source[];
-  private join?: { type: string; room: string; profile: Profile };
+  private join?: {
+    type: string;
+    room: string;
+    profile: Profile;
+    recentNumericIds?: string[];
+  };
   private welcomed = false;
   private visible = new Map<string, Profile>();
   private routes = new Map<string, Source>();
   private lookups = new Map<string, Lookup>();
   private primary?: Source;
-  private numberPublished = false;
   private heartbeat?: ReturnType<typeof setInterval>;
+  private tickAt = Date.now();
+  private readonly onOnline = () => this.resume();
+  private readonly onVisible = () => {
+    if (document.visibilityState === "visible") this.resume();
+  };
   constructor(adapters: DiscoveryAdapter[]) {
+    if (typeof window !== "undefined") window.addEventListener("online", this.onOnline);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisible);
     this.sources = adapters.map((adapter) => ({
       adapter,
       peers: new Map(),
@@ -81,9 +95,12 @@ class CombinedSession implements DiscoverySession {
       const session = source.adapter.open();
       source.session = session;
       source.lastSeen = Date.now();
+      this.connectionDeadline(source, session, SIGNALING_CONFIG.openTimeoutMs);
+      session.onactivity = () => { if (source.session === session) this.receivedTraffic(source); };
       session.onopen = () => {
         if (source.session === session && this.join) {
           try {
+            this.connectionDeadline(source, session, SIGNALING_CONFIG.joinTimeoutMs);
             session.send(JSON.stringify(this.join));
           } catch {
             this.lost(source, session);
@@ -117,13 +134,16 @@ class CombinedSession implements DiscoverySession {
     if (this.readyState === 3 || (session && source.session !== session))
       return;
     runtimeLog("warn", "discovery", "设备查找来源已断开，准备重试", { detail: source.adapter.name });
+    clearTimeout(source.timeout);
+    clearTimeout(source.probe);
+    source.timeout = source.probe = undefined;
+    source.welcomedAt = undefined;
     source.session = undefined;
     if (session) {
       session.onclose = session.onerror = null;
       session.close();
     }
     source.joined = false;
-    source.numericId = undefined;
     source.peers.clear();
     for (const [id, route] of this.routes)
       if (route === source) this.routes.delete(id);
@@ -150,13 +170,10 @@ class CombinedSession implements DiscoverySession {
     const next = this.primary?.joined
       ? this.primary
       : this.sources.find((s) => s.joined && s.adapter.supportsNumericIds);
-    if (next !== this.primary || !this.numberPublished) {
-      this.primary = next;
-      this.numberPublished = true;
-      this.emit({ type: "discovery_number", numericId: next?.numericId });
-    }
+    this.primary = next;
   }
-  private publish() {
+
+  private publish(joinedPeer?: string) {
     const peers = new Map<string, Profile>();
     // Prefer the numeric identity of the server used to reach that device.
     for (const source of [...this.sources].reverse())
@@ -168,8 +185,10 @@ class CombinedSession implements DiscoverySession {
         peers.delete(id);
         continue;
       }
-      if (
-        !this.visible.has(id) ||
+      const previous = this.visible.get(id);
+      if (!previous || id === joinedPeer) {
+        this.emit({ type: "peer_joined", peer });
+      } else if (
         (
           [
             "id",
@@ -181,7 +200,9 @@ class CombinedSession implements DiscoverySession {
             "clientType",
             "numericId",
           ] as const
-        ).some((key) => this.visible.get(id)?.[key] !== peer[key])
+        ).some((key) => previous[key] !== peer[key]) ||
+        previous.capabilities.length !== peer.capabilities.length ||
+        peer.capabilities.some(cap => !previous.capabilities.includes(cap))
       )
         this.emit({ type: "peer_updated", peer });
     }
@@ -273,8 +294,16 @@ class CombinedSession implements DiscoverySession {
     }
     this.finishLookupSource(packet.requestId, source);
   }
+  private receivedTraffic(source: Source) {
+    source.lastSeen = Date.now();
+    clearTimeout(source.probe);
+    source.probe = undefined;
+    if (source.welcomedAt !== undefined && source.lastSeen - source.welcomedAt >= SIGNALING_CONFIG.reconnectStableMs)
+      source.attempts = 0;
+  }
   private receive(source: Source, packet: Record<string, any>) {
     if (!packet || typeof packet !== "object") return;
+    if (confirmsActivity(packet)) this.receivedTraffic(source);
     if (
       packet.type === "group_resolved" ||
       packet.type === "peer_resolved" ||
@@ -283,14 +312,28 @@ class CombinedSession implements DiscoverySession {
       this.receiveLookup(source, packet);
       return;
     }
-    if (packet.type === "pong" || packet.type === "welcome")
-      source.lastSeen = Date.now();
+    if (packet.type === "signal_error" && !source.adapter.usesBrowserNetworkStatus &&
+        this.routes.get(packet.to) === source && packet.data && typeof packet.data === "object") {
+      this.routes.delete(packet.to);
+      for (const alternate of this.sources) {
+        if (alternate === source || !alternate.joined || !alternate.peers.has(packet.to) || alternate.session?.readyState !== 1) continue;
+        try {
+          alternate.session.send(JSON.stringify({ type: "signal", to: packet.to, data: packet.data }));
+          this.routes.set(packet.to, alternate);
+          return;
+        } catch { this.lost(alternate); }
+      }
+      return;
+    }
+    if (packet.type === "network_changed" && !source.adapter.usesBrowserNetworkStatus) {
+      this.emit(packet);
+      return;
+    }
     if (packet.type === "welcome" && Array.isArray(packet.peers)) {
       source.joined = true;
-      source.attempts = 0;
-      source.numericId = isNumericId(packet.numericId)
-        ? packet.numericId
-        : undefined;
+      source.welcomedAt = Date.now();
+      clearTimeout(source.timeout);
+      source.timeout = undefined;
       source.peers = new Map(
         packet.peers.filter(isProfile).map((p: Profile) => [p.id, p]),
       );
@@ -301,11 +344,24 @@ class CombinedSession implements DiscoverySession {
       this.selectPrimary();
       this.publish();
     } else if (
+      packet.type === "discovery_updated" &&
+      Array.isArray(packet.peers) &&
+      packet.peers.every(isProfile) &&
+      Array.isArray(packet.removedPeerIds) &&
+      packet.removedPeerIds.every((id: unknown) => typeof id === "string")
+    ) {
+      for (const id of packet.removedPeerIds) {
+        source.peers.delete(id);
+        if (this.routes.get(id) === source) this.routes.delete(id);
+      }
+      for (const peer of packet.peers) source.peers.set(peer.id, peer);
+      this.publish();
+    } else if (
       (packet.type === "peer_joined" || packet.type === "peer_updated") &&
       isProfile(packet.peer)
     ) {
       source.peers.set(packet.peer.id, packet.peer);
-      this.publish();
+      this.publish(packet.type === "peer_joined" ? packet.peer.id : undefined);
     } else if (packet.type === "peer_left" && typeof packet.id === "string") {
       source.peers.delete(packet.id);
       if (this.routes.get(packet.id) === source) this.routes.delete(packet.id);
@@ -317,18 +373,6 @@ class CombinedSession implements DiscoverySession {
     ) {
       this.routes.set(packet.from, source);
       this.emit(packet);
-    } else if (packet.type === "number_updated") {
-      if (Array.isArray(packet.peerIds) && isNumericId(packet.numericId)) {
-        if (packet.peerIds.includes(this.join?.profile.id))
-          source.numericId = packet.numericId;
-        for (const id of packet.peerIds) {
-          const peer = source.peers.get(id);
-          if (peer)
-            source.peers.set(id, { ...peer, numericId: packet.numericId });
-        }
-        this.publish();
-        if (source === this.primary) this.emit(packet);
-      }
     } else if (
       packet.type === "connect_error" ||
       (packet.type === "error" &&
@@ -337,35 +381,26 @@ class CombinedSession implements DiscoverySession {
       this.emit(packet);
     else if (packet.type === "pong") this.emit(packet);
   }
+  updateLocalProfile(profile: Profile) {
+    if (this.join) this.join.profile = profile;
+  }
   send(raw: string) {
     if (this.readyState !== 1) throw new Error("连接已关闭");
     const packet = JSON.parse(raw);
     if (packet.type === "join") {
       this.join = packet;
       for (const source of this.sources) this.open(source);
-      this.heartbeat = setInterval(() => {
-        for (const source of this.sources) {
-          if (!source.session) continue;
-          if (
-            Date.now() - source.lastSeen >
-            SIGNALING_CONFIG.heartbeatTimeoutMs
-          )
-            this.lost(source);
-          else if (source.session.readyState === 1) {
-            try {
-              source.session.send('{"type":"ping"}');
-            } catch {
-              this.lost(source);
-            }
-          }
-        }
-      }, SIGNALING_CONFIG.heartbeatIntervalMs);
+      this.tickAt = Date.now();
+      this.heartbeat = setInterval(() => this.check(), SIGNALING_CONFIG.heartbeatIntervalMs);
     } else if (packet.type === "connect" || packet.type === "connect_group") {
       this.lookup(packet, raw);
-    } else if (packet.type === "profile") {
-      if (this.join) this.join.profile = packet.profile;
+    } else if (packet.type === "change_numeric_id" || packet.type === "discover") {
+      if (this.join) {
+        if (packet.type === "change_numeric_id") Object.assign(this.join.profile = {...this.join.profile}, { numericId: packet.numericId, revision: packet.revision });
+        else this.join.recentNumericIds = packet.recentNumericIds;
+      }
       for (const source of this.sources)
-        if (source.joined) {
+        if (source.joined && source.session?.readyState === 1) {
           try {
             source.session?.send(raw);
           } catch {
@@ -373,27 +408,93 @@ class CombinedSession implements DiscoverySession {
           }
         }
     } else if (packet.type === "ping") {
-      if (this.sources.some((s) => s.joined))
+      // This pong proves the coordinator is alive, not any upstream service.
+      // Keep its native listener and healthy transports alive while sources retry.
+      if (this.welcomed || this.sources.some((s) => s.joined))
         queueMicrotask(() => this.emit({ type: "pong" }));
     } else {
-      const source =
-        packet.type === "signal"
-          ? (this.routes.get(packet.to) ??
-            this.sources.find((s) => s.joined && s.peers.has(packet.to)))
-          : this.primary;
-      if (!source?.joined || source.session?.readyState !== 1)
-        throw new Error("暂时无法联系设备，请检查发现方式和服务器设置");
-      source.session.send(raw);
+      const preferred = packet.type === "signal" ? this.routes.get(packet.to) : this.primary;
+      const candidates = packet.type === "signal"
+        ? [preferred, ...this.sources.filter((s) => s.peers.has(packet.to))]
+        : [preferred];
+      for (const source of new Set(candidates)) {
+        if (!source?.joined || source.session?.readyState !== 1) continue;
+        try {
+          source.session.send(raw);
+          if (packet.type === "signal") this.routes.set(packet.to, source);
+          return;
+        } catch {
+          this.lost(source);
+        }
+      }
+      throw new Error("暂时无法联系设备，请检查发现方式和服务器设置");
+    }
+  }
+  private connectionDeadline(source: Source, session: DiscoverySession, delay: number) {
+    clearTimeout(source.timeout);
+    const deadline = Date.now() + delay;
+    source.timeout = setTimeout(() => {
+      if (source.session !== session || source.joined) return;
+      if (Date.now() - deadline > SIGNALING_CONFIG.heartbeatIntervalMs)
+        this.connectionDeadline(source, session, SIGNALING_CONFIG.joinTimeoutMs);
+      else this.lost(source, session);
+    }, delay);
+  }
+  private probe(source: Source) {
+    const session = source.session;
+    if (!session || session.readyState !== 1) return;
+    clearTimeout(source.probe);
+    const deadline = Date.now() + SIGNALING_CONFIG.heartbeatResumeGraceMs;
+    source.probe = setTimeout(() => {
+      source.probe = undefined;
+      if (source.session !== session) return;
+      if (Date.now() - deadline > SIGNALING_CONFIG.heartbeatIntervalMs) this.probe(source);
+      else this.lost(source, session);
+    }, SIGNALING_CONFIG.heartbeatResumeGraceMs);
+    try { session.send('{"type":"ping"}'); }
+    catch { this.lost(source, session); }
+  }
+  resume() {
+    if (this.readyState === 3 || !this.join) return;
+    this.tickAt = Date.now();
+    for (const source of this.sources) {
+      if (!source.session) {
+        clearTimeout(source.retry);
+        source.retry = undefined;
+        this.open(source);
+      } else if (source.joined) {
+        if (this.tickAt - source.lastSeen >= SIGNALING_CONFIG.heartbeatIntervalMs) this.probe(source);
+      }
+      else this.connectionDeadline(source, source.session, SIGNALING_CONFIG.joinTimeoutMs);
+    }
+  }
+  private check() {
+    const now = Date.now();
+    const suspended = now - this.tickAt > SIGNALING_CONFIG.heartbeatIntervalMs * 2;
+    this.tickAt = now;
+    for (const source of this.sources) {
+      if (!source.session || !source.joined || now - source.lastSeen < SIGNALING_CONFIG.heartbeatIntervalMs) continue;
+      if (suspended) { this.probe(source); continue; }
+      if (source.probe) continue;
+      if (now - source.lastSeen > SIGNALING_CONFIG.heartbeatTimeoutMs) this.lost(source);
+      else if (source.session.readyState === 1) {
+        try { source.session.send('{"type":"ping"}'); }
+        catch { this.lost(source); }
+      }
     }
   }
   close() {
     if (this.readyState === 3) return;
     this.readyState = 3;
     clearInterval(this.heartbeat);
+    if (typeof window !== "undefined") window.removeEventListener("online", this.onOnline);
+    if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisible);
     for (const lookup of this.lookups.values()) clearTimeout(lookup.timer);
     this.lookups.clear();
     for (const source of this.sources) {
       clearTimeout(source.retry);
+      clearTimeout(source.timeout);
+      clearTimeout(source.probe);
       if (source.session) {
         source.session.onclose = source.session.onerror = null;
         source.session.close();

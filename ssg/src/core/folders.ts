@@ -2,7 +2,7 @@ import type { AttachmentSource } from "./types";
 import {
   CHUNK_SIZE,
   FOLDER_CONFIG,
-  MAX_FILE_SIZE,
+  MAX_BUFFERED_FILE_BYTES,
   MAX_TRANSFER_SIZE,
 } from "../config";
 
@@ -91,7 +91,7 @@ export function inspectFolder(folder: FolderSelection) {
     fileCount,
     directoryCount,
     compress:
-      size <= MAX_FILE_SIZE && fileCount <= FOLDER_CONFIG.maxCompressedFiles,
+      size <= MAX_BUFFERED_FILE_BYTES && fileCount <= FOLDER_CONFIG.maxCompressedFiles,
   };
 }
 

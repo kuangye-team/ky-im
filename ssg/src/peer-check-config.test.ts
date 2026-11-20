@@ -21,5 +21,6 @@ it("reads the list check interval from the frontend environment", async () => {
   vi.resetModules();
   const { CONNECTION_CONFIG } = await import("./config");
   expect(CONNECTION_CONFIG.listHeartbeatIntervalMs).toBe(45000);
+  expect(CONNECTION_CONFIG.offlineHeartbeatIntervalMs).toBe(90000);
   expect(CONNECTION_CONFIG.peerHeartbeatIntervalMs).toBe(10000);
 });

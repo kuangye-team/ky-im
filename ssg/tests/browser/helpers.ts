@@ -12,11 +12,26 @@ export async function capture(page: Page, filename: string) {
   });
 }
 
+export async function useRoom(page: Page, room: string) {
+  // Both the WebSocket upgrade and the signed join use the configured room.
+  await page.route("**/src/config.ts", async route => {
+    const response = await route.fetch();
+    await route.fulfill({ response, body: (await response.text()) + `\nSIGNALING_CONFIG.room = ${JSON.stringify(room)};` });
+  });
+}
+
 export async function setProfile(
   page: Page,
   name: string,
   bio = "局域网自动化测试",
 ) {
+  await editProfile(page, name, bio);
+  // A fresh discovery session advertises the saved name before peers open a chat.
+  await page.reload();
+  await expect(page.getByRole("button", { name: "个人资料", exact: true })).toContainText(name);
+}
+
+export async function editProfile(page: Page, name: string, bio = "局域网自动化测试") {
   await page.getByRole("button", { name: "个人资料", exact: true }).click();
   await page.getByLabel("显示名称", { exact: false }).fill(name);
   await page.getByLabel("个性签名", { exact: false }).fill(bio);

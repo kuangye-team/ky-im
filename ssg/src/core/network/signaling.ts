@@ -1,6 +1,20 @@
+import { requireServer, CompatibilityError, type RuntimeInfo } from "../capabilities";
 import { SIGNALING_CONFIG } from "../../config";
 import type { DiscoveryAdapter, DiscoverySession } from "./types";
-import type { RelayTransportAdapter } from "./relay";
+export interface SignalingHook { socket?(address: string): WebSocket; session(socket: WebSocket): DiscoverySession }
+
+/** Server responses that reach discovery. The transport reports consumed relay and RTC traffic separately. */
+export function confirmsActivity(packet: Record<string, unknown>) {
+  switch (packet.type) {
+    case "welcome": case "discovery_updated": case "group_resolved": return Array.isArray(packet.peers);
+    case "peer_joined": case "peer_updated": case "peer_resolved": return !!packet.peer && typeof packet.peer === "object";
+    case "peer_left": case "numeric_id_changed": return typeof packet.id === "string";
+    case "signal": return typeof packet.from === "string" && !!packet.data && typeof packet.data === "object";
+    case "numeric_id_rejected": case "connect_error": case "error": return typeof packet.code === "string";
+    case "pong": return true;
+    default: return false;
+  }
+}
 
 export function signalingAddress(url?: string) {
   return (
@@ -17,117 +31,74 @@ export class SignalingDiscoveryAdapter implements DiscoveryAdapter {
 
   constructor(
     private readonly url?: string,
-    private readonly relay?: RelayTransportAdapter,
+    private readonly relay?: SignalingHook,
     private readonly authorization?: string,
   ) {}
 
   open(): DiscoverySession {
-    return openSignalingSession(this.url, this.authorization, this.relay);
+    return new NegotiatedSession(openSignalingSession(this.url, this.relay, this.authorization), this.authorization);
   }
 }
 
 export function openSignalingSession(
   url?: string,
-  authorization?: string,
-  relay?: RelayTransportAdapter,
+  relay?: SignalingHook,
+  credential?: string,
 ): DiscoverySession {
-  const address = signalingAddress(url);
-  const open = (address: string) => {
-    const socket = new WebSocket(address);
-    return relay ? relay.session(socket) : socket;
-  };
-  if (!authorization) return open(address);
-  return new AuthorizedSession(address, authorization, open);
+  const target = new URL(signalingAddress(url));
+  target.search = "";
+  target.searchParams.set("room", SIGNALING_CONFIG.room);
+  if (target.protocol !== "wss:" && (target.protocol !== "ws:" || (credential && !["localhost", "127.0.0.1", "[::1]"].includes(target.hostname))))
+    throw new Error("请使用 wss:// 安全地址连接此服务器");
+  const socket = relay?.socket?.(target.href) ?? new WebSocket(target.href);
+  return relay?.session(socket) ?? socket;
 }
 
-const AUTHORIZATION_ERROR = "访问密钥不正确或无权访问，请检查后重试";
-const CONNECTION_ERROR = "连接失败，请检查服务器地址或稍后重试";
-
-class AuthorizedSession implements DiscoverySession {
+/** Protocol boundary: no application join is sent before minimum server requirements pass. */
+class NegotiatedSession implements DiscoverySession {
+  onactivity?: () => void;
   onopen: DiscoverySession["onopen"] = null;
   onmessage: DiscoverySession["onmessage"] = null;
   onerror: DiscoverySession["onerror"] = null;
   onclose: DiscoverySession["onclose"] = null;
-  private session?: DiscoverySession;
+  private info?: RuntimeInfo;
   private closed = false;
-  private controller = new AbortController();
-  get readyState() {
-    return this.closed ? 3 : (this.session?.readyState ?? 0);
-  }
-
-  constructor(
-    address: string,
-    authorization: string,
-    open: (url: string) => DiscoverySession,
-  ) {
-    void this.connect(address, authorization, open);
-  }
-
-  private async connect(
-    address: string,
-    authorization: string,
-    open: (url: string) => DiscoverySession,
-  ) {
-    const timer = setTimeout(() => this.controller.abort(), 5000);
-    try {
-      const endpoint = new URL(address);
-      endpoint.protocol = endpoint.protocol === "wss:" ? "https:" : "http:";
-      endpoint.pathname = endpoint.pathname.replace(/\/$/, "") + "/ticket";
-      endpoint.searchParams.delete("ticket");
-      const response = await fetch(endpoint, {
-        headers: { Authorization: authorization },
-        signal: this.controller.signal,
-        cache: "no-store",
-        credentials: "omit",
-        redirect: "error",
-      });
-      if (response.status === 401 || response.status === 403)
-        throw new Error(AUTHORIZATION_ERROR);
-      if (!response.ok) throw new Error(CONNECTION_ERROR);
-      const result = await response.json();
-      if (
-        result.ticket !== null &&
-        (typeof result.ticket !== "string" ||
-          !result.ticket ||
-          result.ticket.length > 512)
-      )
-        throw new Error(CONNECTION_ERROR);
+  private timer?: ReturnType<typeof setTimeout>;
+  get readyState() { return this.closed ? 3 : this.info ? this.inner.readyState : 0; }
+  constructor(private inner: DiscoverySession, authorization?: string) {
+    inner.onactivity = () => { if (this.info && !this.closed) this.onactivity?.(); };
+    const fail = (error: unknown) => {
+      const cause = error instanceof CompatibilityError ? error : new CompatibilityError(["server-unsupported"]);
+      this.onerror?.(Object.assign(new Event("error"), { message: cause.message, cause }));
+      this.close(); this.onclose?.(new Event("close"));
+    };
+    inner.onopen = () => {
       if (this.closed) return;
-      const target = new URL(address);
-      target.searchParams.delete("ticket");
-      if (result.ticket) target.searchParams.set("ticket", result.ticket);
-      this.session = open(target.href);
-      this.session.onopen = (event) => this.onopen?.(event);
-      this.session.onmessage = (event) => this.onmessage?.(event);
-      this.session.onerror = (event) => this.onerror?.(event);
-      this.session.onclose = (event) => {
-        this.closed = true;
-        this.onclose?.(event);
-      };
-    } catch (error) {
+      this.timer = setTimeout(() => fail(new CompatibilityError(["server-unsupported"])), 5000);
+      try { inner.send(JSON.stringify({ type: "auth", authorization })); } catch (error) { fail(error); }
+    };
+    inner.onmessage = event => {
       if (this.closed) return;
-      this.closed = true;
-      const event = Object.assign(new Event("error"), {
-        message:
-          error instanceof Error && error.message === AUTHORIZATION_ERROR
-            ? AUTHORIZATION_ERROR
-            : CONNECTION_ERROR,
-      });
-      this.onerror?.(event);
-      this.onclose?.(new Event("close"));
-    } finally {
-      clearTimeout(timer);
-    }
+      if (!this.info) {
+        try {
+          if (typeof event.data !== "string" || event.data.length > SIGNALING_CONFIG.maxMessageChars) throw new CompatibilityError(["server-unsupported"]);
+          const packet = JSON.parse(event.data);
+          if (packet.type === "error" && packet.code === "unauthorized") {
+            this.onerror?.(Object.assign(new Event("error"), {message: "访问密钥不正确或无权访问，请检查后重试"}));
+            this.close();
+            return;
+          }
+          if (packet.type !== "capabilities") throw new CompatibilityError(["server-unsupported"]);
+          this.info = requireServer(packet); clearTimeout(this.timer); this.onopen?.(new Event("open"));
+        } catch (error) { fail(error); }
+      } else this.onmessage?.(event);
+    };
+    inner.onerror = event => this.onerror?.(event);
+    inner.onclose = event => { this.closed = true; clearTimeout(this.timer); this.onclose?.(event); };
   }
-
   send(packet: string) {
     if (this.readyState !== 1) throw new Error("连接已断开，请重新发送");
-    this.session!.send(packet);
+    this.inner.send(packet);
   }
-
-  close() {
-    this.closed = true;
-    this.controller.abort();
-    this.session?.close();
-  }
+  close() { this.closed = true; clearTimeout(this.timer); this.inner.close(); }
 }

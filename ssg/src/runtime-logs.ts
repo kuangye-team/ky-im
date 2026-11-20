@@ -2,7 +2,7 @@
 export const LOG_LIMIT = 2000;
 export const LOG_MAX_BYTES = 3 * 1024 * 1024;
 export const LOG_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
-const STORAGE_KEY = "hummingbird.runtime-logs";
+const STORAGE_KEY = "hummingbird.v2.runtime-logs";
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogCategory =
   | "app"
@@ -25,9 +25,14 @@ export type RuntimeLog = {
 };
 const session = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 let sequence = 0;
+let runtime: { localPeerId: string; clientType: string; version: string } | undefined;
+export function setLogRuntime({ id, clientType, version }: { id: string; clientType: string; version: string }) {
+  runtime = { localPeerId: id, clientType, version };
+}
 const listeners = new Set<() => void>();
 let pending: ReturnType<typeof setTimeout> | undefined;
 let initialized = false;
+let resetting = false;
 
 // Error messages may contain URLs or credentials supplied by a service.
 export function sanitizeLog(value: string, limit = 1200): string {
@@ -40,6 +45,8 @@ export function sanitizeLog(value: string, limit = 1200): string {
         return "[address]";
       }
     })
+    .replace(/\/(?:ip4|ip6|dns4|dns6)\/[^\s"']+/gi, "[address]")
+    .replace(/(?:a=)?candidate:[^\r\n]+/gi, "[candidate]")
     .replace(/Bearer\s+[\w.+/=-]+/gi, "Bearer [redacted]")
     .replace(
       /((?:authorization|token|password|secret|api[_-]?key)\s*[=:]\s*)[^\s,;]+/gi,
@@ -58,6 +65,7 @@ export function serializeSourceLog(value: unknown): string {
       typeof value === "boolean"
     )
       return value;
+    if (value === undefined) return null;
     if (typeof value !== "object") return String(value);
     if (seen.has(value)) return "[circular]";
     if (depth >= 5) return "[depth limit]";
@@ -75,14 +83,25 @@ export function serializeSourceLog(value: unknown): string {
     for (const [key, item] of Object.entries(value).slice(0, 32)) {
       result[key] = /authorization|password|token|secret|api.?key/i.test(key)
         ? "[redacted]"
-        : /^(text|payload|body|content|fileName)$/i.test(key)
+        : /^(text|payload|body|content|fileName|path|sdp|candidate|address|addresses|credential)$/i.test(key)
           ? "[omitted]"
           : clean(item, depth + 1);
     }
     return result;
   }
   try {
-    return JSON.stringify(clean(value), null, 2).slice(0, 6000);
+    const fields = clean(value);
+    let result = JSON.stringify(fields, null, 2);
+    for (const limit of [2000, 480, 120, 32]) {
+      if (result.length <= 6000) return result;
+      result = JSON.stringify(fields, (_key, item) => typeof item === "string" ? item.slice(0, limit) : item);
+    }
+    if (result.length <= 6000) return result;
+    const { diagnostic, ...envelope } = fields as Record<string, unknown>;
+    const summary = Object.fromEntries(Object.entries(diagnostic ?? {}).filter(([, v]) => v === null || typeof v !== "object")
+      .map(([k, v]) => [k.slice(0, 80), typeof v === "string" ? v.slice(0, 64) : v]).slice(0, 16));
+    return JSON.stringify({ ...envelope, diagnostic: { ...summary, truncated: true } },
+      (_key, item) => typeof item === "string" ? item.slice(0, 160) : item);
   } catch {
     return "[unavailable]";
   }
@@ -93,6 +112,10 @@ function sourceLocation() {
   );
   // Skip this helper and runtimeLog, including minified production function names.
   return sanitizeLog(frames[2]?.trim() || "app", 400);
+}
+function restoreSource(raw: string) {
+  try { return serializeSourceLog(JSON.parse(raw)); }
+  catch { return sanitizeLog(raw, 6000); } // Older logs could be truncated mid-JSON.
 }
 function readLogs(): RuntimeLog[] {
   try {
@@ -125,7 +148,7 @@ function readLogs(): RuntimeLog[] {
             : undefined,
         raw:
           typeof entry.raw === "string"
-            ? sanitizeLog(entry.raw, 6000)
+            ? restoreSource(entry.raw)
             : undefined,
       }));
   } catch {
@@ -161,6 +184,7 @@ export function subscribeRuntimeLogs(listener: () => void) {
 export function flushRuntimeLogs() {
   clearTimeout(pending);
   pending = undefined;
+  if (resetting) return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
   } catch {
@@ -178,10 +202,12 @@ export function runtimeLog(
     raw?: unknown;
   } = {},
 ) {
+  if (resetting) return "";
   const time = Date.now();
   const source = context.source || sourceLocation();
+  const id = `${session}-${++sequence}`;
   const entry: RuntimeLog = {
-    id: `${session}-${++sequence}`,
+    id,
     time,
     session,
     level,
@@ -191,7 +217,7 @@ export function runtimeLog(
     ...(context.detail ? { detail: sanitizeLog(context.detail) } : {}),
     source: sanitizeLog(source, 400),
     raw: serializeSourceLog({
-      source,
+      id, session, sequence, ...runtime, source,
       time: new Date(time).toISOString(),
       level,
       category,
@@ -209,6 +235,7 @@ export function runtimeLog(
   for (const listener of listeners) listener();
   if (level === "error" || level === "warn") flushRuntimeLogs();
   else if (!pending) pending = setTimeout(flushRuntimeLogs, 500);
+  return id;
 }
 export function clearRuntimeLogs() {
   entries = [];
@@ -216,6 +243,10 @@ export function clearRuntimeLogs() {
   retainedBytes = 0;
   flushRuntimeLogs();
   for (const listener of listeners) listener();
+}
+export function stopLogsForReset() {
+  resetting = true;
+  clearRuntimeLogs();
 }
 export function initializeRuntimeLogs() {
   if (initialized || typeof window === "undefined") return;

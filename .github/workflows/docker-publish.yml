@@ -115,6 +115,11 @@ jobs:
           platforms: linux/${{ matrix.arch }}
           push: true
           build-args: |
+            RELEASE_VERSION=${{ (github.ref_type == 'tag' && github.ref_name) || vars.RELEASE_VERSION || '0.1.0' }}
+            VITE_RTC_MAX_MESSAGE_SIZE=${{ vars.VITE_RTC_MAX_MESSAGE_SIZE || '65536' }}
+            VITE_RTC_MAX_BUFFERED_AMOUNT=${{ vars.VITE_RTC_MAX_BUFFERED_AMOUNT || '1048576' }}
+            VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD=${{ vars.VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD || '262144' }}
+            VITE_RTC_FILE_CHUNK_SIZE=${{ vars.VITE_RTC_FILE_CHUNK_SIZE || '262144' }}
             VITE_API_LATEST=${{ secrets.VITE_API_LATEST || vars.VITE_API_LATEST || '/api/latest' }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true

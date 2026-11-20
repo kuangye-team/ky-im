@@ -37,7 +37,7 @@ it("removes expired logs and clears persisted history", () => {
   clearRuntimeLogs();
   expect(getRuntimeLogs()).toEqual([]);
   expect(localStorage.setItem).toHaveBeenLastCalledWith(
-    "hummingbird.runtime-logs",
+    "hummingbird.v2.runtime-logs",
     "[]",
   );
 });
@@ -74,9 +74,21 @@ it("retains source location, original error stack, and bounded sanitized diagnos
   expect(log.raw).not.toContain("private-chat");
   flushRuntimeLogs();
   expect(localStorage.setItem).toHaveBeenLastCalledWith(
-    "hummingbird.runtime-logs",
+    "hummingbird.v2.runtime-logs",
     JSON.stringify(getRuntimeLogs()),
   );
+});
+it("keeps oversized source records parseable and correlates downstream closes to the first event", () => {
+  const first = runtimeLog("warn", "connection", "failed", {raw: {
+    attemptId: "A", activeConnectionId: "B", error: new Error("timeout"),
+    sdp: "private-sdp", path: "private-path", details: Array(24).fill("x".repeat(3000)),
+  }});
+  runtimeLog("info", "connection", "closed", {raw: {causeEventId: first}});
+  const [failure, close] = getRuntimeLogs().map(e => JSON.parse(e.raw!));
+  expect(failure.id).toBe(first);
+  expect(failure.diagnostic.activeConnectionId).toBe("B");
+  expect(close.diagnostic.causeEventId).toBe(first);
+  expect(JSON.stringify(failure)).not.toContain("private-");
 });
 it("caps total storage even when source events contain large stacks", () => {
   for (let i = 0; i < 1000; i++)

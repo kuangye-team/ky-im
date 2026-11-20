@@ -286,3 +286,23 @@
   background: var(--surface-soft);
   color: var(--muted);
 }
+
+.settings-ice-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.settings-ice-card .settings-ice-empty {
+  margin: 16px 0;
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+@media (min-width: 701px) {
+  .settings-ice-card .settings-server-columns,
+  .settings-ice-card .settings-server {
+    grid-template-columns: minmax(140px, 1fr) minmax(0, 1.5fr) 180px;
+  }
+}

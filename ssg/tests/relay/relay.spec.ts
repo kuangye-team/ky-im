@@ -21,7 +21,7 @@ async function enableRelay(page: Page) {
     page.getByText("连接成功 · 支持中转", { exact: true }),
   ).toBeVisible();
   await expect(relay).toBeEnabled();
-  await relay.check();
+  await relay.click();
   await expect(relay).toBeChecked();
   await expect(page.getByRole("status")).toHaveText("设置已生效。");
 }
@@ -32,7 +32,7 @@ test("测试服务器能力并限制中转开关，地址变更后重新测试",
   await expect(
     page.getByRole("checkbox", { name: "启用服务器 1 的中转", exact: true }),
   ).toBeChecked();
-  await page.getByRole("button", { name: "添加服务器", exact: true }).click();
+  await page.getByRole("region", { name: "信令服务器", exact: true }).getByRole("button", { name: "添加服务器", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog.getByLabel("服务器名称", { exact: true }).fill("仅帮助连接");
   await dialog
@@ -55,7 +55,7 @@ test("测试服务器能力并限制中转开关，地址变更后重新测试",
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await expectNoHorizontalOverflow(page);
-  await page.locator(".settings-server-list").scrollIntoViewIfNeeded();
+  await page.getByRole("list", { name: "信令服务器", exact: true }).scrollIntoViewIfNeeded();
   await page.screenshot({
     path: resolve(screenshots, "relay-settings-mobile.png"),
     fullPage: true,
@@ -77,7 +77,7 @@ test("测试服务器能力并限制中转开关，地址变更后重新测试",
   ).toBeDisabled();
 });
 
-test("直连无法建立时中转文字和文件，正常直连不走中转", async ({
+test("libp2p 多传输可发送文字和文件，隧道保持加密和有界", async ({
   browser,
   baseURL,
 }) => {
@@ -87,11 +87,13 @@ test("直连无法建立时中转文字和文件，正常直连不走中转", as
   const a = await aContext.newPage(),
     b = await bContext.newPage();
   const frames: { type: string; data?: { kind: string; binary?: boolean; payload?: string } }[] = [];
+  const binaryFrames: Buffer[] = [];
   const errors: string[] = [];
   for (const page of [a, b]) {
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("websocket", (socket) =>
       socket.on("framesent", ({ payload }) => {
+        if (Buffer.isBuffer(payload)) { binaryFrames.push(payload); return; }
         try {
           frames.push(JSON.parse(String(payload)));
         } catch {
@@ -113,7 +115,7 @@ test("直连无法建立时中转文字和文件，正常直连不走中转", as
     await expect(
       b.getByText("优先通过直连发送", { exact: true }),
     ).toBeVisible();
-    expect(frames.filter((frame) => frame.type === "relay")).toEqual([]);
+
     // With no TURN servers, relay-only ICE prevents a direct WebRTC channel.
     for (const context of [aContext, bContext])
       await context.addInitScript(() => {
@@ -153,11 +155,11 @@ test("直连无法建立时中转文字和文件，正常直连不走中转", as
     await file.click();
     const download = await downloadPromise;
     expect(await readFile((await download.path())!)).toEqual(payload);
-    const binary = frames.filter(
-      (frame) => frame.type === "relay" && frame.data?.kind === "data" && frame.data.binary,
-    );
-    expect(binary.map((frame) => Buffer.from(frame.data!.payload!, "base64").length))
-      .toEqual([...Array(40).fill(128 * 1024 + 44), 17 + 44]);
+    const binary = binaryFrames.filter(frame => frame.subarray(0,4).toString() === "KIM2");
+    expect(binary.length).toBeGreaterThan(0);
+    expect(binary.every(frame => frame.length-10-frame[4]-frame[5] <= 16384)).toBe(true);
+    expect(frames.some(frame => frame.type === "relay_bind")).toBe(false);
+    expect(binary.some(frame => frame.includes(Buffer.from("直连失败后的中转消息")))).toBe(false);
     expect(errors).toEqual([]);
     await b.screenshot({
       path: resolve(screenshots, "relay-transfer.png"),

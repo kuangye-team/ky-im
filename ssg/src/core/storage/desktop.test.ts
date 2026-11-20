@@ -25,7 +25,6 @@ describe("desktop adapter", () => {
     ]);
     expect(a).toBe(b);
     expect(nativeInvoke.mock.calls.map(([, args]) => ((args as Record<string, unknown>).request as { op: string }).op)).toEqual([
-      "info",
       "resetTransfers",
     ]);
   });

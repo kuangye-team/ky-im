@@ -9,13 +9,11 @@ export function OwnNumber({
   numericId,
   compact = false,
   onNotice,
-  connected,
   onRefresh,
 }: {
   numericId?: string;
   compact?: boolean;
   onNotice: (message: string) => void;
-  connected: boolean;
   onRefresh: () => Promise<void>;
 }) {
   const { t } = useTranslation("components");
@@ -50,7 +48,7 @@ export function OwnNumber({
     }
   };
   const refresh = async () => {
-    if (!connected || refreshPending.current) return;
+    if (refreshPending.current) return;
     refreshPending.current = true;
     setRefreshing(true);
     try {
@@ -76,7 +74,7 @@ export function OwnNumber({
           aria-label={t("我的蜂鸟号")}
           className={numericId ? undefined : "own-number-placeholder"}
         >
-          {numericId || t("上线后显示")}
+          {numericId || "—"}
         </output>
         <button
           ref={button}
@@ -94,8 +92,8 @@ export function OwnNumber({
           type="button"
           className="icon-button refresh-number-button"
           aria-label={t("刷新我的蜂鸟号")}
-          title={connected ? t("换一个新的蜂鸟号") : t("上线后可刷新蜂鸟号")}
-          disabled={!connected || refreshing}
+          title={t("换一个新的蜂鸟号")}
+          disabled={refreshing}
           aria-busy={refreshing}
           onClick={() => void refresh()}
         >

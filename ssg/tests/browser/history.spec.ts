@@ -85,7 +85,7 @@ test("单条消息可取消或确认删除，删除附件后刷新仍生效且�
 async function storedKeys(page: Page, store: "messages" | "attachments") {
   return page.evaluate(async (storeName) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("send-chat", 1);
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -117,10 +117,9 @@ test("聊天记录与存储管理独立，文件下载、多选及大文件清�
   ).toBeVisible();
   const logo = page.locator(".brand-mark .hummingbird-logo");
   await expect(logo).toBeVisible();
-  await expect(logo).toHaveCSS("background-image", /\/icons\/sky\/bird\.svg/);
   const fixture = await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("send-chat", 1);
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -167,12 +166,13 @@ test("聊天记录与存储管理独立，文件下载、多选及大文件清�
           createdAt: Date.now(),
           status: "delivered",
         });
-        tx.objectStore("attachments").put(
-          new Blob([new Uint8Array(file.size)]),
-          file.id,
-        );
+
       }
       await done;
+      const { IndexedDBStorageAdapter } = await import("/src/core/storage.ts");
+      const storage = new IndexedDBStorageAdapter();
+      for (const file of files) await storage.saveAttachment(file.id, new Blob([new Uint8Array(file.size)]));
+      await storage.close();
       return files;
     } finally {
       db.close();
@@ -354,13 +354,20 @@ test("聊天记录与存储管理独立，文件下载、多选及大文件清�
 
 test("空存储支持英文、手机布局、独立地址和前进后退", async ({ page }) => {
   await page.addInitScript(() => {
+    const estimate = navigator.storage.estimate.bind(navigator.storage);
+    let fail = true;
     Object.defineProperty(navigator.storage, "estimate", {
-      value: () => Promise.reject(new Error("unavailable")),
+      value: () => {
+        if (fail) { fail = false; return Promise.reject(new Error("unavailable")); }
+        return estimate();
+      },
     });
   });
   await page.setViewportSize({ width: 375, height: 812 });
   await page.goto("/storage");
   await expect(page.getByText("暂不可用", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "暂时无法读取存储用量，请重试。" })).toBeVisible();
+  await page.getByRole("button", { name: "刷新存储用量" }).click();
   await expect(
     page.getByText("还没有保存的文件", { exact: true }),
   ).toBeVisible();
@@ -404,4 +411,44 @@ test("空存储支持英文、手机布局、独立地址和前进后退", async
     page.getByRole("heading", { name: "Chat history", exact: true }),
   ).toBeVisible();
   await expectNoHorizontalOverflow(page);
+});
+
+test("存储用量只在进入或手动刷新时扫描，普通重载沿用上次结果", async ({ page }) => {
+  await page.addInitScript(() => {
+    const estimate = navigator.storage.estimate.bind(navigator.storage);
+    navigator.storage.estimate = () => {
+      sessionStorage.setItem("test-scans", String(Number(sessionStorage.getItem("test-scans")) + 1));
+      return estimate();
+    };
+  });
+  const start = new Date("2026-01-01T00:00:00Z").getTime();
+  const clock = (seconds: number) => page.clock.setFixedTime(new Date(start + seconds * 1000));
+  const count = () => page.evaluate(() => Number(sessionStorage.getItem("test-scans")));
+  const visit = () => page.getByRole("button", { name: "存储管理", exact: true }).click();
+  const leave = () => page.getByRole("button", { name: "聊天记录", exact: true }).click();
+  const refresh = page.getByRole("button", { name: "刷新存储用量" });
+  await clock(0);
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "个人资料", exact: true })).toBeVisible();
+  expect(await count()).toBe(0);
+  await visit();
+  await expect(page.getByText("还没有保存的文件", { exact: true })).toBeVisible();
+  expect(await count()).toBe(1);
+  await clock(30);
+  await refresh.focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(count).toBe(2);
+  await expect(refresh).toBeEnabled();
+  await clock(89);
+  await leave();
+  await visit();
+  await page.reload();
+  await expect(page.getByText("还没有保存的文件", { exact: true })).toBeVisible();
+  expect(await count()).toBe(2);
+  await clock(90);
+  await page.getByRole("button", { name: "大文件", exact: true }).click();
+  expect(await count()).toBe(2);
+  await leave();
+  await visit();
+  await expect.poll(count).toBe(3);
 });

@@ -3,8 +3,6 @@ use crate::{
     hub::{Hub, Identity, Peer, Transport},
     protocol::{ClientMessage, ServerMessage, valid_identifier},
 };
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::atomic::AtomicU64;
 use std::{
     net::IpAddr,
     sync::{Arc, Mutex},
@@ -17,8 +15,6 @@ pub struct AppState {
     pub(crate) hub: Mutex<Hub>,
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) connections: Arc<Semaphore>,
-    #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) next_generation: AtomicU64,
 }
 
 impl AppState {
@@ -28,8 +24,6 @@ impl AppState {
             connections: Arc::new(Semaphore::new(config.max_connections)),
             config,
             hub: Mutex::new(Hub::default()),
-            #[cfg(not(target_arch = "wasm32"))]
-            next_generation: AtomicU64::new(1),
         })
     }
 }
@@ -43,15 +37,13 @@ pub(crate) fn process_message(
     transport: &Arc<dyn Transport>,
 ) -> Result<(), ServerMessage> {
     match message {
-        ClientMessage::Capabilities => {
-            transport.send(ServerMessage::Capabilities {
-                relay: state.config.relay_enabled,
-            });
-            Ok(())
-        }
+        ClientMessage::Auth { .. } => Err(ServerMessage::error(
+            "unexpected_auth",
+            "Already authenticated",
+        )),
         ClientMessage::Relay { to, session, data } => {
             let result = require_identity(identity)
-                .and_then(|identity| state.relay(identity, &to, &session, data));
+                .and_then(|owner| state.relay(owner, &to, &session, data));
             result.map_err(|error| {
                 let (code, message) = match error {
                     ServerMessage::Error { code, message } => (code, message),
@@ -65,7 +57,12 @@ pub(crate) fn process_message(
                 }
             })
         }
-        ClientMessage::Join { room, profile } => {
+        ClientMessage::Join {
+            room,
+            profile,
+            recent_numeric_ids,
+            proof,
+        } => {
             if identity.is_some() {
                 return Err(ServerMessage::error(
                     "already_joined",
@@ -78,32 +75,45 @@ pub(crate) fn process_message(
                     "room must contain 1–64 ASCII letters, digits, '-' or '_'",
                 ));
             }
+            if !proof.verify(&profile.id, generation) {
+                return Err(ServerMessage::error(
+                    "invalid_identity",
+                    "Device identity could not be verified",
+                ));
+            }
             profile
                 .validate()
                 .map_err(|message| ServerMessage::error("invalid_profile", message))?;
+            if !profile.supports_discovery() {
+                return Err(ServerMessage::error(
+                    "capability_required",
+                    "Required capabilities are missing",
+                ));
+            }
             *identity = Some(state.join(
                 format!("{room}@{}", source_ip.to_canonical()),
                 Peer {
+                    number_revision: 0,
                     profile,
                     generation: generation.to_owned(),
                     transport: transport.clone(),
                 },
+                recent_numeric_ids,
             )?);
             Ok(())
         }
-        ClientMessage::Profile { profile } => {
-            state.update_profile(require_identity(identity)?, profile)
+        ClientMessage::Discover { recent_numeric_ids } => {
+            state.discover(require_identity(identity)?, recent_numeric_ids)
         }
-        ClientMessage::RefreshNumber { request_id } => {
-            let Some(identity) = identity.as_ref() else {
-                return Err(ServerMessage::ConnectError {
-                    request_id,
-                    code: "join_required".into(),
-                    message: "请先连接信令服务".into(),
-                });
-            };
-            state.refresh_number(identity, request_id)
-        }
+        ClientMessage::ChangeNumericId {
+            numeric_id,
+            revision,
+        } => state
+            .change_numeric_id(require_identity(identity)?, numeric_id, revision)
+            .map_err(|error| match error {
+                ServerMessage::Error { code, .. } => ServerMessage::NumericIdRejected { code },
+                other => other,
+            }),
         ClientMessage::ConnectGroup {
             request_id,
             numeric_id,
@@ -138,6 +148,7 @@ pub(crate) fn process_message(
         }
         ClientMessage::Signal { to, data } => state.signal(require_identity(identity)?, &to, data),
         ClientMessage::Ping => {
+            require_identity(identity)?;
             if transport.send(ServerMessage::Pong) {
                 Ok(())
             } else {

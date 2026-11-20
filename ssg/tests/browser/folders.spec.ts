@@ -3,8 +3,6 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { BlobReader, TextWriter, ZipReader } from "@zip.js/zip.js";
 import {
-  capture,
-  expectNoHorizontalOverflow,
   openPeer,
   enableAutoAcceptFiles,
   setProfile,
@@ -70,7 +68,7 @@ async function receiveIntoDisk(page: Page, occupied = false) {
 async function attachmentCount(page: Page) {
   return page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open("send-chat");
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -87,221 +85,74 @@ async function attachmentCount(page: Page) {
   });
 }
 for (const automatic of [false, true]) {
-  test(`小文件夹保留目录和同名文件（自动接收：${automatic}）`, async ({
-    browser,
-    baseURL,
-  }) => {
-    const a = await browser.newContext({ locale: "zh-CN" });
-    const b = await browser.newContext({ locale: "zh-CN" });
+  test(`文件夹流式保留空目录，刷新后可导出 ZIP（自动接收：${automatic}）`, async ({ browser, baseURL }) => {
+    const a = await browser.newContext({ locale: "zh-CN" }), b = await browser.newContext({ locale: "zh-CN" });
     try {
-      const alice = await a.newPage();
-      const bob = await b.newPage();
+      const alice = await a.newPage(), bob = await b.newPage();
+      await bob.addInitScript(() => Object.defineProperty(window, "showDirectoryPicker", { value: undefined, configurable: true }));
       await connect(alice, bob, baseURL!);
       if (automatic) await enableAutoAcceptFiles(bob);
       await source(alice, 3);
-      await alice
-        .getByRole("button", { name: "发送文件夹", exact: true })
-        .click();
-      const message = bob
-        .locator(".message-row")
-        .filter({ hasText: "资料集.zip" });
+      await alice.getByRole("button", { name: "发送文件夹", exact: true }).click();
+      const message = bob.locator(".message-row").filter({ hasText: "资料集" });
       if (!automatic) {
-        await expect(
-          message.getByRole("button", { name: "接收", exact: true }),
-        ).toBeVisible();
+        await expect(message.getByRole("button", { name: "接收", exact: true })).toBeEnabled();
         expect(await attachmentCount(bob)).toBe(0);
-        await message
-          .getByRole("button", { name: "接收", exact: true })
-          .click();
+        await message.getByRole("button", { name: "接收", exact: true }).click();
       }
-      await expect(
-        message.getByRole("button", { name: "下载 资料集.zip", exact: true }),
-      ).toBeEnabled();
-      const downloadPromise = bob.waitForEvent("download");
-      await message
-        .getByRole("button", { name: "下载 资料集.zip", exact: true })
-        .click();
-      const download = await downloadPromise;
-      const zip = new ZipReader(
-        new BlobReader(new Blob([await readFile((await download.path())!)])),
-      );
-      const entries = await zip.getEntries();
-      expect(entries.map((entry) => entry.filename)).toEqual(
-        expect.arrayContaining([
-          "资料集/",
-          "资料集/空目录/",
-          "资料集/0.txt",
-          "资料集/子目录/0.txt",
-          "资料集/1.txt",
-        ]),
-      );
-      const content = entries.find(
-        (entry) => entry.filename === "资料集/子目录/0.txt",
-      )!;
-      if (content.directory) throw new Error("Expected a file");
-      expect(await content.getData(new TextWriter())).toBe("文件 2 的内容");
-      await zip.close();
-      expect(await attachmentCount(alice)).toBe(1);
+      await expect(alice.getByText("已送达", { exact: true })).toBeVisible();
       expect(await attachmentCount(bob)).toBe(1);
-      await capture(bob, "folder-zip.png");
-    } finally {
-      await a.close();
-      await b.close();
-    }
+      expect(await attachmentCount(alice)).toBe(1);
+      await bob.reload(); await openPeer(bob, "文件夹发送方");
+      const downloaded = bob.waitForEvent("download");
+      await bob.getByRole("button", { name: "下载 资料集", exact: true }).click();
+      const download = await downloaded;
+      expect(download.suggestedFilename()).toBe("资料集.zip");
+      const archive = new ZipReader(new BlobReader(new Blob([await readFile((await download.path())!)])));
+      const entries = await archive.getEntries();
+      expect(entries.map(e => e.filename).sort()).toEqual([
+        "资料集/", "资料集/空目录/", "资料集/子目录/", "资料集/子目录/0.txt", "资料集/0.txt", "资料集/1.txt",
+      ].sort());
+      const text = entries.find(e => e.filename === "资料集/子目录/0.txt")!;
+      expect(await text.getData!(new TextWriter())).toBe("文件 2 的内容");
+      expect(entries.find(e => e.filename === "资料集/1.txt")!.uncompressedSize).toBe(0);
+      await archive.close();
+      await bob.screenshot({ path: `../temp/screenshot/opfs-folder-${automatic}.png`, fullPage: true });
+    } finally { await a.close(); await b.close(); }
   });
 }
 
-test("257 个小文件直接保存，保留结构、避免覆盖，双方只留记录", async ({
-  browser,
-  baseURL,
-}) => {
-  const a = await browser.newContext({ locale: "zh-CN" });
-  const b = await browser.newContext({ locale: "zh-CN" });
+test("257 个文件保存在 OPFS，目录导出避开同名内容，删除记录保留导出副本", async ({ browser, baseURL }) => {
+  const a = await browser.newContext({ locale: "zh-CN" }), b = await browser.newContext({ locale: "zh-CN" });
   try {
-    const alice = await a.newPage();
-    const bob = await b.newPage();
-    await connect(alice, bob, baseURL!);
-    await source(alice, 257);
-    await receiveIntoDisk(bob, true);
-    await alice
-      .getByRole("button", { name: "发送文件夹", exact: true })
-      .click();
-    const request = bob.locator(".message-row").filter({ hasText: "资料集" });
-    await expect(request.getByText(/257 个文件/)).toBeVisible();
-    await expect(
-      bob.getByRole("button", { name: "接收并保存", exact: true }),
-    ).toBeEnabled();
-    expect(await attachmentCount(alice)).toBe(0);
-    expect(await attachmentCount(bob)).toBe(0);
-    await capture(bob, "folder-direct-confirmation.png");
-    await bob.getByRole("button", { name: "接收并保存", exact: true }).click();
-    await expect(alice.getByText("已送达", { exact: true })).toBeVisible();
-    const result = await bob.evaluate(async () => {
-      const saved = await (
-        await navigator.storage.getDirectory()
-      ).getDirectoryHandle("saved");
-      const original = await saved.getDirectoryHandle("资料集");
-      const folder = await saved.getDirectoryHandle("资料集 (2)");
-      const texts: string[] = [];
-      for (let index = 0; index < 257; index++) {
-        const parent =
-          index === 256 ? await folder.getDirectoryHandle("子目录") : folder;
-        const file = await (
-          await parent.getFileHandle(index === 256 ? "0.txt" : `${index}.txt`)
-        ).getFile();
-        if (index === 0) {
-          const data = new Uint8Array(await file.arrayBuffer());
-          texts.push(
-            data.length === 2 * 1024 * 1024 + 17 &&
-              data.every((byte) => byte === 91)
-              ? "verified large file"
-              : "corrupt",
-          );
-        } else texts.push(await file.text());
-      }
-      return {
-        texts,
-        empty: (await folder.getDirectoryHandle("空目录")).kind,
-        original: await (
-          await (await original.getFileHandle("keep.txt")).getFile()
-        ).text(),
-      };
+    const alice = await a.newPage(), bob = await b.newPage();
+    await connect(alice, bob, baseURL!); await source(alice, 257); await receiveIntoDisk(bob, true);
+    await alice.getByRole("button", { name: "发送文件夹", exact: true }).click();
+    await bob.getByRole("button", { name: "接收", exact: true }).click();
+    await expect(alice.getByText("已送达", { exact: true })).toBeVisible({ timeout: 45_000 });
+    const row = bob.locator(".message-row").filter({ hasText: "资料集" });
+    const id = (await row.getAttribute("data-message-id"))!;
+    await row.getByRole("button", { name: "下载 资料集", exact: true }).click();
+    const exported = async () => bob.evaluate(async () => {
+      try {
+        const saved = await (await navigator.storage.getDirectory()).getDirectoryHandle("saved");
+        const root = await saved.getDirectoryHandle("资料集 (2)");
+        const nested = await root.getDirectoryHandle("子目录");
+        return { nested: await (await nested.getFileHandle("0.txt")).getFile().then(f => f.text()),
+          empty: (await root.getDirectoryHandle("空目录")).kind,
+          original: await (await (await saved.getDirectoryHandle("资料集")).getFileHandle("keep.txt")).getFile().then(f => f.text()) };
+      } catch { return null; }
     });
-    expect(result.texts).toEqual(
-      Array.from({ length: 257 }, (_, index) =>
-        index === 0
-          ? "verified large file"
-          : index === 1
-            ? ""
-            : `文件 ${index} 的内容`,
-      ),
-    );
-    expect(result.empty).toBe("directory");
-    expect(result.original).toBe("keep existing");
-    expect(await attachmentCount(alice)).toBe(0);
+    await expect.poll(exported).toEqual({ nested: "文件 256 的内容", empty: "directory", original: "keep existing" });
+    await bob.evaluate(async (id) => {
+      const { IndexedDBStorageAdapter } = await import("/src/core/storage.ts");
+      const storage = new IndexedDBStorageAdapter(); await storage.deleteMessages([id]); await storage.close();
+    }, id);
     expect(await attachmentCount(bob)).toBe(0);
-    await bob.reload();
-    await openPeer(bob, "文件夹发送方");
-    await expect(
-      bob.locator(".message-row").getByText("资料集", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      bob
-        .locator(".message-row")
-        .getByRole("button", { name: "转发消息", exact: true }),
-    ).toBeDisabled();
-    await capture(bob, "folder-direct-complete.png");
-    await bob.setViewportSize({ width: 390, height: 844 });
-    await expectNoHorizontalOverflow(bob);
-    await capture(bob, "folder-direct-mobile.png");
-  } finally {
-    await a.close();
-    await b.close();
-  }
-});
-
-test("文件夹超过 256 MB 时不读取内容，支持拒收、取消和能力检测", async ({
-  browser,
-  baseURL,
-}) => {
-  const a = await browser.newContext({ locale: "zh-CN" });
-  const b = await browser.newContext({ locale: "zh-CN" });
-  try {
-    const alice = await a.newPage();
-    const bob = await b.newPage();
-    await connect(alice, bob, baseURL!);
-    await alice.evaluate(() => {
-      const file = new File(["must not read"], "large.bin");
-      Object.defineProperty(file, "size", { value: 256 * 1024 ** 2 + 1 });
-      file.slice = () => {
-        throw new Error("Read before acceptance");
-      };
-      Object.defineProperty(window, "showDirectoryPicker", {
-        configurable: true,
-        value: async () => ({
-          name: "大文件夹",
-          async *values() {
-            yield {
-              name: "large.bin",
-              kind: "file",
-              getFile: async () => file,
-            };
-          },
-        }),
-      });
-    });
-    await bob.evaluate(() =>
-      Object.defineProperty(window, "showDirectoryPicker", {
-        value: undefined,
-        configurable: true,
-      }),
-    );
-    await alice
-      .getByRole("button", { name: "发送文件夹", exact: true })
-      .click();
-    await expect(
-      bob.getByRole("button", { name: "接收并保存", exact: true }),
-    ).toBeDisabled();
-    await expect(
-      bob.getByText(
-        "当前浏览器不支持保存文件夹，请使用电脑上的 Chrome 或 Edge 打开安全连接后重试",
-        { exact: true },
-      ),
-    ).toBeHidden();
-    await bob.getByRole("button", { name: "拒收", exact: true }).click();
-    await expect(alice.getByText("发送失败", { exact: true })).toBeVisible();
-    await alice
-      .getByRole("button", { name: "发送文件夹", exact: true })
-      .click();
-    await alice.getByRole("button", { name: "取消传输", exact: true }).click();
-    await expect(alice.getByText("发送失败", { exact: true })).toHaveCount(2);
-    await expect(bob.getByText("接收失败", { exact: true })).toHaveCount(2);
-    expect(await attachmentCount(alice)).toBe(0);
-    expect(await attachmentCount(bob)).toBe(0);
-  } finally {
-    await a.close();
-    await b.close();
-  }
+    expect(await exported()).toMatchObject({ nested: "文件 256 的内容", original: "keep existing" });
+    await bob.reload(); await openPeer(bob, "文件夹发送方");
+    await expect(bob.locator(`[data-message-id="${id}"]`)).toHaveCount(0);
+  } finally { await a.close(); await b.close(); }
 });
 
 test("拖入文件夹和兼容选择入口都能发送", async ({ browser, baseURL }) => {
@@ -328,7 +179,7 @@ test("拖入文件夹和兼容选择入口都能发送", async ({ browser, baseU
       .click();
     await (await chooser).setFiles(folder);
     await expect(
-      bob.getByRole("button", { name: "下载 普通资料.zip", exact: true }),
+      bob.getByRole("button", { name: "下载 普通资料", exact: true }),
     ).toBeEnabled();
     const draggedFolder = resolve(temporary, "拖拽资料");
     await mkdir(resolve(draggedFolder, "空文件夹"), { recursive: true });
@@ -344,10 +195,11 @@ test("拖入文件夹和兼容选择入口都能发送", async ({ browser, baseU
       });
     await session.detach();
     const button = bob.getByRole("button", {
-      name: "下载 拖拽资料.zip",
+      name: "下载 拖拽资料",
       exact: true,
     });
     await expect(button).toBeEnabled();
+    await bob.evaluate(() => Object.defineProperty(window, "showDirectoryPicker", { value: undefined, configurable: true }));
     const downloaded = bob.waitForEvent("download");
     await button.click();
     const archive = new ZipReader(

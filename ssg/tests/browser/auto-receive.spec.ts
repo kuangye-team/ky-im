@@ -11,7 +11,7 @@ import {
 async function attachmentCount(page: Page) {
   return page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>((resolve) => {
-      const request = indexedDB.open("send-chat");
+      const request = indexedDB.open("ky-im");
       request.onsuccess = () => resolve(request.result);
     });
     const count = await new Promise<number>((resolve) => {

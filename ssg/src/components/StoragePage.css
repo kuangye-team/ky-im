@@ -22,6 +22,28 @@
 .history-summary small {
   font-size: 12px;
 }
+.storage-manager .storage-metrics > div > span {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+}
+.storage-metrics .storage-usage-label {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.storage-sync {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.storage-sync:hover,
+.storage-sync:focus-visible {
+  color: var(--primary);
+  background: var(--surface-soft);
+}
 .storage-metrics .metric-detail {
   display: block;
   margin-top: 8px;
@@ -89,6 +111,16 @@
   align-items: center;
   gap: 16px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.storage-manager-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.storage-manager-actions > button {
+  white-space: nowrap;
 }
 .large-files-heading h2 {
   display: flex;

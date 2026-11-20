@@ -19,6 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  RELEASE_VERSION: ${{ inputs.tag || github.ref_name }}
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
   # Set the repository variable to true to promote a release after publishing.
   RELEASE_AUTO_LATEST: ${{ vars.RELEASE_AUTO_LATEST || 'false' }}
@@ -226,7 +227,15 @@ jobs:
           VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
           VITE_API_LATEST: ${{ secrets.VITE_API_LATEST || vars.VITE_API_LATEST || '/api/latest' }}
           VITE_CLIENT_DOWNLOAD_URL: ${{ vars.VITE_CLIENT_DOWNLOAD_URL }}
+          VITE_ICE_SERVERS: ${{ secrets.VITE_ICE_SERVERS || vars.VITE_ICE_SERVERS || 'stun:stun.miwifi.com:3478,stun:stun.chat.bilibili.com:3478,stun:stun.cloudflare.com:3478,stun:stun.l.google.com:19302' }}
+          VITE_RTC_MAX_MESSAGE_SIZE: ${{ vars.VITE_RTC_MAX_MESSAGE_SIZE || '65536' }}
+          VITE_RTC_MAX_BUFFERED_AMOUNT: ${{ vars.VITE_RTC_MAX_BUFFERED_AMOUNT || '1048576' }}
+          VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD: ${{ vars.VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD || '262144' }}
+          VITE_RTC_FILE_CHUNK_SIZE: ${{ vars.VITE_RTC_FILE_CHUNK_SIZE || '262144' }}
+          VITE_MACOS_SEND_ACTIVITY: ${{ vars.VITE_MACOS_SEND_ACTIVITY || 'true' }}
+          VITE_WINDOWS_SEND_ACTIVITY: ${{ vars.VITE_WINDOWS_SEND_ACTIVITY || 'true' }}
           VITE_STORAGE_CHUNK_SIZE: ${{ secrets.VITE_STORAGE_CHUNK_SIZE || vars.VITE_STORAGE_CHUNK_SIZE || '2097152' }}
+          VITE_SHOW_TRANSFER_SPEED: ${{ vars.VITE_SHOW_TRANSFER_SPEED || 'true' }}
           RELEASE_VERSION: ${{ env.RELEASE_TAG }}
           TAURI_UPDATER_URL: ${{ vars.TAURI_UPDATER_URL || format('https://github.com/{0}/releases/latest/download/latest.json', github.repository) }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}

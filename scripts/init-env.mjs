@@ -122,14 +122,8 @@ export function initEnv(root = ROOT, { desktopOnly = false } = {}) {
     files.push([output, renderEnv(read(template), values, excluded)]);
   };
 
-  // Preserve legacy app/.env files until desktop.app is explicitly configured.
-  if (config.desktop !== undefined) {
-    const desktop = section(config, "desktop");
-    if (Object.hasOwn(desktop, "app"))
-      env("app/.env.example", "app/.env", section(config, "desktop.app"));
-    if (Object.hasOwn(desktop, "ssg"))
-      env("ssg/.env.example", "ssg/.env.desktop", section(config, "desktop.ssg"), new Set(["WEB_PORT"]));
-  }
+  env("app/.env.example", "app/.env", section(config, "desktop.app"));
+  env("ssg/.env.example", "ssg/.env.desktop", section(config, "desktop.ssg"), new Set(["WEB_PORT"]));
 
   if (!desktopOnly) {
     // Compose 的 build.args 从根目录 .env 取值；前端配置只在 compose.ssg 维护。

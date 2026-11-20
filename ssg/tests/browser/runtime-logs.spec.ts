@@ -41,6 +41,9 @@ test("通道打开后可以聊天，两个入口支持筛选、导出和保留�
     ).toBeVisible();
     await a.getByRole("button", { name: "查看连接日志", exact: true }).click();
     const dialog = a.getByRole("dialog", { name: "运行日志", exact: true });
+    const fileDiagnostics = dialog.getByRole("checkbox", { name: "记录后续文件传输的性能" });
+    await expect(fileDiagnostics).not.toBeChecked();
+    await fileDiagnostics.check();
     await expect(
       dialog.getByRole("button", { name: "与 日志测试 Windows 的连接" }),
     ).toHaveAttribute("aria-pressed", "true");
@@ -111,6 +114,8 @@ test("通道打开后可以聊天，两个入口支持筛选、导出和保留�
     });
     await a.reload();
     await a.getByRole("button", { name: "运行日志", exact: true }).click();
+    await expect(fileDiagnostics).toBeChecked();
+    await fileDiagnostics.uncheck();
     await dialog
       .getByRole("textbox", { name: "搜索运行日志" })
       .fill("对方已确认收到");
@@ -135,7 +140,7 @@ test("通道打开后可以聊天，两个入口支持筛选、导出和保留�
   }
 });
 
-test("连续三个周期未确认存活后离线，无 pong 也能通过消息确认恢复", async ({
+test("连续三个探测周期失败后离线，消息确认可以恢复在线", async ({
   browser,
   baseURL,
 }) => {
@@ -143,33 +148,29 @@ test("连续三个周期未确认存活后离线，无 pong 也能通过消息�
   const bContext = await browser.newContext({ locale: "zh-CN" });
   const a = await aContext.newPage();
   const b = await bContext.newPage();
-  await b.addInitScript(() => {
-    (window as unknown as { dropPong: boolean }).dropPong = true;
-    const send = RTCDataChannel.prototype.send;
-    RTCDataChannel.prototype.send = function (
-      data: string | ArrayBuffer | ArrayBufferView | Blob,
-    ) {
-      if (
-        (window as unknown as { dropPong?: boolean }).dropPong &&
-        typeof data === "string" &&
-        ["peer-ping", "peer-pong"].includes(JSON.parse(data).type)
-      )
-        return;
-      return send.call(this, data as ArrayBuffer);
-    };
-  });
   try {
-    await a.goto(baseURL!);
-    await setProfile(a, "恢复测试 Mac");
-    await b.goto(baseURL!);
-    await setProfile(b, "恢复测试 Windows");
+    for (const [page, name] of [[a, "恢复测试 Mac"], [b, "恢复测试 Windows"]] as const) {
+      await page.goto(`${baseURL}/tests/browser/p2p.html`);
+      await page.evaluate(name => (window as any).start(name, "web", "rtc"), name);
+    }
+    for (const page of [a, b]) {
+      await expect.poll(() => page.evaluate(() => (window as any).engine.getSnapshot().peers.length)).toBe(1);
+      await page.evaluate(() => (window as any).render());
+    }
+    // Isolate A's missed probes. An incoming probe from B would also confirm liveness.
+    await b.evaluate(() => {
+      (window as any).engine.network.transport.probe = async () => ({ roundTripMs: 1, ageMs: 0 });
+    });
+    await a.evaluate(() => {
+      (window as any).engine.network.transport.probe = async () => { throw new Error("test probe failure"); };
+    });
     await openPeer(a, "恢复测试 Windows");
     await expect(
       a.getByText("在线 · 可以聊天了", { exact: true }),
     ).toBeVisible();
     // Assert completed cycles, rather than the transient reconnect label.
     await expect.poll(() => a.evaluate(() =>
-      JSON.parse(localStorage.getItem("hummingbird.runtime-logs") || "[]")
+      JSON.parse(localStorage.getItem("hummingbird.v2.runtime-logs") || "[]")
         .filter((entry: { message: string }) => entry.message === "暂未收到对方响应")
         .map((entry: { raw: string }) => JSON.parse(entry.raw).diagnostic.missedCycles),
     ), { timeout: 40_000 }).toEqual([1, 2, 3]);
@@ -183,7 +184,7 @@ test("连续三个周期未确认存活后离线，无 pong 也能通过消息�
       path: "../temp/screenshot/connection-three-cycles-offline.png",
       animations: "disabled",
     });
-    // Continue suppressing ping/pong: a real delivery acknowledgement must restore presence.
+    // Keep probes failing: a real delivery acknowledgement must restore presence.
     await openPeer(b, "恢复测试 Mac");
     await sendText(a, "离线提示下继续发送");
     await expect(
@@ -202,7 +203,7 @@ test("连续三个周期未确认存活后离线，无 pong 也能通过消息�
   } finally {
     for (const [name, page] of [["sender", a], ["receiver", b]] as const)
       await test.info().attach(`${name}-runtime.json`, {
-        body: await page.evaluate(() => localStorage.getItem("hummingbird.runtime-logs") || "[]"),
+        body: await page.evaluate(() => localStorage.getItem("hummingbird.v2.runtime-logs") || "[]"),
         contentType: "application/json",
       });
     await aContext.close();

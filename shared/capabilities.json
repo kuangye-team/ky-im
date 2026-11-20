@@ -1,0 +1,19 @@
+{
+  "web": "client.web.v1",
+  "app": "client.app.v1",
+  "server": "server.signaling.v1",
+  "discovery": "discovery.v1",
+  "signaling": "signaling.v1",
+  "reverseDial": "signaling.reverse-dial.v1",
+  "tcp": "transfer.tcp.v1",
+  "webtransport": "transfer.webtransport.v1",
+  "webrtc": "transfer.webrtc.v1",
+  "relay": "transport.ws-relay.v1",
+  "chat": "chat.v1",
+  "file": "file.v1",
+  "resume": "file-resume.v1",
+  "folderResume": "folder-resume.v1",
+  "folder": "folder.v1",
+  "receipts": "receipts.v1",
+  "query": "capabilities.query.v1"
+}

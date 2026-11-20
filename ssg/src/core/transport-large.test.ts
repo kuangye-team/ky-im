@@ -1,16 +1,16 @@
-import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Channel, controls, transportFixture } from "./test-transport";
+import { localRuntime } from "./capabilities";
+import { describe, expect, it, vi } from "vitest";
 import { ChatEngine } from "./engine";
-import { IndexedDBStorageAdapter } from "./storage";
-import { MAX_FILE_SIZE, decodeChunk, encodeChunk, newId } from "./protocol";
+import { MAX_BUFFERED_FILE_BYTES, decodeChunk, encodeChunk, newId } from "./protocol";
 import type { Profile } from "./types";
-import { CHUNK_SIZE, FOLDER_CONFIG, TRANSFER_CONFIG } from "../config";
+import { CHUNK_SIZE, TRANSFER_CONFIG } from "../config";
 
 // Exercise the complete streaming lifecycle without allocating hundreds of megabytes.
 // protocol.test.ts separately fixes the production boundary at exactly 256 MiB.
 vi.mock("../config", async (original) => ({
   ...(await original<typeof import("../config")>()),
-  MAX_FILE_SIZE: 64 * 1024,
+  MAX_BUFFERED_FILE_BYTES: 64 * 1024,
   CHUNK_SIZE: 16 * 1024, // Scale lifecycle windows; protocol/browser tests exercise real 128 KiB frames.
   STORAGE_CONFIG: {
     ...(await original<typeof import("../config")>()).STORAGE_CONFIG,
@@ -22,102 +22,6 @@ vi.mock("../config", async (original) => ({
   },
 }));
 
-class Channel extends EventTarget {
-  maxMessageSize?: number;
-  readyState = "connecting";
-  binaryType = "arraybuffer";
-  bufferedAmount = 0;
-  bufferedAmountLowThreshold = 0;
-  onopen?: () => void;
-  onclose?: () => void;
-  onmessage?: (event: { data: unknown }) => void;
-  onerror?: () => void;
-  sent: unknown[] = [];
-  autoPong = true;
-  send(data: unknown) {
-    this.sent.push(data);
-    if (this.autoPong && typeof data === "string") {
-      const packet = JSON.parse(data);
-      if (packet.type === "peer-ping") this.receive(JSON.stringify({ type: "peer-pong", id: packet.id }));
-    }
-  }
-  close() {
-    this.readyState = "closed";
-    this.onclose?.();
-  }
-  open() {
-    this.readyState = "open";
-    this.onopen?.();
-  }
-  receive(data: unknown) {
-    this.onmessage?.({ data });
-  }
-}
-class PeerConnection {
-  static instances: PeerConnection[] = [];
-  connectionState = "new";
-  signalingState = "stable";
-  localDescription: unknown = null;
-  remoteDescription: unknown = null;
-  channel = new Channel();
-  onconnectionstatechange?: () => void;
-  onicecandidate?: unknown;
-  ondatachannel?: unknown;
-  constructor() {
-    PeerConnection.instances.push(this);
-  }
-  createDataChannel() {
-    return this.channel;
-  }
-  async createOffer() {
-    return { type: "offer", sdp: "test-offer" };
-  }
-  async createAnswer() {
-    return { type: "answer", sdp: "test-answer" };
-  }
-  async setLocalDescription(value: { type: string }) {
-    this.localDescription = value;
-    this.signalingState =
-      value.type === "offer" ? "have-local-offer" : "stable";
-  }
-  async setRemoteDescription(value: { type: string }) {
-    this.remoteDescription = value;
-    this.signalingState =
-      value.type === "offer" ? "have-remote-offer" : "stable";
-  }
-  async addIceCandidate() {}
-  close() {
-    this.connectionState = "closed";
-    this.onconnectionstatechange?.();
-  }
-  fail() {
-    this.connectionState = "failed";
-    this.onconnectionstatechange?.();
-  }
-}
-class Socket {
-  static OPEN = 1;
-  static instances: Socket[] = [];
-  readyState = 1;
-  onopen?: () => void;
-  onmessage?: (event: { data: string }) => void;
-  onclose?: () => void;
-  onerror?: () => void;
-  sent: string[] = [];
-  constructor() {
-    Socket.instances.push(this);
-  }
-  send(value: string) {
-    this.sent.push(value);
-  }
-  close() {
-    this.readyState = 3;
-    this.onclose?.();
-  }
-  receive(packet: unknown) {
-    this.onmessage?.({ data: JSON.stringify(packet) });
-  }
-}
 const me: Profile = {
   id: "10000000-0000-4000-8000-000000000000",
   name: "本机",
@@ -125,60 +29,16 @@ const me: Profile = {
   color: "#597461",
   bio: "",
   device: "Mac",
-  clientType: "web" as const,
+  clientType: "web" as const, ...localRuntime(true), capabilities: localRuntime(true).capabilities.filter(c => c !== "file-resume.v1" && c !== "folder-resume.v1"),
 };
 const peer: Profile = {
   ...me,
   id: "20000000-0000-4000-8000-000000000000",
   name: "对方",
 };
-const engines: ChatEngine[] = [];
-const adapters: IndexedDBStorageAdapter[] = [];
-async function setup(open = true) {
-  const storage = new IndexedDBStorageAdapter(`send-transport-${newId()}`);
-  adapters.push(storage);
-  const engine = new ChatEngine(storage, me, []);
-  engines.push(engine);
-  await engine.selectPeer(peer);
-  engine.start();
-  const socket = Socket.instances.at(-1)!;
-  socket.onopen?.();
-  socket.receive({ type: "welcome", id: me.id, peers: [peer] });
-  const pc = PeerConnection.instances.at(-1)!;
-  await Promise.resolve();
-  if (open) pc.channel.open();
-  return { engine, storage, socket, pc, channel: pc.channel };
-}
-const controls = (channel: Channel) =>
-  channel.sent
-    .filter((value): value is string => typeof value === "string")
-    .map((value) => JSON.parse(value) as Record<string, unknown>)
-    .filter((packet) => packet.type !== "peer-ping" && packet.type !== "peer-pong");
-beforeEach(() => {
-  PeerConnection.instances = [];
-  Socket.instances = [];
-  const saved = new Map<string, string>();
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => saved.get(key) ?? null,
-    setItem: (key: string, value: string) => saved.set(key, value),
-  });
-  vi.stubGlobal("navigator", { onLine: true });
-  vi.stubGlobal("window", new EventTarget());
-  vi.stubGlobal("location", { protocol: "http:", host: "192.168.1.2:5173" });
-  vi.stubGlobal("RTCPeerConnection", PeerConnection);
-  vi.stubGlobal("WebSocket", Socket);
-});
-afterEach(async () => {
-  for (const engine of engines.splice(0)) engine.stop();
-  vi.useRealTimers();
-  // Finish queued IDB failure updates before closing the databases.
-  await new Promise((resolve) => setTimeout(resolve, 20));
-  await Promise.all(adapters.splice(0).map((storage) => storage.close()));
-  vi.unstubAllGlobals();
-  vi.restoreAllMocks();
-});
+const { setup } = transportFixture({ local: me, remote: peer, persistProfile: false });
 
-function offer(channel: Channel, size = MAX_FILE_SIZE + 17) {
+function offer(channel: Channel, size = MAX_BUFFERED_FILE_BYTES + 17) {
   const id = newId();
   channel.receive(
     JSON.stringify({
@@ -287,27 +147,7 @@ describe("contact file receiving permission", () => {
     expect(engine.hasPendingTransfers()).toBe(false);
   });
 
-  it("sends an attachment to a legacy client without pong and still requires acceptance and ack", async () => {
-    const { engine, channel } = await setup(false);
-    channel.autoPong = false;
-    channel.open();
-    const sending = engine.sendFiles([new File(["legacy file"], "legacy.txt")]);
-    await vi.waitFor(() =>
-      expect(controls(channel).some((packet) => packet.type === "file-start")).toBe(true),
-    );
-    const id = engine.getSnapshot().messages[0].id;
-    expect(channel.sent.some((packet) => packet instanceof ArrayBuffer)).toBe(false);
-    channel.receive(JSON.stringify({ type: "file-accept", id }));
-    expect(await sending).toBe(true);
-    const chunk = channel.sent.find((packet) => packet instanceof ArrayBuffer) as ArrayBuffer;
-    expect(new TextDecoder().decode(decodeChunk(chunk)!.data)).toBe("legacy file");
-    expect(engine.getSnapshot().messages[0].status).toBe("sent");
-    channel.receive(JSON.stringify({ type: "ack", id }));
-    await vi.waitFor(() =>
-      expect(engine.getSnapshot().messages[0].status).toBe("delivered"),
-    );
-  });
-  it.each([0, 3, MAX_FILE_SIZE])(
+  it.each([0, 3, MAX_BUFFERED_FILE_BYTES])(
     "requires consent by default for %i bytes and stores only after acceptance",
     async (size) => {
       const { engine, channel, socket } = await setup();
@@ -415,9 +255,45 @@ describe("contact file receiving permission", () => {
 });
 
 describe("large file consent and direct-to-disk transfers", () => {
+  it("processes text and cancellation while another transfer is blocked writing, without acknowledging partial output", async () => {
+    const { engine, channel } = await setup();
+    const id = offer(channel);
+    await pending(engine, id);
+    const sink = destination();
+    let release!: () => void;
+    sink.write.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    await engine.acceptFile(id, sink);
+    channel.receive(encodeChunk(id, 0, new ArrayBuffer(CHUNK_SIZE)));
+    await vi.waitFor(() => expect(sink.write).toHaveBeenCalledOnce());
+    const text = newId();
+    channel.receive(JSON.stringify({ type: "text", id: text, text: "继续聊天", createdAt: Date.now() }));
+    await vi.waitFor(() => expect(controls(channel)).toContainEqual({ type: "ack", id: text }));
+    channel.receive(JSON.stringify({ type: "transfer-error", id, message: "文件传输已取消" }));
+    await vi.waitFor(() => expect(sink.abort).toHaveBeenCalledOnce());
+    release();
+    channel.receive(encodeChunk(id, 1, new ArrayBuffer(CHUNK_SIZE)));
+    channel.receive(JSON.stringify({ type: "file-end", id }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sink.write).toHaveBeenCalledOnce();
+    expect(sink.close).not.toHaveBeenCalled();
+    expect(controls(channel)).not.toContainEqual({ type: "ack", id });
+  });
+
+  it("does not resurrect a file when cancellation overtakes its delayed offer", async () => {
+    const { engine, channel } = await setup();
+    const id = newId();
+    channel.receive(JSON.stringify({ type: "transfer-error", id, message: "文件传输已取消" }));
+    channel.receive(JSON.stringify({ type: "file-start", id, kind: "file", fileName: "cancelled.bin", mimeType: "", size: 1, createdAt: Date.now() }));
+    channel.receive(encodeChunk(id, 0, new Uint8Array([1]).buffer));
+    channel.receive(JSON.stringify({ type: "file-end", id }));
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(engine.getSnapshot().messages.some((message) => message.id === id)).toBe(false);
+    expect(controls(channel).some((packet) => packet.id === id)).toBe(false);
+  });
+
   it("keeps stream windows independent when another file stalls or is cancelled", async () => {
     const { engine, channel } = await setup();
-    const bytes = new Uint8Array(MAX_FILE_SIZE + 17).fill(9);
+    const bytes = new Uint8Array(MAX_BUFFERED_FILE_BYTES + 17).fill(9);
     const batch = engine.sendFiles([
       new File([bytes], "stalled.bin"),
       new File([bytes], "completed.bin"),
@@ -467,13 +343,13 @@ describe("large file consent and direct-to-disk transfers", () => {
   it("automatically receives the exact boundary only when enabled, but still requires consent above it", async () => {
     const { engine, channel } = await setup();
     await engine.updatePeerAutoAcceptFiles(peer.id, true);
-    const automatic = offer(channel, MAX_FILE_SIZE);
+    const automatic = offer(channel, MAX_BUFFERED_FILE_BYTES);
     await vi.waitFor(() =>
       expect(
         engine.getSnapshot().messages.find((m) => m.id === automatic)?.status,
       ).toBe("sending"),
     );
-    const manual = offer(channel, MAX_FILE_SIZE + 1);
+    const manual = offer(channel, MAX_BUFFERED_FILE_BYTES + 1);
     await pending(engine, manual);
     expect(controls(channel).filter((p) => p.type === "file-accept")).toEqual([
       { type: "file-accept", id: automatic },
@@ -496,7 +372,7 @@ describe("large file consent and direct-to-disk transfers", () => {
   it("streams complete bytes in bounded batches and acknowledges only after closing the destination", async () => {
     const { engine, storage, channel, socket } = await setup();
     const save = vi.spyOn(storage, "saveAttachment");
-    const bytes = new Uint8Array(MAX_FILE_SIZE + 17).map((_, i) => i % 251);
+    const bytes = new Uint8Array(MAX_BUFFERED_FILE_BYTES + 17).map((_, i) => i % 251);
     const id = offer(channel, bytes.length);
     await pending(engine, id);
     const sink = destination();
@@ -549,7 +425,7 @@ describe("large file consent and direct-to-disk transfers", () => {
   });
   it("does not read or store outgoing bytes before consent and honors refusal", async () => {
     const { engine, storage, channel } = await setup();
-    const file = new File([new Uint8Array(MAX_FILE_SIZE + 1)], "large.bin");
+    const file = new File([new Uint8Array(MAX_BUFFERED_FILE_BYTES + 1)], "large.bin");
     const slice = vi.spyOn(file, "slice");
     const save = vi.spyOn(storage, "saveAttachment");
     const sending = engine.sendFiles([file]).catch(() => false);
@@ -580,7 +456,7 @@ describe("large file consent and direct-to-disk transfers", () => {
   it("waits for disk progress before sending another window, then finishes without persisting bytes", async () => {
     const { engine, storage, channel } = await setup();
     const save = vi.spyOn(storage, "saveAttachment");
-    const bytes = new Uint8Array(MAX_FILE_SIZE + 17).fill(91);
+    const bytes = new Uint8Array(MAX_BUFFERED_FILE_BYTES + 17).fill(91);
     const sending = engine.sendFiles([new File([bytes], "large.bin")]);
     await vi.waitFor(() =>
       expect(controls(channel).some((p) => p.type === "file-start")).toBe(true),
@@ -747,7 +623,7 @@ describe("direct folder transfers", () => {
     expect(engine.getSnapshot().messages[0]?.attachmentStorage).toBe(
       "external",
     );
-    expect(controls(channel)).toContainEqual({ type: "folder-supported", id });
+    expect(controls(channel).some(p => p.type === "file-accept" && p.id === id)).toBe(false);
     const signaling = [...socket.sent];
     const sinks = [destination(), destination()];
     const target = {
@@ -808,7 +684,7 @@ describe("direct folder transfers", () => {
   });
   it("does not create or read anything before consent and propagates cancellation", async () => {
     const { engine, channel, storage } = await setup();
-    const file = new File([new Uint8Array(MAX_FILE_SIZE + 1)], "test.bin");
+    const file = new File([new Uint8Array(MAX_BUFFERED_FILE_BYTES + 1)], "test.bin");
     const slice = vi.spyOn(file, "slice");
     const save = vi.spyOn(storage, "saveAttachment");
     const sending = engine
@@ -950,31 +826,16 @@ describe("direct folder transfers", () => {
     await vi.waitFor(() => expect(sink.abort).toHaveBeenCalledOnce());
     expect(sink.write).not.toHaveBeenCalled();
   });
-  it("detects older receivers without sending folder contents", async () => {
-    const { engine, channel } = await setup();
-    const file = new File([new Uint8Array(MAX_FILE_SIZE + 1)], "test.bin");
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const sending = engine
-      .sendFolder(
-        async () => ({
-          name: "资料",
-          entries: [{ kind: "file", path: file.name, file }],
-        }),
-        () => {},
-        new AbortController().signal,
-      )
-      .catch(() => false);
-    await vi.waitFor(() =>
-      expect(controls(channel).some((p) => p.type === "folder-start")).toBe(
-        true,
-      ),
-    );
-    await vi.advanceTimersByTimeAsync(FOLDER_CONFIG.supportTimeoutMs + 1);
-    expect(await sending).toBe(false);
-    expect(engine.getSnapshot().messages[0]?.error).toBe(
-      "对方暂不支持接收文件夹，请更新后重试",
-    );
-    expect(channel.sent.some((p) => p instanceof ArrayBuffer)).toBe(false);
+  it("rejects missing folder capability before sending contents", async () => {
+    const { engine, channel, socket } = await setup();
+    socket.receive({ type: "peer_updated", peer: { ...peer, capabilities: peer.capabilities.filter(c => c !== "folder.v1") } });
+    const file = new File([new Uint8Array(MAX_BUFFERED_FILE_BYTES + 1)], "test.bin");
+    const sending = engine.sendFolder(async () => ({ name: "资料", entries: [{ kind: "file", path: file.name, file }] }), () => {}, new AbortController().signal);
+    await expect(sending).rejects.toThrow("暂时无法连接");
+    expect(engine.getSnapshot().error).toBe("暂时无法连接");
+    expect(engine.getSnapshot().compatibilityReasons).toEqual(["peer-update", "peer-unsupported"]);
+    expect(controls(channel).some(p => p.type === "folder-start")).toBe(false);
+    expect(channel.sent.some(p => p instanceof ArrayBuffer)).toBe(false);
   });
 });
 
@@ -1025,7 +886,7 @@ describe("managed desktop transfers", () => {
       Object.assign(storage, { createFileDestination: async () => sink });
       if (mode === "write-error") sink.write.mockRejectedValueOnce(new Error("disk full"));
       if (mode === "close-error") sink.close.mockRejectedValueOnce(new Error("disk full"));
-      const file = new File([new Uint8Array(MAX_FILE_SIZE + 17)], "partial.bin");
+      const file = new File([new Uint8Array(MAX_BUFFERED_FILE_BYTES + 17)], "partial.bin");
       if (mode === "changed-source") vi.spyOn(file, "slice").mockReturnValue(new Blob(["short"]));
       const sending = engine.sendFiles([file]).catch(() => false);
       await vi.waitFor(() => expect(controls(channel).some((p) => p.type === "file-start")).toBe(true));
@@ -1074,7 +935,7 @@ describe("managed desktop transfers", () => {
     sink.write.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
     Object.assign(storage, { createFileDestination: vi.fn(async () => sink) });
     const save = vi.spyOn(storage, "saveAttachment");
-    const bytes = new Uint8Array(MAX_FILE_SIZE + 17).fill(42);
+    const bytes = new Uint8Array(MAX_BUFFERED_FILE_BYTES + 17).fill(42);
     const file = new File([bytes], "native.bin");
     const read = vi.spyOn(file, "slice");
     const sending = engine.sendFiles([file]);
@@ -1124,7 +985,7 @@ describe("managed desktop transfers", () => {
   it("lets desktop receivers request bounded windows for small files sent by browsers", async () => {
     const { engine, channel } = await setup();
     const sending = engine.sendFiles([
-      new File([new Uint8Array(MAX_FILE_SIZE)], "small.bin"),
+      new File([new Uint8Array(MAX_BUFFERED_FILE_BYTES)], "small.bin"),
     ]);
     await vi.waitFor(() =>
       expect(controls(channel).some((p) => p.type === "file-start")).toBe(true),

@@ -1,10 +1,11 @@
+import { canDialWebTransport, CompatibilityError, type CompatibilityReason } from "../core/capabilities";
+import { CompatibilityHelp } from "./CompatibilityHelp";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
   ScrollText,
   Check,
-  Copy,
   Eye,
   EyeOff,
   Globe,
@@ -29,9 +30,13 @@ import {
 } from "../core/network/settings";
 import { translateError } from "../localizeError";
 import { RuntimeLogs } from "./RuntimeLogs";
+import { IceServerSettings } from "./IceServerSettings";
 import { Modal } from "./Modal";
-import { copyText } from "./copyText";
+import { ServerAddress } from "./ServerAddress";
+import { TurnServerSettings } from "./TurnServerSettings";
 import "./SystemSettings.css";
+
+type SettingsSection = keyof NetworkSettings | "turnServers";
 
 export function SystemSettings({
   engine,
@@ -51,12 +56,13 @@ export function SystemSettings({
   const applyingRef = useRef(false);
   const [error, setError] = useState("");
   const [errorSection, setErrorSection] =
-    useState<keyof NetworkSettings>("servers");
+    useState<SettingsSection>("servers");
   const [applied, setApplied] = useState(false);
   const [editor, setEditor] = useState<SignalServer | null>(null);
   const [editorError, setEditorError] = useState("");
   const [showServerKey, setShowServerKey] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  const [testReasons, setTestReasons] = useState<Record<string, CompatibilityReason[]>>({});
   const [testErrors, setTestErrors] = useState<Record<string, string>>({});
   const mounted = useRef(true);
   useEffect(() => {
@@ -76,7 +82,7 @@ export function SystemSettings({
     editor && !settings.servers.some((server) => server.id === editor.id);
   const apply = async (
     next: NetworkSettings,
-    section: keyof NetworkSettings | "editor" = "servers",
+    section: SettingsSection | "editor" = "servers",
   ) => {
     if (applyingRef.current) return false;
     applyingRef.current = true;
@@ -120,11 +126,13 @@ export function SystemSettings({
   const runTest = async (server: SignalServer) => {
     if (busy) return;
     setTesting(server.id);
+    setTestReasons(reasons => ({ ...reasons, [server.id]: [] }));
     setTestErrors((errors) => ({ ...errors, [server.id]: "" }));
     let relay: boolean | undefined;
     try {
       relay = (await testServer(server.url, 5000, server.authorization)).relay;
     } catch (error) {
+      if (mounted.current && error instanceof CompatibilityError) setTestReasons(reasons => ({ ...reasons, [server.id]: error.reasons }));
       if (mounted.current)
         setTestErrors((errors) => ({
           ...errors,
@@ -196,7 +204,7 @@ export function SystemSettings({
       </div>
       {showLogs && <RuntimeLogs onClose={() => setShowLogs(false)} />}
       <div className="settings-feedback">
-        <p>{t("修改后自动生效并重新连接。正在传输内容时，请完成后再修改。")}</p>
+        <p>{t("设置生效时会重新连接。正在传输内容时，请完成后再修改。")}</p>
         <p role="status">
           {pending
             ? t("还有内容正在传输，请完成后再修改设置")
@@ -277,7 +285,7 @@ export function SystemSettings({
           <label className="settings-choice">
             <input
               type="checkbox"
-              checked={settings.transport.tcp}
+              checked={desktop ? settings.transport.tcp : canDialWebTransport()}
               disabled={!desktop}
               onChange={(e) =>
                 void apply(
@@ -290,9 +298,9 @@ export function SystemSettings({
               }
             />
             <span>
-              <strong>{t("快速直连（TCP）")}</strong>
+              <strong>{t("快速直连")}</strong>
               <small>
-                {t("适合客户端之间直接传输，需要双方都能使用这种方式。")}
+                {t("同一网络内的客户端和支持的浏览器可以直接收发。")}
               </small>
             </span>
           </label>
@@ -325,7 +333,7 @@ export function SystemSettings({
           {!desktop && (
             <p className="settings-hint">
               {t(
-                "网页版使用在线查找和兼容传输；附近查找和快速直连需要安装客户端。",
+                "网页版通过服务器查找设备，并自动选择可用的传输方式。",
               )}
             </p>
           )}
@@ -337,7 +345,7 @@ export function SystemSettings({
           <div className="settings-server-heading">
             <h2 id={serverHeadingId}>
               <Globe size={19} aria-hidden="true" />
-              {t("服务器列表")}
+              {t("信令服务器")}
             </h2>
             <button
               className="secondary-button"
@@ -364,7 +372,7 @@ export function SystemSettings({
             <span>{t("服务器地址")}</span>
             <span>{t("操作")}</span>
           </div>
-          <ul className="settings-server-list" aria-label={t("服务器列表")}>
+          <ul className="settings-server-list" aria-label={t("信令服务器")}>
             {settings.servers.map((server, index) => (
               <li className="settings-server" key={server.id}>
                 <div className="settings-server-name">
@@ -389,6 +397,7 @@ export function SystemSettings({
                             ? t("连接成功 · 不支持中转")
                             : t("测试后可查看中转支持情况")}
                   </small>
+                  <CompatibilityHelp reasons={testReasons[server.id]} />
                 </div>
                 <ServerAddress
                   address={server.url || defaultAddress}
@@ -503,6 +512,22 @@ export function SystemSettings({
             {t("默认服务器由应用提供，可设置访问密钥、启用或停用。")}
           </p>
         </section>
+        <IceServerSettings
+          servers={settings.iceServers}
+          busy={busy}
+          error={errorSection === "iceServers" ? error : ""}
+          onClearError={() => setError("")}
+          onNotice={onNotice}
+          onApply={(iceServers) => apply({ ...settings, iceServers }, "iceServers")}
+        />
+        <TurnServerSettings
+          servers={settings.iceServers}
+          busy={busy}
+          error={errorSection === "turnServers" ? error : ""}
+          onClearError={() => setError("")}
+          onNotice={onNotice}
+          onApply={(iceServers) => apply({ ...settings, iceServers }, "turnServers")}
+        />
       </div>
       {editor && (
         <Modal
@@ -652,52 +677,5 @@ export function SystemSettings({
         </Modal>
       )}
     </section>
-  );
-}
-
-function ServerAddress({
-  address,
-  onNotice,
-}: {
-  address: string;
-  onNotice: (message: string) => void;
-}) {
-  const { t } = useTranslation();
-  const [copied, setCopied] = useState(false);
-  useEffect(() => setCopied(false), [address]);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  return (
-    <div className="settings-server-address">
-      <span title={address}>{address}</span>
-      <button
-        type="button"
-        className={`icon-button${copied ? " copied" : ""}`}
-        aria-label={t("复制服务器地址")}
-        title={t(copied ? "已复制" : "复制服务器地址")}
-        onClick={() => {
-          void copyText(address).then(
-            () => {
-              setCopied(true);
-              onNotice(t("服务器地址已复制"));
-            },
-            () => {
-              setCopied(false);
-              onNotice(t("请选中地址后手动复制"));
-            },
-          );
-        }}
-      >
-        {copied ? (
-          <Check size={15} aria-hidden="true" />
-        ) : (
-          <Copy size={15} aria-hidden="true" />
-        )}
-      </button>
-    </div>
   );
 }

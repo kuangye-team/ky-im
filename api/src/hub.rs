@@ -2,15 +2,12 @@ use crate::{
     AppState,
     protocol::{
         Profile, RelayPacket, ServerMessage, valid_identifier, valid_numeric_id, valid_signal,
+        validate_recent_numbers,
     },
 };
 use serde_json::Value;
 use std::{
-    collections::{
-        HashMap, HashSet,
-        hash_map::{DefaultHasher, RandomState},
-    },
-    hash::{BuildHasher, Hash, Hasher},
+    collections::{HashMap, HashSet},
     sync::Arc,
 };
 
@@ -43,6 +40,7 @@ impl CloseReason {
 #[derive(Clone)]
 pub(crate) struct Peer {
     pub profile: Profile,
+    pub number_revision: u64,
     pub generation: String,
     pub transport: Arc<dyn Transport>,
 }
@@ -57,13 +55,15 @@ impl Peer {
 
 #[derive(Default)]
 pub(crate) struct Hub {
+    pub(crate) relay: crate::relay::RelayRegistry,
     pub rooms: HashMap<String, HashMap<String, Peer>>,
     peer_rooms: HashMap<String, String>,
-    // Numbers identify automatic discovery groups (namespace + observed source IP).
-    numeric_ids: HashMap<String, String>,
-    room_numbers: HashMap<String, String>,
+    // Device-owned numbers form a second discovery group, independent of source IP.
+    numeric_ids: HashMap<String, HashSet<String>>,
     // A subscriber sees group members; subscribers do not discover one another.
     subscriptions: HashMap<String, HashSet<String>>,
+    // Recent-chat subscriptions are replaceable, independent of explicit lookups.
+    recent_subscriptions: HashMap<String, HashSet<String>>,
     // Exact UUID lookups retain independent, pair-only reconnect permission.
     pairs: HashMap<String, HashSet<String>>,
     connect_attempts: HashMap<String, (u64, u8)>,
@@ -77,11 +77,25 @@ pub(crate) struct Identity {
 }
 
 impl Hub {
+    fn close_tunnels(&mut self, id: &str) {
+        for (a, b, session) in self.relay.remove_owner(id) {
+            for (from, to) in [(&a, &b), (&b, &a)] {
+                if let Some(peer) = self.peer(to) {
+                    peer.send(ServerMessage::Relay {
+                        from: from.clone(),
+                        session: session.clone(),
+                        data: RelayPacket::Close,
+                    });
+                }
+            }
+        }
+    }
+
     fn peer(&self, id: &str) -> Option<&Peer> {
         self.rooms.get(self.peer_rooms.get(id)?)?.get(id)
     }
 
-    fn current(&self, identity: &Identity) -> Result<&Peer, ServerMessage> {
+    pub(crate) fn current(&self, identity: &Identity) -> Result<&Peer, ServerMessage> {
         self.rooms
             .get(&identity.room)
             .and_then(|peers| peers.get(&identity.id))
@@ -95,16 +109,30 @@ impl Hub {
             if let Some(peers) = self.rooms.get(room) {
                 ids.extend(peers.keys().cloned());
             }
-            for (subscriber, groups) in &self.subscriptions {
-                if groups.contains(room) {
+        }
+        if let Some(number) = self
+            .peer(id)
+            .and_then(|peer| peer.profile.numeric_id.as_ref())
+        {
+            if let Some(members) = self.numeric_ids.get(number) {
+                ids.extend(members.iter().cloned());
+            }
+            for (subscriber, groups) in self.subscriptions.iter().chain(&self.recent_subscriptions)
+            {
+                if groups.contains(number) {
                     ids.insert(subscriber.clone());
                 }
             }
         }
-        if let Some(groups) = self.subscriptions.get(id) {
+        for groups in self
+            .subscriptions
+            .get(id)
+            .into_iter()
+            .chain(self.recent_subscriptions.get(id))
+        {
             for group in groups {
-                if let Some(peers) = self.rooms.get(group) {
-                    ids.extend(peers.keys().cloned());
+                if let Some(peers) = self.numeric_ids.get(group) {
+                    ids.extend(peers.iter().cloned());
                 }
             }
         }
@@ -148,23 +176,46 @@ impl Hub {
         Ok(())
     }
 
-    fn remove(&mut self, id: &str, preserve_room: bool) -> Option<Peer> {
+    fn remove_number(&mut self, id: &str, number: &str, preserve_group: bool) {
+        if let Some(members) = self.numeric_ids.get_mut(number) {
+            members.remove(id);
+            if members.is_empty() && !preserve_group {
+                self.numeric_ids.remove(number);
+                // Recent contacts retain bounded subscription intent. Explicit
+                // lookups keep their existing lifetime and do not follow reused groups.
+                self.subscriptions.retain(|_, groups| {
+                    groups.remove(number);
+                    !groups.is_empty()
+                });
+            }
+        }
+    }
+
+    fn pair(&mut self, a: &str, b: &str) {
+        self.pairs
+            .entry(a.to_owned())
+            .or_default()
+            .insert(b.to_owned());
+        self.pairs
+            .entry(b.to_owned())
+            .or_default()
+            .insert(a.to_owned());
+    }
+
+    fn remove(&mut self, id: &str, preserve_number: bool) -> Option<Peer> {
+        self.close_tunnels(id);
         let observers = self.observers(id);
         let room = self.peer_rooms.remove(id)?;
         let peers = self.rooms.get_mut(&room)?;
         let peer = peers.remove(id)?;
-        if peers.is_empty() && !preserve_room {
+        if peers.is_empty() {
             self.rooms.remove(&room);
-            if let Some(number) = self.room_numbers.remove(&room) {
-                self.numeric_ids.remove(&number);
-            }
-            // A released number must never transfer subscriptions to a new group.
-            self.subscriptions.retain(|_, groups| {
-                groups.remove(&room);
-                !groups.is_empty()
-            });
+        }
+        if let Some(number) = &peer.profile.numeric_id {
+            self.remove_number(id, number, preserve_number);
         }
         self.subscriptions.remove(id);
+        self.recent_subscriptions.remove(id);
         self.connect_attempts.remove(id);
         if let Some(pairs) = self.pairs.remove(id) {
             for paired_id in pairs {
@@ -184,53 +235,25 @@ impl Hub {
         Some(peer)
     }
 
-    fn assign_number(
-        &self,
-        room: &str,
-        preferred: Option<&str>,
-        replacing_id: &str,
-    ) -> Result<String, ServerMessage> {
-        if let Some(number) = self.room_numbers.get(room) {
-            return Ok(number.clone());
-        }
-        if let Some(number) = preferred.filter(|number| {
-            self.numeric_ids.get(*number).is_none_or(|existing_room| {
-                self.peer_rooms.get(replacing_id) == Some(existing_room)
-                    && self
-                        .rooms
-                        .get(existing_room)
-                        .is_some_and(|peers| peers.len() == 1)
-            })
-        }) {
-            return Ok(number.to_owned());
-        }
-        // A stable group starting point helps reconnects retain their code.
-        // Saved codes are preferences; collisions never merge different source groups.
-        let mut hasher = DefaultHasher::new();
-        room.hash(&mut hasher);
-        let start = hasher.finish() % 900_000;
-        self.available_number(start)
-    }
-
-    fn available_number(&self, start: u64) -> Result<String, ServerMessage> {
-        for offset in 0..900_000 {
-            let number = (100_000 + (start + offset) % 900_000).to_string();
-            if !self.numeric_ids.contains_key(&number) {
-                return Ok(number);
-            }
-        }
-        Err(ServerMessage::error(
-            "id_limit",
-            "No numeric IDs are available",
-        ))
+    fn recent_groups(&self, own_number: &str, numbers: Vec<String>) -> HashSet<String> {
+        numbers
+            .into_iter()
+            .filter(|number| number != own_number)
+            .collect()
     }
 }
 
 impl AppState {
-    pub(crate) fn join(&self, room: String, mut peer: Peer) -> Result<Identity, ServerMessage> {
+    pub(crate) fn join(
+        &self,
+        room: String,
+        mut peer: Peer,
+        recent_numeric_ids: Vec<String>,
+    ) -> Result<Identity, ServerMessage> {
+        validate_recent_numbers(&recent_numeric_ids)?;
         // Nonblocking sends under this lock preserve presence-before-signal ordering.
         let mut hub = self.hub.lock().expect("hub lock poisoned");
-        peer.profile.relay &= self.config.relay_enabled;
+        peer.profile.relay &= self.config.relay_enabled && peer.profile.supports("relay");
         let id = peer.profile.id.clone();
         let removes_old_room = hub.peer_rooms.get(&id).is_some_and(|old_room| {
             old_room != &room
@@ -252,11 +275,24 @@ impl AppState {
         }) {
             return Err(ServerMessage::error("room_full", "The room is full"));
         }
-        let number = hub.assign_number(&room, peer.profile.numeric_id.as_deref(), &id)?;
+        let number = peer.profile.numeric_id.clone().ok_or_else(|| {
+            ServerMessage::error("invalid_profile", "A device-owned numericId is required")
+        })?;
+        if hub.numeric_ids.get(&number).is_some_and(|members| {
+            !members.contains(&id) && members.len() >= self.config.max_peers_per_room
+        }) {
+            return Err(ServerMessage::error(
+                "room_full",
+                "The number group is full",
+            ));
+        }
         peer.profile.numeric_id = Some(number.clone());
         // Do not evict the existing session until every capacity check has succeeded.
-        let preserve_room = hub.peer_rooms.get(&id) == Some(&room);
-        if let Some(old) = hub.remove(&id, preserve_room) {
+        let preserve_number = hub
+            .peer(&id)
+            .and_then(|peer| peer.profile.numeric_id.as_ref())
+            == Some(&number);
+        if let Some(old) = hub.remove(&id, preserve_number) {
             old.transport.close(CloseReason::Replaced);
         }
         let identity = Identity {
@@ -264,16 +300,22 @@ impl AppState {
             id: id.clone(),
             generation: peer.generation.clone(),
         };
-        hub.numeric_ids.insert(number.clone(), room.clone());
-        hub.room_numbers.insert(room.clone(), number.clone());
+        hub.numeric_ids
+            .entry(number.clone())
+            .or_default()
+            .insert(id.clone());
         hub.peer_rooms.insert(id.clone(), room.clone());
         hub.rooms
             .entry(room)
             .or_default()
             .insert(id.clone(), peer.clone());
+        let recent_groups = hub.recent_groups(&number, recent_numeric_ids);
+        if !recent_groups.is_empty() {
+            hub.recent_subscriptions.insert(id.clone(), recent_groups);
+        }
         let observers = hub.observers(&id);
         peer.send(ServerMessage::Welcome {
-            relay: self.config.relay_enabled,
+            runtime: crate::protocol::capabilities::server_runtime(self.config.relay_enabled),
             id: id.clone(),
             room: identity.room.clone(),
             numeric_id: number,
@@ -290,81 +332,125 @@ impl AppState {
         Ok(identity)
     }
 
-    pub(crate) fn update_profile(
+    pub(crate) fn discover(
         &self,
         identity: &Identity,
-        mut profile: Profile,
+        recent_numeric_ids: Vec<String>,
     ) -> Result<(), ServerMessage> {
+        validate_recent_numbers(&recent_numeric_ids)?;
         let mut hub = self.hub.lock().expect("hub lock poisoned");
-        let current = hub.current(identity)?;
-        profile.relay &= self.config.relay_enabled;
-        profile.id.clone_from(&identity.id);
-        profile.numeric_id.clone_from(&current.profile.numeric_id);
-        profile
-            .validate()
-            .map_err(|message| ServerMessage::error("invalid_profile", message))?;
-        if profile == current.profile {
-            return Ok(());
+        let requester = hub.current(identity)?.clone();
+        let previous = hub.observers(&identity.id);
+        let groups = hub.recent_groups(
+            requester.profile.numeric_id.as_deref().unwrap(),
+            recent_numeric_ids,
+        );
+        if groups.is_empty() {
+            hub.recent_subscriptions.remove(&identity.id);
+        } else {
+            hub.recent_subscriptions.insert(identity.id.clone(), groups);
         }
-        hub.rooms
-            .get_mut(&identity.room)
-            .unwrap()
-            .get_mut(&identity.id)
-            .unwrap()
-            .profile = profile.clone();
-        for id in hub.observers(&identity.id) {
-            if let Some(other) = hub.peer(&id) {
-                other.send(ServerMessage::PeerUpdated {
-                    peer: Box::new(profile.clone()),
+        let observers = hub.observers(&identity.id);
+        let added = observers.difference(&previous).cloned().collect();
+        let mut removed = previous.difference(&observers).cloned().collect::<Vec<_>>();
+        removed.sort();
+        // One response keeps a large number group from overflowing the sender's queue.
+        requester.send(ServerMessage::DiscoveryUpdated {
+            peers: hub.profiles(&added),
+            removed_peer_ids: removed.clone(),
+        });
+        for id in &removed {
+            if let Some(other) = hub.peer(id) {
+                other.send(ServerMessage::PeerLeft {
+                    id: identity.id.clone(),
+                });
+            }
+        }
+        for id in observers.difference(&previous) {
+            if let Some(other) = hub.peer(id) {
+                other.send(ServerMessage::PeerJoined {
+                    peer: Box::new(requester.profile.clone()),
                 });
             }
         }
         Ok(())
     }
 
-    pub(crate) fn refresh_number(
+    pub(crate) fn change_numeric_id(
         &self,
         identity: &Identity,
-        request_id: String,
+        number: String,
+        revision: u64,
     ) -> Result<(), ServerMessage> {
         let mut hub = self.hub.lock().expect("hub lock poisoned");
-        let old_number = hub.current(identity)?.profile.numeric_id.clone().unwrap();
-        // Share discovery's request validation and per-identity rate limit.
-        hub.check_lookup(identity, &request_id, &old_number)?;
-        let start = RandomState::new().hash_one((&identity.id, now_ms())) % 900_000;
-        // Keep the old number occupied until a different free number is found.
-        let number = hub
-            .available_number(start)
-            .map_err(|_| connect_error(&request_id, "id_limit", "当前在线人数较多，请稍后再来"))?;
-        hub.numeric_ids.remove(&old_number);
+        let current = hub.current(identity)?;
+        if !valid_numeric_id(&number) || !(1..=9_007_199_254_740_991).contains(&revision) {
+            return Err(ServerMessage::error(
+                "invalid_numeric_id",
+                "Invalid number or revision",
+            ));
+        }
+        if current.number_revision >= revision {
+            return Ok(());
+        }
+        let old_number = current
+            .profile
+            .numeric_id
+            .clone()
+            .expect("registered device number");
+        if old_number == number {
+            return Ok(());
+        }
+        if hub
+            .numeric_ids
+            .get(&number)
+            .is_some_and(|members| members.len() >= self.config.max_peers_per_room)
+        {
+            return Err(ServerMessage::error(
+                "room_full",
+                "The number group is full",
+            ));
+        }
+        let previous = hub.observers(&identity.id);
+        for id in &previous {
+            hub.pair(&identity.id, id);
+        }
+        hub.remove_number(&identity.id, &old_number, false);
         hub.numeric_ids
-            .insert(number.clone(), identity.room.clone());
-        hub.room_numbers
-            .insert(identity.room.clone(), number.clone());
-        let members = hub.rooms.get_mut(&identity.room).unwrap();
-        for member in members.values_mut() {
-            member.profile.numeric_id = Some(number.clone());
-        }
-        let member_ids = members.keys().cloned().collect::<Vec<_>>();
-        // One batch per recipient avoids overflowing signaling queues in large groups.
-        // Only include identities this recipient already has permission to discover.
-        let mut updates: HashMap<String, Vec<String>> = HashMap::new();
-        for id in member_ids {
-            let mut recipients = hub.observers(&id);
-            recipients.insert(id.clone());
-            for recipient in recipients {
-                updates.entry(recipient).or_default().push(id.clone());
+            .entry(number.clone())
+            .or_default()
+            .insert(identity.id.clone());
+        let current = hub
+            .rooms
+            .get_mut(&identity.room)
+            .unwrap()
+            .get_mut(&identity.id)
+            .unwrap();
+        current.number_revision = revision;
+        current.profile.numeric_id = Some(number.clone());
+        let profile = current.profile.clone();
+        let observers = hub.observers(&identity.id);
+        for id in &observers {
+            if let Some(other) = hub.peer(id) {
+                if previous.contains(id) {
+                    other.send(ServerMessage::NumericIdChanged {
+                        id: identity.id.clone(),
+                        previous_numeric_id: old_number.clone(),
+                        numeric_id: number.clone(),
+                        revision,
+                    });
+                } else {
+                    other.send(ServerMessage::PeerJoined {
+                        peer: Box::new(profile.clone()),
+                    });
+                }
             }
         }
-        for (recipient, mut peer_ids) in updates {
-            peer_ids.sort();
-            if let Some(peer) = hub.peer(&recipient) {
-                peer.send(ServerMessage::NumberUpdated {
-                    request_id: (recipient == identity.id).then(|| request_id.clone()),
-                    numeric_id: number.clone(),
-                    peer_ids,
-                });
-            }
+        let current = hub.current(identity)?;
+        for peer in hub.profiles(&observers.difference(&previous).cloned().collect()) {
+            current.send(ServerMessage::PeerJoined {
+                peer: Box::new(peer),
+            });
         }
         Ok(())
     }
@@ -377,7 +463,7 @@ impl AppState {
     ) -> Result<(), ServerMessage> {
         let mut hub = self.hub.lock().expect("hub lock poisoned");
         hub.check_lookup(identity, &request_id, numeric_id)?;
-        let group = hub.numeric_ids.get(numeric_id).cloned().ok_or_else(|| {
+        let members = hub.numeric_ids.get(numeric_id).cloned().ok_or_else(|| {
             connect_error(
                 &request_id,
                 "peer_unavailable",
@@ -386,19 +472,15 @@ impl AppState {
         })?;
         let requester = hub.current(identity)?.clone();
         let previous = hub.observers(&identity.id);
-        let members = hub
-            .rooms
-            .get(&group)
-            .unwrap()
-            .keys()
-            .filter(|id| *id != &identity.id)
-            .cloned()
+        let members = members
+            .into_iter()
+            .filter(|id| id != &identity.id)
             .collect::<HashSet<_>>();
-        if group != identity.room {
+        if requester.profile.numeric_id.as_deref() != Some(numeric_id) {
             hub.subscriptions
                 .entry(identity.id.clone())
                 .or_default()
-                .insert(group);
+                .insert(numeric_id.to_owned());
         }
         requester.send(ServerMessage::GroupResolved {
             request_id,
@@ -475,7 +557,7 @@ impl AppState {
                 "This server does not relay content",
             ));
         }
-        let hub = self.hub.lock().expect("hub lock poisoned");
+        let mut hub = self.hub.lock().expect("hub lock poisoned");
         let sender = hub.current(identity)?;
         if !valid_identifier(session) || !data.valid() || to == identity.id {
             return Err(ServerMessage::error("invalid_relay", "Invalid relay frame"));
@@ -490,12 +572,27 @@ impl AppState {
                 "Both devices must enable relay",
             ));
         }
-        if !target.transport.send(ServerMessage::Relay {
+        let transport = target.transport.clone();
+        let target_generation = target.generation.clone();
+        if !hub.relay.route(
+            &identity.id,
+            to,
+            &identity.generation,
+            &target_generation,
+            session,
+            &data,
+        ) {
+            return Err(ServerMessage::error(
+                "invalid_tunnel",
+                "Tunnel is closed or its receive window is exhausted",
+            ));
+        }
+        if !transport.send(ServerMessage::Relay {
             from: identity.id.clone(),
             session: session.into(),
             data,
         }) {
-            target.transport.close(CloseReason::SlowConsumer);
+            transport.close(CloseReason::SlowConsumer);
             return Err(ServerMessage::error(
                 "slow_consumer",
                 "Relay recipient cannot keep up",
@@ -525,7 +622,7 @@ impl AppState {
         if !valid_signal(&data) {
             return Err(ServerMessage::error(
                 "invalid_signal",
-                "Only WebRTC SDP descriptions and ICE candidates are allowed",
+                "Unsupported signaling message",
             ));
         }
         target.send(ServerMessage::Signal {
@@ -576,97 +673,5 @@ pub(crate) fn now_ms() -> u64 {
             .get_or_init(std::time::Instant::now)
             .elapsed()
             .as_millis() as u64
-    }
-}
-
-// Keep the existing DO row format so a Wasm deployment can restore TS sessions.
-#[cfg(target_arch = "wasm32")]
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub(crate) struct StoredPeer {
-    pub sid: String,
-    pub room: String,
-    pub profile: Profile,
-    pub subscriptions: Vec<String>,
-    pub pairs: Vec<String>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Hub {
-    pub fn restore(
-        &mut self,
-        stored: StoredPeer,
-        transport: Arc<dyn Transport>,
-        lookup: (u64, u8),
-    ) {
-        let id = stored.profile.id.clone();
-        let number = stored
-            .profile
-            .numeric_id
-            .clone()
-            .expect("stored group number");
-        self.numeric_ids.insert(number.clone(), stored.room.clone());
-        self.room_numbers.insert(stored.room.clone(), number);
-        self.peer_rooms.insert(id.clone(), stored.room.clone());
-        self.subscriptions
-            .insert(id.clone(), stored.subscriptions.into_iter().collect());
-        self.pairs
-            .insert(id.clone(), stored.pairs.into_iter().collect());
-        self.connect_attempts.insert(id.clone(), lookup);
-        self.rooms.entry(stored.room).or_default().insert(
-            id,
-            Peer {
-                profile: stored.profile,
-                generation: stored.sid,
-                transport,
-            },
-        );
-    }
-
-    pub fn stored_peers(&self) -> Vec<StoredPeer> {
-        self.rooms
-            .iter()
-            .flat_map(|(room, peers)| {
-                peers.values().map(|peer| {
-                    let id = &peer.profile.id;
-                    let sorted = |map: &HashMap<String, HashSet<String>>| {
-                        let mut values = map
-                            .get(id)
-                            .into_iter()
-                            .flatten()
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        values.sort();
-                        values
-                    };
-                    StoredPeer {
-                        sid: peer.generation.clone(),
-                        room: room.clone(),
-                        profile: peer.profile.clone(),
-                        subscriptions: sorted(&self.subscriptions),
-                        pairs: sorted(&self.pairs),
-                    }
-                })
-            })
-            .collect()
-    }
-
-    pub fn identity_for_session(&self, sid: &str) -> Option<Identity> {
-        self.rooms.iter().find_map(|(room, peers)| {
-            peers
-                .values()
-                .find(|peer| peer.generation == sid)
-                .map(|peer| Identity {
-                    room: room.clone(),
-                    id: peer.profile.id.clone(),
-                    generation: sid.to_owned(),
-                })
-        })
-    }
-
-    pub fn lookup_rate(&self, identity: &Identity) -> (u64, u8) {
-        self.connect_attempts
-            .get(&identity.id)
-            .copied()
-            .unwrap_or((now_ms(), 0))
     }
 }

@@ -1,7 +1,8 @@
+import { localRuntime } from "./capabilities";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CHUNK_SIZE,
-  MAX_FILE_SIZE,
+  MAX_BUFFERED_FILE_BYTES,
   MAX_TEXT_BYTES,
   decodeChunk,
   encodeChunk,
@@ -9,7 +10,7 @@ import {
   newId,
   parseControlPacket,
 } from "./protocol";
-import { MAX_TRANSFER_SIZE } from "../config";
+import { MAX_FILE_CHUNK_BYTES, MAX_TRANSFER_SIZE } from "../config";
 
 afterEach(() => vi.unstubAllGlobals());
 const id = "7458d107-39cf-48cf-82ea-2c2b6c267c91";
@@ -37,12 +38,18 @@ describe("RTC wire protocol", () => {
     expect(decodeChunk(encoded)).toEqual({ id, sequence: 12, data: bytes });
     expect(encoded.byteLength).toBe(bytes.byteLength + 44);
   });
+  it("encodes only the selected file slice and owns the outgoing payload", () => {
+    const source = Uint8Array.of(240, 1, 2, 3, 241);
+    const encoded = encodeChunk(id, 3, source.subarray(1, 4));
+    source.fill(0);
+    expect([...decodeChunk(encoded)!.data]).toEqual([1, 2, 3]);
+  });
   it("rejects malformed, oversized and unrelated binary frames", () => {
     expect(decodeChunk(new ArrayBuffer(43))).toBeNull();
-    expect(decodeChunk(new ArrayBuffer(CHUNK_SIZE + 45))).toBeNull();
+    expect(decodeChunk(new ArrayBuffer(MAX_FILE_CHUNK_BYTES + 45))).toBeNull();
     expect(decodeChunk(new ArrayBuffer(50))).toBeNull();
     expect(() => encodeChunk("not-a-uuid", 0, new ArrayBuffer(1))).toThrow();
-    expect(() => encodeChunk(id, 0, new ArrayBuffer(CHUNK_SIZE + 1))).toThrow();
+    expect(() => encodeChunk(id, 0, new ArrayBuffer(MAX_FILE_CHUNK_BYTES + 1))).toThrow();
   });
   it("accepts valid metadata including zero-byte and exact-limit files", () => {
     expect(parseControlPacket(JSON.stringify(file))).toEqual(file);
@@ -50,11 +57,11 @@ describe("RTC wire protocol", () => {
       parseControlPacket(JSON.stringify({ ...file, size: 0 })),
     ).not.toBeNull();
     expect(
-      parseControlPacket(JSON.stringify({ ...file, size: MAX_FILE_SIZE })),
+      parseControlPacket(JSON.stringify({ ...file, size: MAX_BUFFERED_FILE_BYTES })),
     ).not.toBeNull();
-    expect(MAX_FILE_SIZE).toBe(256 * 1024 ** 2);
+    expect(MAX_BUFFERED_FILE_BYTES).toBe(256 * 1024 ** 2);
     expect(
-      parseControlPacket(JSON.stringify({ ...file, size: MAX_FILE_SIZE + 1 })),
+      parseControlPacket(JSON.stringify({ ...file, size: MAX_BUFFERED_FILE_BYTES + 1 })),
     ).not.toBeNull();
   });
   it.each([
@@ -103,10 +110,15 @@ describe("RTC wire protocol", () => {
       color: "#597461",
       avatar: "🌿",
       device: "Mac",
-      clientType: "web" as const,
+      clientType: "web" as const, ...localRuntime(true),
     };
     expect(isProfile(profile)).toBe(true);
-    expect(isProfile({ ...profile, clientType: "app" })).toBe(true);
+    expect(isProfile({ ...profile, clientType: "desktop", ...localRuntime(true) })).toBe(true);
+    expect(isProfile({ ...profile, clientType: "mobile", device: "Harmony" })).toBe(true);
+    expect(isProfile({ ...profile, clientType: "app" })).toBe(false);
+    expect(isProfile({ ...profile, device: undefined })).toBe(true);
+    for (const device of ["Windows", "iOS", "Browser", "", null])
+      expect(isProfile({ ...profile, device })).toBe(false);
     expect(isProfile({ ...profile, clientType: "unknown" })).toBe(false);
     expect(isProfile({ ...profile, clientType: undefined })).toBe(false);
     expect(isProfile({ ...profile, color: "url(javascript:alert(1))" })).toBe(
@@ -115,4 +127,9 @@ describe("RTC wire protocol", () => {
     expect(isProfile({ ...profile, name: "" })).toBe(false);
     expect(isProfile({ ...profile, bio: "x".repeat(161) })).toBe(false);
   });
+});
+
+it("does not accept connection probes as application messages", () => {
+  for (const type of ["peer-ping", "peer-pong"])
+    expect(parseControlPacket(JSON.stringify({ type, id }))).toBeNull();
 });

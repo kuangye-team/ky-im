@@ -1,6 +1,6 @@
 import { translateError } from "../localizeError";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   Download,
   File,
@@ -10,13 +10,17 @@ import {
   Info,
   LoaderCircle,
   RefreshCw,
+  RotateCcw,
   Trash2,
   X,
 } from "lucide-react";
 import type { ChatEngine } from "../core";
 import { LARGE_FILE_BYTES } from "../core/storage";
-import type { ChatSnapshot, Message, StorageInfo } from "../core/types";
+import type { ChatSnapshot, Message } from "../core/types";
+import { storageUsage } from "../core/storage/usage";
 import { Modal } from "./Modal";
+import { resetAppData } from "../reset-app-data";
+import { reloadApp } from "../reload";
 import { downloadAttachment, readableSize } from "./fileDownloads";
 import "./StoragePage.css";
 
@@ -35,72 +39,32 @@ export function StoragePage({
     " ",
   );
   const desktop = !!engine.storage.getStorageInfo;
-  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
+  const view = storageUsage(engine.storage);
+  const { result, loading, error: loadError } = useSyncExternalStore(view.subscribe, view.snapshot);
+  const storageInfo = result?.info;
+  const files = result?.files ?? [];
+  const [movedDirectory, setMovedDirectory] = useState("");
+  const directory = storageInfo?.directory ?? movedDirectory;
   const [moving, setMoving] = useState(false);
   const [directoryError, setDirectoryError] = useState("");
   const [pendingDirectory, setPendingDirectory] = useState<string | null>(null);
-  const [usage, setUsage] = useState<StorageEstimate | null>(null);
-  const [files, setFiles] = useState<Message[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-  const [refreshVersion, setRefreshVersion] = useState(0);
   const [filter, setFilter] = useState<"all" | "large">("all");
   const [downloading, setDownloading] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const resetInProgress = useRef(false);
+  const resetCancel = useRef<HTMLButtonElement>(null);
   const [pendingDeletion, setPendingDeletion] = useState<Message[] | null>(
     null,
   );
 
   useEffect(() => {
-    let current = true;
-    setLoading(true);
-    setLoadError("");
-    void engine.storage
-      .getFiles()
-      .then((nextFiles) => {
-        if (!current) return;
-        setFiles(nextFiles);
-        const ids = new Set(nextFiles.map((file) => file.id));
-        setSelected(
-          (previous) => new Set([...previous].filter((id) => ids.has(id))),
-        );
-      })
-      .catch(() => {
-        if (current) setLoadError("暂时无法读取文件，请重试。");
-      })
-      .finally(() => {
-        if (current) setLoading(false);
-      });
-    if (engine.storage.getStorageInfo) {
-      void engine.storage
-        .getStorageInfo()
-        .then((info) => {
-          if (current) {
-            setStorageInfo(info);
-            setUsage({ usage: info.usage });
-          }
-        })
-        .catch((error) => {
-          if (current)
-            setDirectoryError(
-              error instanceof Error ? error.message : String(error),
-            );
-        });
-    } else
-      void navigator.storage
-        ?.estimate?.()
-        .then((estimate) => {
-          if (current) setUsage(estimate);
-        })
-        .catch(() => {
-          if (current) setUsage(null);
-        });
-    return () => {
-      current = false;
-    };
-  }, [engine, snap.messages, snap.conversations, refreshVersion]);
+    void view.refresh();
+  }, [view]);
 
   const downloadFile = async (file: Message) => {
     if (downloading) return;
@@ -146,7 +110,21 @@ export function StoragePage({
   const totalSize = files.reduce((total, file) => total + (file.size || 0), 0);
   const allSelected =
     visibleFiles.length > 0 && selectedFiles.length === visibleFiles.length;
-  const busy = loading || deleting || moving || !!downloading || !!loadError;
+  const busy = loading || deleting || moving || resetting || !!downloading;
+  const reset = async () => {
+    if (resetInProgress.current) return;
+    resetInProgress.current = true;
+    setResetting(true);
+    setResetError("");
+    try {
+      await resetAppData(engine);
+      await reloadApp();
+    } catch (error) {
+      setResetError(error instanceof Error ? error.message : "重置未完成，请重试");
+      resetInProgress.current = false;
+      setResetting(false);
+    }
+  };
   const confirmDeletion = (targets: Message[]) => {
     setDeleteError("");
     setPendingDeletion(targets);
@@ -158,12 +136,10 @@ export function StoragePage({
     try {
       const ids = new Set(pendingDeletion.map((file) => file.id));
       await engine.deleteMessages([...ids]);
-      setFiles((previous) => previous.filter((file) => !ids.has(file.id)));
       setSelected(
         (previous) => new Set([...previous].filter((id) => !ids.has(id))),
       );
       setPendingDeletion(null);
-      setRefreshVersion((value) => value + 1);
       onNotice(t("已清理 {{count}} 个文件及对应消息", { count: ids.size }));
     } catch (error) {
       setDeleteError(
@@ -178,13 +154,12 @@ export function StoragePage({
     setDirectoryError("");
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
-      const directory = await open({
+      const chosen = await open({
         directory: true,
         multiple: false,
-        defaultPath: storageInfo?.directory,
+        defaultPath: directory || undefined,
       });
-      if (directory && directory !== storageInfo?.directory)
-        setPendingDirectory(directory);
+      if (chosen && chosen !== directory) setPendingDirectory(chosen);
     } catch (error) {
       setDirectoryError(error instanceof Error ? error.message : String(error));
     }
@@ -195,17 +170,16 @@ export function StoragePage({
     setDirectoryError("");
     try {
       const info = await engine.moveStorage(pendingDirectory);
-      setStorageInfo(info);
-      setUsage({ usage: info.usage });
+      setMovedDirectory(info.directory);
+      setSelected(new Set());
       setPendingDirectory(null);
       onNotice(
         t(
           info.cleanupWarning
-            ? "数据已迁移，原目录未能清理，可手动删除原目录。"
+            ? "文件已迁移，原位置仍有部分文件或缓存。"
             : "数据存储目录已迁移",
         ),
       );
-      setRefreshVersion((value) => value + 1);
     } catch (error) {
       setDirectoryError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -234,18 +208,18 @@ export function StoragePage({
             </h2>
             <button
               className="secondary-button"
-              disabled={busy || engine.hasPendingTransfers() || !storageInfo}
+              disabled={busy || engine.hasPendingTransfers() || !directory}
               onClick={() => void chooseDirectory()}
             >
               {t("修改目录")}
             </button>
           </div>
           <p className="storage-directory-path">
-            {storageInfo?.directory || t("正在读取文件…")}
+            {directory || t(loading ? "正在读取文件…" : "暂不可用")}
           </p>
           <p>
             {t(
-              "接收中的文件暂存在缓存目录，完成后自动移入文件目录。修改目录会迁移全部聊天记录和文件。",
+              "修改位置会移动已保存的文件和缓存，聊天记录仍保存在本机。",
             )}
           </p>
           {storageInfo?.cleanupPending && (
@@ -268,10 +242,17 @@ export function StoragePage({
         aria-label={t("存储统计")}
       >
         <div>
-          <span>{t("已用空间")}</span>
+          <span className="storage-usage-label">
+            {t(desktop ? "已用空间" : "本站总占用")}
+            <button type="button" className="storage-sync" aria-label={t("刷新存储用量")}
+              title={t("刷新存储用量")} aria-busy={loading} disabled={loading || moving || resetting || deleting}
+              onClick={() => void view.refresh(true)}>
+              <RefreshCw size={14} className={loading ? "history-spinner" : undefined} aria-hidden="true" />
+            </button>
+          </span>
           <strong>
-            {usage?.usage !== undefined
-              ? readableSize(usage.usage)
+            {result?.usage !== undefined
+              ? readableSize(result.usage)
               : t("暂不可用")}
           </strong>
           <small className="metric-detail">
@@ -291,21 +272,21 @@ export function StoragePage({
         <div>
           <span>{t("文件数")}</span>
           <strong>
-            {loadError ? "—" : loading ? "…" : files.length}
+            {result ? files.length : loading ? "…" : "—"}
             <small> {t("个")}</small>
           </strong>
           <small className="metric-detail">
-            {loadError ? "—" : loading ? "…" : readableSize(totalSize)}
+            {result ? readableSize(totalSize) : loading ? "…" : "—"}
           </small>
         </div>
         <div>
           <span>{t("大文件数")}</span>
           <strong>
-            {loadError ? "—" : loading ? "…" : largeFiles.length}
+            {result ? largeFiles.length : loading ? "…" : "—"}
             <small> {t("个")}</small>
           </strong>
           <small className="metric-detail">
-            {loadError ? "—" : loading ? "…" : readableSize(largeFilesSize)}
+            {result ? readableSize(largeFilesSize) : loading ? "…" : "—"}
           </small>
         </div>
       </div>
@@ -323,14 +304,24 @@ export function StoragePage({
             </h2>
             <p>{t("已保存的图片和文件按大小排序，下载后可留存一份。")}</p>
           </div>
-          <button
-            className="danger-outline"
-            disabled={busy || !largeFiles.length}
-            onClick={() => confirmDeletion(largeFiles)}
-          >
-            <Trash2 size={15} aria-hidden="true" />
-            {t("清理全部大文件")}
-          </button>
+          <div className="storage-manager-actions">
+            <button
+              className="danger-outline"
+              disabled={resetting || moving || deleting || !!downloading || !engine.storage.resetData}
+              onClick={() => { setResetError(""); setResetOpen(true); }}
+            >
+              <RotateCcw size={15} aria-hidden="true" />
+              {t("重置应用数据")}
+            </button>
+            <button
+              className="danger-outline"
+              disabled={busy || !largeFiles.length}
+              onClick={() => confirmDeletion(largeFiles)}
+            >
+              <Trash2 size={15} aria-hidden="true" />
+              {t("清理全部大文件")}
+            </button>
+          </div>
         </div>
         <div
           className="storage-file-filters"
@@ -360,30 +351,20 @@ export function StoragePage({
           </span>
         </div>
 
-        {loadError ? (
-          <div className="large-files-empty" role="alert">
-            <p>{t(loadError)}</p>
-            <button
-              className="secondary-button"
-              onClick={() => setRefreshVersion((value) => value + 1)}
-            >
-              <RefreshCw size={14} />
-              {t("重新加载")}
-            </button>
-          </div>
-        ) : !visibleFiles.length ? (
+        {loadError && <p className="large-files-error" role="alert">{t("暂时无法读取存储用量，请重试。")}</p>}
+        {!result && !loading ? null : !visibleFiles.length ? (
           <div className="large-files-empty" role="status">
-            {loading ? (
+            {loading && !result ? (
               <LoaderCircle size={27} className="history-spinner" />
             ) : (
               <FolderOpen size={30} />
             )}
             <strong>
-              {loading
+              {loading && !result
                 ? t("正在读取文件…")
                 : t(filter === "large" ? "还没有大文件" : "还没有保存的文件")}
             </strong>
-            {!loading && (
+            {(!loading || result) && (
               <p>
                 {filter === "large"
                   ? t("这里会列出 {{size}} 及以上的本地图片和文件。", {
@@ -537,6 +518,30 @@ export function StoragePage({
       </p>
 
       <Modal
+        open={resetOpen}
+        onClose={() => { if (!resetting) setResetOpen(false); }}
+        onOpenAutoFocus={() => resetCancel.current?.focus()}
+        title={t("重置应用数据？")}
+        description={t(desktop
+          ? "这会清除这台设备上新版和旧版蜂鸟的个人资料、蜂鸟号、聊天记录和设置，以及两版最后存储位置的文件和缓存，无法恢复。"
+          : "这会清除此浏览器中本站新版和旧版蜂鸟的个人资料、蜂鸟号、聊天记录、文件和设置，无法恢复。")}
+      >
+        <p className="large-files-confirm-size">
+          {t("重置后将重新打开应用并生成新的蜂鸟号。未完成的传输会中断，对方的数据不受影响。")}
+        </p>
+        {desktop && <p className="large-files-confirm-size">{t("重置后将使用默认存储位置。你另存的文件会保留。")}</p>}
+        {resetError && <p className="large-files-error" role="alert">{t(translateError(resetError))}</p>}
+        <div className="modal-actions">
+          <button ref={resetCancel} className="secondary-button" disabled={resetting} onClick={() => setResetOpen(false)}>
+            <X size={15} aria-hidden="true" />{t("取消")}
+          </button>
+          <button className="danger-button" disabled={resetting} onClick={() => void reset()}>
+            {resetting ? <LoaderCircle size={15} className="history-spinner" aria-hidden="true" /> : <RotateCcw size={15} aria-hidden="true" />}
+            {t(resetting ? "正在重置…" : "确认重置")}
+          </button>
+        </div>
+      </Modal>
+      <Modal
         open={!!pendingDirectory}
         onClose={() => {
           if (!moving) {
@@ -546,7 +551,7 @@ export function StoragePage({
         }}
         title={t("迁移数据存储目录")}
         description={t(
-          "请选择空文件夹。迁移完成后会切换到新目录并清理原目录；迁移期间请勿退出应用。",
+          "请选择空文件夹，或切回默认位置。迁移期间请保持应用打开。从自选位置迁出时会保留原文件副本。",
         )}
       >
         <p className="storage-directory-path">{pendingDirectory}</p>
