@@ -1,3 +1,4 @@
+import { isNative } from "../platform";
 import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
@@ -38,7 +39,7 @@ function ExternalLinkTo({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  if (import.meta.env.VITE_DESKTOP && licenseText !== undefined) {
+  if (isNative() && licenseText !== undefined) {
     return (
       <>
         <a
@@ -103,13 +104,16 @@ export function LegalLinks({
 function LegalHeading({
   title,
   subtitle,
+  phone,
   privacy = false,
 }: {
   title: string;
   subtitle: string;
+  phone: boolean;
   privacy?: boolean;
 }) {
   const { t } = useTranslation();
+  if (phone) return <p className="legal-heading legal-intro">{subtitle}</p>;
   return (
     <header className="legal-heading">
       <Link className="legal-back" to="/">
@@ -144,8 +148,10 @@ function LegalEmail({ onNotice }: { onNotice: (message: string) => void }) {
 
 export function LicensesPage({
   onNotice,
+  phone,
 }: {
   onNotice: (message: string) => void;
+  phone: boolean;
 }) {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<
@@ -221,6 +227,7 @@ export function LicensesPage({
   return (
     <article className="legal-page">
       <LegalHeading
+        phone={phone}
         title={t("开源许可")}
         subtitle={t(
           "本项目离不开开源社区的慷慨奉献，衷心感谢本项目所依赖的所有开源项目及其背后的贡献者！",
@@ -267,7 +274,7 @@ export function LicensesPage({
               className="legal-download"
               href={noticesUrl}
               download="THIRD-PARTY-NOTICES.txt"
-              onClick={import.meta.env.VITE_DESKTOP ? (event) => {
+              onClick={isNative() ? (event) => {
                 event.preventDefault();
                 void fetch(noticesUrl)
                   .then((response) => response.blob())
@@ -331,13 +338,16 @@ export function LicensesPage({
 
 export function PrivacyPage({
   onNotice,
+  phone,
 }: {
   onNotice: (message: string) => void;
+  phone: boolean;
 }) {
   const { t } = useTranslation();
   return (
     <article className="legal-page">
       <LegalHeading
+        phone={phone}
         privacy
         title={t("隐私协议")}
         subtitle={t("了解你的资料、聊天和文件如何处理。更新于 {{date}}。", {
@@ -349,14 +359,14 @@ export function PrivacyPage({
         <div>
           <strong>
             {t(
-              import.meta.env.VITE_DESKTOP
+              isNative()
                 ? "聊天直达对方，记录留在自己的设备。"
                 : "聊天直达对方，记录留在自己的浏览器。",
             )}
           </strong>
           <p>
             {t(
-              import.meta.env.VITE_DESKTOP
+              isNative()
                 ? "客户端可通过在线服务器或本地网络发现设备，优先直接传输；双方启用中转且直连失败时，由支持中转的服务器转送。快速直连目前不加密，请在可信网络中使用。"
                 : "无需注册账号。文字、图片和文件优先在设备间直传。双方启用中转且直连失败时，支持中转的服务器会转送内容，但不会保存。",
             )}
@@ -368,28 +378,28 @@ export function PrivacyPage({
         <p>{t("运行日志保存在本机，包含连接时间、设备标识、连接地址和收发结果，不记录聊天正文和文件内容。最多保留最近 7 天的 2000 条记录，可在运行日志中导出或清空，不会自动上传。")}</p>
         <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "客户端使用 SQLite 保存资料、联系人和聊天记录，附件保存在本地数据目录。语言、网络配置与在线状态也保存在当前设备。"
               : "你的昵称、头像、个性签名、设备标识、联系人备注、聊天记录和附件保存在当前浏览器中，用来展示资料、识别联系人和查看历史消息。语言与在线状态的选择也会保存在此浏览器。",
           )}
         </p>
         <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "这些内容不会自动同步到其他设备。可在“存储管理”中查看和迁移数据目录，请为重要文件保留备份。"
               : "这些内容不会自动同步到其他设备，会保留到你主动删除或浏览器清理网站数据时。无痕浏览、空间不足或清理浏览器数据可能导致记录丢失，请提前下载重要文件。",
           )}
         </p>
         <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "接收文件默认需要确认。自动接收的文件和文件夹保存在应用数据目录。接收文件时选择另存为，文件会保存在所选位置，聊天只保留传输记录。"
               : "接收文件默认需要确认。自动接收的文件和文件夹保存在当前浏览器中，受浏览器可用空间限制。支持选择保存位置的浏览器还可在接收文件时另存为，聊天只保留传输记录。",
           )}
         </p>
         <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "客户端直接传输文件夹并保留目录结构。已接收的文件、文件夹及发送时保存的文件副本由应用管理，删除对应聊天记录也会删除这些副本；另存为到其他位置的内容不受影响。"
               : "文件夹传输会保留目录结构。删除聊天记录也会删除浏览器中保存的对应文件和文件夹；已下载到其他位置的副本不受影响。不支持保存目录的浏览器会将文件夹导出为 ZIP。",
           )}
@@ -399,7 +409,7 @@ export function PrivacyPage({
         <h2>{t("2. 发现朋友与建立连接")}</h2>
         <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "客户端在线时会在本地网络发布设备标识、昵称、头像、个性签名、设备名称和连接地址，帮助附近设备发现彼此。可发现你的设备也能看到这些公开资料。"
               : "打开网站并保持在线时，连接服务会处理你的网络地址、设备标识、蜂鸟号、昵称、头像、个性签名、设备名称和连接状态，帮助同一网络或通过蜂鸟号查找的设备发现彼此。可发现你的设备也能看到你的公开资料，请勿填写不想分享的信息。",
           )}
@@ -455,7 +465,7 @@ export function PrivacyPage({
         </p>
         <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "清空聊天记录会删除本机存储中的消息、附件和联系人备注，保留个人资料。另存为的文件及对方的副本需分别管理。"
               : "清空聊天记录会移除当前浏览器中的消息、附件和联系人备注，但保留你的个人资料。若要移除全部本地资料与设置，可在浏览器设置中清除本站的网站数据。下载到设备上的文件需自行管理，对方保存的内容不受影响。",
           )}

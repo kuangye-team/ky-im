@@ -14,41 +14,13 @@ export function OwnNumber({
   numericId?: string;
   compact?: boolean;
   onNotice: (message: string) => void;
-  onRefresh: () => Promise<void>;
+  onRefresh?: () => Promise<void>;
 }) {
   const { t } = useTranslation("components");
-  const button = useRef<HTMLButtonElement>(null);
-  const [copied, setCopied] = useState(false);
-  const [copying, setCopying] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const refreshPending = useRef(false);
-
-  useEffect(() => setCopied(false), [numericId]);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 2000);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  const copy = async () => {
-    if (!numericId || copying) return;
-    setCopying(true);
-    try {
-      await copyText(
-        numericId,
-        button.current?.closest<HTMLElement>('[role="dialog"]'),
-      );
-      setCopied(true);
-      onNotice(t("蜂鸟号已复制"));
-    } catch {
-      setCopied(false);
-      onNotice(t("暂时无法复制，请选中蜂鸟号后手动复制"));
-    } finally {
-      setCopying(false);
-    }
-  };
   const refresh = async () => {
-    if (refreshPending.current) return;
+    if (!onRefresh || refreshPending.current) return;
     refreshPending.current = true;
     setRefreshing(true);
     try {
@@ -76,19 +48,8 @@ export function OwnNumber({
         >
           {numericId || "—"}
         </output>
-        <button
-          ref={button}
-          type="button"
-          className="icon-button copy-number-button"
-          aria-label={t("复制我的蜂鸟号")}
-          title={copied ? t("已复制") : t("复制蜂鸟号")}
-          disabled={!numericId || refreshing}
-          aria-busy={copying}
-          onClick={() => void copy()}
-        >
-          {copied ? <Check size={16} /> : <Copy size={16} />}
-        </button>
-        <button
+        <CopyNumberButton key={numericId} numericId={numericId} disabled={refreshing} label={t("复制我的蜂鸟号")} onNotice={onNotice} />
+        {onRefresh && <button
           type="button"
           className="icon-button refresh-number-button"
           aria-label={t("刷新我的蜂鸟号")}
@@ -101,8 +62,41 @@ export function OwnNumber({
             size={16}
             className={refreshing ? "spinning" : undefined}
           />
-        </button>
+        </button>}
       </span>
     </div>
   );
+}
+
+export function CopyNumberButton({ numericId, label, disabled, onNotice }: {
+  numericId?: string; label?: string; disabled?: boolean; onNotice: (message: string) => void;
+}) {
+  const { t } = useTranslation("components");
+  const [copied, setCopied] = useState(false);
+  const [copying, setCopying] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return <button type="button" className="icon-button copy-number-button"
+    aria-label={label ?? t("复制蜂鸟号")} title={t(copied ? "已复制" : "复制蜂鸟号")}
+    disabled={!numericId || disabled} aria-busy={copying}
+    onClick={async event => {
+      if (!numericId || copying) return;
+      setCopying(true);
+      try {
+        await copyText(numericId, event.currentTarget.closest<HTMLElement>('[role="dialog"]'));
+        setCopied(true);
+        onNotice(t("蜂鸟号已复制"));
+      } catch {
+        setCopied(false);
+        onNotice(t("暂时无法复制，请选中蜂鸟号后手动复制"));
+      } finally {
+        setCopying(false);
+      }
+    }}>
+    {copied ? <Check size={16} /> : <Copy size={16} />}
+  </button>;
 }

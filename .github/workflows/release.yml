@@ -1,4 +1,4 @@
-name: Publish server and desktop releases
+name: Publish server and client releases
 
 on:
   push:
@@ -291,8 +291,62 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  android:
+    needs: frontend
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+      - uses: android-actions/setup-android@v3
+      - name: Install Android platforms and NDK
+        run: |
+          sdkmanager "platforms;android-36" "platforms;android-37.0" "build-tools;36.0.0" "ndk;30.0.16248370"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app -> ../temp/cache/cargo
+          key: android-arm
+      - run: npm ci --ignore-scripts && npm --prefix ssg ci
+      - name: Build and verify signed universal APK
+        env:
+          ANDROID_KEY_BASE64: ${{ secrets.ANDROID_KEY_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_SHA256: ${{ vars.ANDROID_KEY_SHA256 }}
+          VITE_API_LATEST: ${{ secrets.VITE_API_LATEST || vars.VITE_API_LATEST || '/api/latest' }}
+          VITE_SIGNAL_URL: ${{ secrets.VITE_SIGNAL_URL || vars.VITE_SIGNAL_URL }}
+          VITE_API_AUTH: ${{ secrets.VITE_API_AUTH || vars.VITE_API_AUTH }}
+          VITE_ROOM: ${{ secrets.VITE_ROOM || vars.VITE_ROOM || 'local' }}
+          VITE_WEB_URL: ${{ vars.VITE_WEB_URL }}
+        run: |
+          set -eu
+          : "${ANDROID_KEY_SHA256:?Configure the release certificate SHA-256}"
+          npm run android:build -- --ci
+          apk="app/android-dist/ky-im-${RELEASE_TAG#v}-android-arm.apk"
+          python3 scripts/verify-android.py "$apk" "$RELEASE_TAG" --certificate "$ANDROID_KEY_SHA256"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-arm
+          path: |
+            app/android-dist/*-android-arm.apk
+            app/android-dist/*-android-arm.apk.sha256
+          if-no-files-found: error
+          retention-days: 7
+
   publish:
-    needs: [frontend, native, desktop]
+    needs: [frontend, native, desktop, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -318,6 +372,10 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: app/dist/
+      - uses: actions/download-artifact@v8
+        with:
+          name: android-arm
+          path: app/android-dist/
       - name: Package release
         env:
           IMAGE_NAME: ${{ secrets.DOCKERHUB_IMAGE || 'kyteam/ky-im' }}
@@ -338,10 +396,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           archive="artifacts/ky-im-${RELEASE_TAG#v}-bin.tar.gz"
+          cp "app/android-dist/ky-im-${RELEASE_TAG#v}-android-arm.apk" app/android-dist/ky-im-android-arm.apk
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* --clobber
+            gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* app/android-dist/* --clobber
           else
-            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* \
+            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* app/android-dist/* \
               --verify-tag --title "ky-im ${RELEASE_TAG#v}" --generate-notes --latest=false
           fi
       - name: Mark release as latest

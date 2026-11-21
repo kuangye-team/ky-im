@@ -1,3 +1,4 @@
+import { isNative } from "./platform";
 import { registerSW } from "virtual:pwa-register";
 
 type UpdateState = {
@@ -67,7 +68,7 @@ function reloadIfAllowed() {
 }
 
 export function startAppUpdates() {
-  if (import.meta.env.VITE_DESKTOP || started || !("serviceWorker" in navigator)) return;
+  if (isNative() || started || !("serviceWorker" in navigator)) return;
   started = true;
   const onActivated = () => {
     activatedUpdate = true;

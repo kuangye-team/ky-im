@@ -1,5 +1,44 @@
 /** English UI copy. Chinese source phrases are the fallback keys. */
 export const appEnglish: Record<string, string> = {
+  "查找附近设备": "Find nearby devices",
+  "通过网络查找": "Find devices online",
+  "设备": "Devices",
+  "邀请": "Invite",
+  "偏好": "Preferences",
+  "数据与连接": "Data and connections",
+  "关于与帮助": "About and help",
+  "存储空间": "Storage space",
+  "连接设置": "Connection settings",
+  "输入蜂鸟号": "Enter a Hummingbird number",
+  "还没有聊天": "No chats yet",
+  "找到另一台设备，就能聊天和传文件。": "Find a device to chat or share files.",
+  "找设备": "Find devices",
+  "还没有发现设备": "No devices found yet",
+  "在另一台设备上打开蜂鸟。": "Open Hummingbird on your other device.",
+  "草稿": "Draft",
+  "你当前离线": "You’re offline",
+  "连接已断开": "Disconnected",
+  "恢复在线": "Go online",
+  "{{count}} 条未读": "{{count}} unread",
+  "未找到这段聊天": "Chat unavailable",
+  "返回我的": "Back to Me",
+  "有新消息": "New messages",
+  "写消息…": "Write a message…",
+  "添加内容": "Add to message",
+  "消息操作": "Message actions",
+  "聊天操作": "Chat actions",
+  "查找设备": "Find devices",
+  "连接服务器": "Connection servers",
+  "用蜂鸟号找到朋友。双方开启中转后，直连失败也能收发。": "Find friends by number. If both of you enable relay, you can still chat and share files when a direct connection fails.",
+  "先测试是否支持中转": "Test for relay support",
+  "直连辅助": "Direct connection helpers",
+  "帮助不同网络的设备直连。": "Connect devices on different networks.",
+  "中转服务器": "Relay servers",
+  "直连失败时帮你转发消息和文件。": "Forward messages and files when a direct connection fails.",
+  "文件": "File",
+  "选择": "Select",
+  "删除 {{count}} 项（{{size}}）": "Delete {{count}} ({{size}})",
+  "关闭": "Close",
   "准备发送附件": "Preparing to send an attachment",
   "连接等待超时，正在重新尝试": "Connection timed out. Retrying…",
   "对方暂时没有响应，正在重新连接": "The other device is not responding. Reconnecting…",
@@ -13,6 +52,7 @@ export const appEnglish: Record<string, string> = {
   "离线 · 正在尝试重新连接": "Offline · Trying to reconnect",
   "连接处理失败": "Connection processing failed",
   "运行日志": "Activity logs",
+  "日志选项": "Log options",
   "查看连接日志": "View connection logs",
   "仅保存在本机，保留最近 7 天、最多 2000 条。不记录聊天正文和文件内容。": "Saved only on this device for up to 7 days, with a limit of 2,000 entries. Message text and file contents are not recorded.",
   "查看范围": "Scope",
@@ -113,14 +153,15 @@ export const appEnglish: Record<string, string> = {
   "设备查找遇到问题": "Discovery encountered a problem",
   "连接服务返回提醒": "Connection service returned a warning",
   "运行日志保存在本机，包含连接时间、设备标识、连接地址和收发结果，不记录聊天正文和文件内容。最多保留最近 7 天的 2000 条记录，可在运行日志中导出或清空，不会自动上传。": "Activity logs stay on this device and include connection times, device identifiers, connection addresses, and transfer results. Message text and file contents are not recorded. Up to 2,000 entries from the last 7 days are retained. Logs can be exported or cleared and are never uploaded automatically.",
-  打开客户端: "Open desktop app",
-  打开WEB端: "Open Web app",
+  打开客户端: "Open app",
+  打开网页版: "Open web app",
   下载蜂鸟客户端: "Download Hummingbird",
   "让聊天与分享，随时在身边。": "Keep your conversations close.",
   "正在获取下载地址…": "Getting downloads…",
   "下载地址暂时无法获取，请稍后重试。": "Downloads are unavailable. Please try again.",
   "Apple 芯片与 Intel": "Apple silicon & Intel",
   适合此设备: "For this device",
+  "客户端支持 Android、macOS 和 Windows。": "Available for Android, macOS and Windows.",
   "客户端支持 macOS 和 Windows。": "The desktop app is available for macOS and Windows.",
   "若未打开，请先下载并安装客户端。": "If the app didn’t open, download and install it first.",
   "已安装？点击上方按钮即可打开。": "Already installed? Use the button above to open it.",
@@ -179,6 +220,8 @@ export const appEnglish: Record<string, string> = {
   尚未检查更新: "Not checked yet",
   "可更新至 {{version}}": "Update to {{version}}",
   检查更新: "Check for updates",
+  下载新版本: "Download update",
+  "本次发布未提供 Android 安装包。": "This release has no Android download.",
   前往更新: "View release",
   更新并重启: "Update and restart",
   "暂时无法检查更新，请稍后重试。":
@@ -198,28 +241,18 @@ export const appEnglish: Record<string, string> = {
   "取消后可以继续使用，稍后再更新。": "Cancel to keep using the app and update later.",
   "安装即将完成，请稍候。": "Installation is almost complete. Please wait.",
   系统配置: "System settings",
-  "选择怎么找到其他设备，以及怎么传送消息和文件。设置只保存在这台设备上。":
-    "Choose how to find devices and send messages and files. Settings are saved on this device only.",
+  "允许查找附近设备": "Allow nearby discovery",
+  "请在系统权限设置中允许蜂鸟查找附近设备": "Allow Hummingbird to find nearby devices in your system permissions.",
+  "设置只保存在这台设备上。": "Settings are saved on this device only.",
   怎么找到其他设备: "Find other devices",
-  "可以同时选择，每组至少保留一种。同一台设备只会显示一次。":
-    "You can use both options. Keep at least one in each group. Each device appears only once.",
+  "至少选择一种查找方式。同一台设备只会显示一次。":
+    "Choose at least one discovery method. Each device appears only once.",
   "在线查找（中心信令）": "Online discovery (signaling)",
   "通过连接服务器找到设备，也可以用蜂鸟号联系朋友。":
     "Find devices with a connection server, or use a Hummingbird number to find friends.",
   "附近查找（mDNS）": "Nearby discovery (mDNS)",
   "自动寻找同一 Wi-Fi 或有线网络里的客户端，没有互联网也能用。":
     "Find apps on the same Wi-Fi or wired network, even without internet access.",
-  怎么传送消息和文件: "Send messages and files",
-  "同时开启时，先尝试快速直连；连接不成功，再尝试兼容传输。":
-    "When both are on, try a direct connection first, then try compatible transfer if it cannot connect.",
-  "快速直连": "Direct transfer",
-  "同一网络内的客户端和支持的浏览器可以直接收发。":
-    "Desktop apps and supported browsers can share directly on the same network.",
-  "兼容传输（WebRTC）": "Compatible transfer (WebRTC)",
-  "支持网页与客户端互传，能否连通取决于双方网络。":
-    "Share between browsers and apps. Connectivity depends on both networks.",
-  "网页版通过服务器查找设备，并自动选择可用的传输方式。":
-    "The browser finds devices online and automatically selects an available connection.",
   服务器列表: "Servers",
   "连接服务器帮助设备找到彼此。双方都开启同一服务器的中转后，直连失败时可由该服务器转送消息和文件。":
     "Connection servers help devices find each other. If both devices enable relay on the same server, it can forward messages and files when direct connections fail.",
@@ -242,14 +275,16 @@ export const appEnglish: Record<string, string> = {
   "设置生效时会重新连接。正在传输内容时，请完成后再修改。":
     "Applying settings reconnects your device. Finish any transfers before making changes.",
   "设置已生效。": "Settings applied.",
+  代理设置: "Proxy settings",
+  跟随系统: "Use system settings",
+  不使用代理: "No proxy",
+  "选择蜂鸟连接服务器时使用的方式。": "Choose how Hummingbird connects to its servers.",
   "正在应用设置…": "Applying settings…",
   "还有内容正在传输，请完成后再修改设置":
     "Sharing is in progress. Finish before changing settings.",
   "配置格式不正确，请重新设置": "Invalid settings. Please check your options.",
   请至少选择一种查找设备的方式: "Select at least one way to find devices.",
-  请至少选择一种传输方式: "Select at least one transfer method.",
-  "网页版使用在线查找和兼容传输，其他方式请使用客户端":
-    "Browsers use online discovery and compatible transfer. Use the app for other options.",
+  "网页版仅支持在线查找设备": "The browser can only find devices online.",
   "服务器信息不完整，请检查名称和地址":
     "Please check the server name and address.",
   "请输入完整的 ws:// 或 wss:// 服务器地址":
@@ -306,6 +341,7 @@ export const appEnglish: Record<string, string> = {
   仅保留传输记录: "Transfer record only",
   网站更新: "App update",
   蜂鸟有新版本了: "A new version of Hummingbird is ready",
+  有新版本: "Update available",
   "更新后即可使用，页面将重新加载。":
     "Update to start using it. This page will reload.",
   更新并刷新: "Update and reload",
@@ -475,6 +511,8 @@ export const appEnglish: Record<string, string> = {
   "离线 · 历史记录可查看": "Offline · History available",
   搜索聊天记录: "Search chat history",
   查看联系人资料: "View contact details",
+  查看聊天文件: "View chat files",
+  聊天文件: "Chat files",
   搜索聊天内容: "Search messages",
   搜索这段聊天中的文字或文件: "Search messages or files in this chat",
   "{{count}} 条": "{{count}} results",
@@ -529,7 +567,6 @@ export const appEnglish: Record<string, string> = {
   无法读取附件: "Could not read the attachment.",
   分享的文件会出现在这里: "Shared files will appear here",
   暂无蜂鸟号: "No number yet",
-  连接此分组: "Connect to this group",
   邀请地址已复制: "Invite link copied.",
   请选中地址后手动复制: "Select the address and copy it manually.",
   "请输入 6 位蜂鸟号，第一位不能是 0":
@@ -537,8 +574,9 @@ export const appEnglish: Record<string, string> = {
   "请先切换为在线，连接后再查找设备":
     "Go online and connect before searching for devices.",
   "连接未成功，请重试": "Could not connect. Please try again.",
-  "分享网址和蜂鸟号，找到彼此的在线设备。":
-    "Share the link and your Hummingbird number to find each other's devices.",
+  "让朋友扫码或打开下方网址，再用蜂鸟号找到你。":
+    "Ask a friend to scan the code or open the link, then find you using your Hummingbird number.",
+  访问地址二维码: "QR code for the invite link",
   访问地址: "Website address",
   复制邀请地址: "Copy invite link",
   已复制: "Copied",
@@ -571,7 +609,5 @@ export const appEnglish: Record<string, string> = {
   选填: "Optional",
   分享一点此刻的心情: "Share a little about your day",
   "保存中…": "Saving…",
-  保存资料: "Save profile",
-  "请勿填写不想分享的信息。": "Only include information you want to share.",
   "蜂鸟-{{value}}-聊天记录.json": "Hummingbird-{{value}}-chat-history.json",
 };

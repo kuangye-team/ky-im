@@ -108,6 +108,7 @@ export async function chooseFileDestination(
 export async function chooseIncomingFileDestination(storage: StorageAdapter, message: Message) {
   const name = message.fileName || "附件";
   if (storage.createExternalFileDestination) {
+    if (import.meta.env.VITE_ANDROID) return storage.createExternalFileDestination(message, "");
     const { save } = await import("@tauri-apps/plugin-dialog");
     const path = await save({ defaultPath: name.replace(/[/\\\\]/g, "_") });
     if (!path) throw new DOMException("Cancelled", "AbortError");

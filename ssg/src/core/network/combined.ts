@@ -13,6 +13,7 @@ type Source = {
   retry?: ReturnType<typeof setTimeout>;
   lastSeen: number;
   attempts: number;
+  openedAfterNetworkChange?: boolean;
   welcomedAt?: number;
   timeout?: ReturnType<typeof setTimeout>;
   probe?: ReturnType<typeof setTimeout>;
@@ -65,12 +66,10 @@ class CombinedSession implements DiscoverySession {
   private primary?: Source;
   private heartbeat?: ReturnType<typeof setInterval>;
   private tickAt = Date.now();
-  private readonly onOnline = () => this.resume();
   private readonly onVisible = () => {
     if (document.visibilityState === "visible") this.resume();
   };
   constructor(adapters: DiscoveryAdapter[]) {
-    if (typeof window !== "undefined") window.addEventListener("online", this.onOnline);
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisible);
     this.sources = adapters.map((adapter) => ({
       adapter,
@@ -89,11 +88,12 @@ class CombinedSession implements DiscoverySession {
     if (this.readyState !== 3)
       this.onmessage?.({ data: JSON.stringify(packet) });
   }
-  private open(source: Source) {
+  private open(source: Source, afterNetworkChange = false) {
     if (this.readyState === 3) return;
     try {
       const session = source.adapter.open();
       source.session = session;
+      source.openedAfterNetworkChange = afterNetworkChange;
       source.lastSeen = Date.now();
       this.connectionDeadline(source, session, SIGNALING_CONFIG.openTimeoutMs);
       session.onactivity = () => { if (source.session === session) this.receivedTraffic(source); };
@@ -454,18 +454,29 @@ class CombinedSession implements DiscoverySession {
     try { session.send('{"type":"ping"}'); }
     catch { this.lost(source, session); }
   }
-  resume() {
+  recheckNetwork() {
+    this.resume(true);
+  }
+  private resume(networkChanged = false) {
     if (this.readyState === 3 || !this.join) return;
     this.tickAt = Date.now();
     for (const source of this.sources) {
+      if (networkChanged && !source.adapter.usesBrowserNetworkStatus && source.session) continue;
+      if (networkChanged) {
+        if (source.session && (source.session.readyState > 1 || (!source.joined && !source.openedAfterNetworkChange)))
+          this.lost(source);
+        source.attempts = 0;
+      }
       if (!source.session) {
         clearTimeout(source.retry);
         source.retry = undefined;
-        this.open(source);
+        this.open(source, networkChanged);
       } else if (source.joined) {
-        if (this.tickAt - source.lastSeen >= SIGNALING_CONFIG.heartbeatIntervalMs) this.probe(source);
+        if (!source.probe && (networkChanged || this.tickAt - source.lastSeen >= SIGNALING_CONFIG.heartbeatIntervalMs))
+          this.probe(source);
+      } else if (!networkChanged) {
+        this.connectionDeadline(source, source.session, SIGNALING_CONFIG.joinTimeoutMs);
       }
-      else this.connectionDeadline(source, source.session, SIGNALING_CONFIG.joinTimeoutMs);
     }
   }
   private check() {
@@ -487,7 +498,6 @@ class CombinedSession implements DiscoverySession {
     if (this.readyState === 3) return;
     this.readyState = 3;
     clearInterval(this.heartbeat);
-    if (typeof window !== "undefined") window.removeEventListener("online", this.onOnline);
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", this.onVisible);
     for (const lookup of this.lookups.values()) clearTimeout(lookup.timer);
     this.lookups.clear();

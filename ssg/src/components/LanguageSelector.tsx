@@ -5,7 +5,7 @@ import { LANGUAGE_CONFIG } from "../config";
 import { setLanguagePreference, useLanguagePreference } from "../i18n";
 import { isLanguagePreference } from "../i18n/language";
 
-export function LanguageSelector() {
+export function LanguageSelector({ row = false }: { row?: boolean } = {}) {
   const { t } = useTranslation();
   const selected = useLanguagePreference();
   const current = LANGUAGE_CONFIG.options.find(
@@ -21,6 +21,7 @@ export function LanguageSelector() {
           title={t("语言")}
         >
           <Languages size={16} aria-hidden="true" />
+          {row && <strong>{t("语言")}</strong>}
           <span>{t(current.label)}</span>
           <ChevronDown
             size={12}

@@ -1,3 +1,4 @@
+import { isNative } from "../platform";
 import { fullProfile, publicProfile, storedProfile } from "./profile-wire";
 import { transferMetrics as metrics } from "./transferMetrics";
 import { openDB, type DBSchema, type IDBPDatabase, type IDBPTransaction } from "idb";
@@ -13,7 +14,7 @@ export { LARGE_FILE_BYTES } from "../config";
 interface ChatDatabase extends DBSchema {
   settings: { key: string; value: Profile | ReturnType<typeof publicProfile> | Uint8Array | StorageUsage };
   conversations: { key: string; value: Conversation };
-  messages: { key: string; value: Message; indexes: { "by-peer": string } };
+  messages: { key: string; value: Message; indexes: { "by-peer": string; "by-peer-time": [string, number] } };
   attachments: { key: string; value: AttachmentRecord };
   pendingAttachments: { key: string; value: { id: string; record: AttachmentRecord; cancelled?: boolean } };
 }
@@ -30,21 +31,24 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
 
   constructor(private readonly databaseName: string = STORAGE_CONFIG.databaseName) {
     const thisAdapter = this;
-    this.database = openDB<ChatDatabase>(databaseName, 2, {
+    this.database = openDB<ChatDatabase>(databaseName, 3, {
       async blocking(_current, next) {
         if (next === null) await thisAdapter.onDatabaseDelete?.();
         await thisAdapter.close();
       },
-      upgrade(db, oldVersion) {
+      upgrade(db, oldVersion, _newVersion, tx) {
         if (!oldVersion) {
           db.createObjectStore("settings");
           db.createObjectStore("conversations", { keyPath: "peer.id" });
           const messages = db.createObjectStore("messages", { keyPath: "id" });
           messages.createIndex("by-peer", "peerId");
-        } else db.deleteObjectStore("attachments");
+        } else if (oldVersion < 2) db.deleteObjectStore("attachments");
         // The unreleased Blob schema is replaced, without migrating binary data.
-        db.createObjectStore("attachments");
-        db.createObjectStore("pendingAttachments");
+        if (oldVersion < 2) {
+          db.createObjectStore("attachments");
+          db.createObjectStore("pendingAttachments");
+        }
+        tx.objectStore("messages").createIndex("by-peer-time", ["peerId", "createdAt"]);
       },
     });
     if (typeof navigator.storage?.getDirectory === "function") void this.directory().catch(() => {});
@@ -183,6 +187,12 @@ export class IndexedDBStorageAdapter implements StorageAdapter {
   }
   async saveConversation(conversation: Conversation) {
     await (await this.database).put("conversations", conversation);
+  }
+  async getLatestMessage(peerId: string) {
+    const db = await this.database;
+    const range = IDBKeyRange.bound([peerId, -Infinity], [peerId, Infinity]);
+    const cursor = await db.transaction("messages").store.index("by-peer-time").openCursor(range, "prev");
+    return cursor?.value;
   }
   async getMessages(peerId: string) {
     return (
@@ -437,7 +447,7 @@ export function registerStorageAdapter(
 }
 
 export async function createStorageAdapter(
-  type = import.meta.env.VITE_DESKTOP ? "desktop" : "browser",
+  type = isNative() ? "desktop" : "browser",
   options?: Record<string, unknown>,
 ): Promise<StorageAdapter> {
   const factory = adapters.get(type);

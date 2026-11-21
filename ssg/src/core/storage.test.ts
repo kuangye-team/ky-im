@@ -63,6 +63,29 @@ async function conversation(
 }
 
 describe("browser storage adapter", () => {
+  it("preserves version 2 records and attachment indexes when adding conversation previews", async () => {
+    const name = "preview-upgrade-" + newId();
+    const db = await openDB(name, 2, { upgrade(db) {
+      db.createObjectStore("settings");
+      db.createObjectStore("conversations", { keyPath: "peer.id" });
+      db.createObjectStore("messages", { keyPath: "id" }).createIndex("by-peer", "peerId");
+      db.createObjectStore("attachments");
+      db.createObjectStore("pendingAttachments");
+    } });
+    const tx = db.transaction(["messages", "attachments"], "readwrite");
+    const message = { id: "z", peerId: "friend", createdAt: 1, kind: "text", text: "first" };
+    tx.objectStore("messages").put(message);
+    tx.objectStore("messages").put({ ...message, id: "a", createdAt: 2, text: "latest" });
+    tx.objectStore("attachments").put({ name: "kept" }, "saved");
+    await tx.done;
+    db.close();
+    const storage = adapter(name);
+    expect((await storage.getLatestMessage("friend"))?.text).toBe("latest");
+    const check = await openDB(name);
+    expect(await check.get("attachments", "saved")).toEqual({ name: "kept" });
+    check.close();
+  });
+
   it("stores metadata only, commits complete streams, and cancels writes when their message is deleted", async () => {
     const name = `opfs-${newId()}`, storage = adapter(name), id = newId();
     const writer = await storage.createFileDestination({ id, size: 6, fileName: "保留.txt", mimeType: "text/plain" });

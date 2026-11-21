@@ -32,7 +32,7 @@ test("离线联系人可以继续输入和发送，并保留失败记录", async
     await expect(a.getByRole("log")).toContainText("仍然尝试发送");
     await expect(a.locator(".message-row").filter({ hasText: "仍然尝试发送" })).toContainText("发送失败");
     await a.reload();
-    await openPeer(a, "离线联系人");
+    await expect(a.locator(".chat-heading h2")).toHaveText("离线联系人");
     await expect(a.getByRole("log")).toContainText("仍然尝试发送");
   } finally {
     await aContext.close();

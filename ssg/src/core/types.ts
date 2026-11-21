@@ -47,8 +47,9 @@ export interface FolderDestination {
   abort?(): Promise<void>;
 }
 /** A file that can be read in bounded chunks, including native files accessed over IPC. */
+export type AndroidDocument = { uri: string; documentTopTreeUri: string | null };
 export interface AttachmentSource {
-  readonly nativeSource?: { path: string } | { attachmentId: string };
+  readonly nativeSource?: { path: string } | { attachmentId: string } | { document: AndroidDocument; size: number };
   name: string;
   type: string;
   size: number;
@@ -59,6 +60,7 @@ export type StorageInfo = {
   usage: number;
   cacheUsage: number;
   cleanupPending?: boolean;
+  directoryUnavailable?: boolean;
 };
 export type StorageMove = { directory: string; cleanupWarning?: boolean };
 export type StorageUsage = {
@@ -89,6 +91,7 @@ export interface StorageAdapter {
   savePeerProfile?(profile: Profile): Promise<void>;
   getConversations(): Promise<Conversation[]>;
   saveConversation(conversation: Conversation): Promise<void>;
+  getLatestMessage?(peerId: string): Promise<Message | undefined>;
   getMessages(peerId: string): Promise<Message[]>;
   saveMessage(message: Message): Promise<void>;
   getAttachment(id: string): Promise<Blob | undefined>;

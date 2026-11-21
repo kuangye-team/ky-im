@@ -1,3 +1,4 @@
+import { binaryPayload } from "../../../native-ipc";
 import { discoveryView, fullProfile, publicProfile } from "../../profile-wire";
 import { runtimeLog } from "../../../runtime-logs";
 import type { ByteConnection } from "./bytes";
@@ -87,7 +88,7 @@ export const nativeBridge: P2pBridge = {
     return invoke("p2p_request", { sessionId, request, onEvent });
   },
   write: (sessionId, data, headers) =>
-    invoke("p2p_write", data, {
+    invoke("p2p_write", binaryPayload(data), {
       headers: { "x-session-id": sessionId, ...headers },
     }),
 };
@@ -183,7 +184,7 @@ export class NativePeerNode implements TransportAdapter {
           windowsSendActivity: import.meta.env.VITE_WINDOWS_SEND_ACTIVITY?.trim().toLowerCase() !== "false",
           room: SIGNALING_CONFIG.room,
           mdns: this.settings.discovery.mdns,
-          tcp: this.settings.transport.tcp,
+          tcp: profile.capabilities.includes(CAP.tcp),
           announceLoopback: import.meta.env.VITE_P2P_ANNOUNCE_LOOPBACK?.trim().toLowerCase() === "true",
         },
         (event) => { if (this.sessionId === sessionId) return this.event(event); },
@@ -237,6 +238,11 @@ export class NativePeerNode implements TransportAdapter {
         if (failed && channel?.physicalConnectionId && channel.physicalConnectionId === info?.connectionId)
           channel.causeEventId ??= eventId;
       } else if (event.type === "socket") {
+        if (import.meta.env.VITE_ANDROID && ["open", "close", "error"].includes(event.state || "")) {
+          runtimeLog(event.state === "error" ? "warn" : "debug", "discovery", "在线查找连接变化", {
+            raw: { socketId: event.socketId, state: event.state, detail: (event as { detail?: string }).detail },
+          });
+        }
         this.sockets.get(event.socketId!)?.event(event.state!, event.message);
       } else if (event.type === "file_progress" || event.type === "file_error") {
         const channel = this.channels.get(event.peerId!);
@@ -306,6 +312,8 @@ export class NativePeerNode implements TransportAdapter {
         paths?.delete(event.connectionId!);
         if (paths?.size) this.diagnosticRoutes[event.peerId!] = [...paths.values()].at(-1)!;
         else { this.connections.delete(event.peerId!); delete this.diagnosticRoutes[event.peerId!]; }
+      } else if (event.type === "network_changed") {
+        this.deliver({ type: "network_changed" });
       } else if (event.type === "addresses") {
         this.addresses = event.addresses!;
         for (const source of this.central.sources.values())

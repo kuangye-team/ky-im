@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import { i18n, resolveLanguage } from "../i18n";
 import { generateProfileName, generateProfileBio } from "../core/profile";
 import { useEffect, useState, type FormEvent } from "react";
-import { Check, Shuffle, X } from "lucide-react";
+import { Check, Save, Shuffle, X } from "lucide-react";
 import type { ChatEngine } from "../core";
 import type { Profile, ChatSnapshot } from "../core/types";
 import { Modal } from "./Modal";
@@ -16,21 +16,23 @@ import { OwnNumber } from "./OwnNumber";
 import { MyStatus } from "./MyStatus";
 import { Avatar } from "./Avatar";
 
-export function ProfileModal({
-  open,
-  onClose,
-  profile,
-  snap,
-  engine,
-  onNotice,
-}: {
-  open: boolean;
+type ProfileFormProps = {
   onClose: () => void;
   profile: Profile;
   snap: ChatSnapshot;
   engine: ChatEngine;
   onNotice: (s: string) => void;
-}) {
+};
+
+export function ProfileModal({ open, ...props }: ProfileFormProps & { open: boolean }) {
+  const { t } = useTranslation();
+  return <Modal open={open} onClose={props.onClose} title={t("让朋友认识你")}
+    description={t("设置一个喜欢的头像和名字，在线设备都能看到。")} className="profile-modal">
+    <ProfileForm {...props} />
+  </Modal>;
+}
+
+export function ProfileForm({ onClose, profile, snap, engine, onNotice }: ProfileFormProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(profile.name);
   const [bio, setBio] = useState(profile.bio);
@@ -38,16 +40,15 @@ export function ProfileModal({
   const [color, setColor] = useState(profile.color);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
-    if (open) {
-      setName(profile.name);
-      setBio(profile.bio);
-      setAvatar(profile.avatar);
-      setColor(profile.color);
-    }
-  }, [open, profile.name, profile.bio, profile.avatar, profile.color]);
-  const submit = async (e: FormEvent) => {
+    setName(profile.name);
+    setBio(profile.bio);
+    setAvatar(profile.avatar);
+    setColor(profile.color);
+  }, [profile.name, profile.bio, profile.avatar, profile.color]);
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (busy || !name.trim()) return;
+    const form = e.currentTarget;
     setBusy(true);
     try {
       await engine.updateProfile({
@@ -56,7 +57,7 @@ export function ProfileModal({
         avatar,
         color,
       });
-      onClose();
+      if (form.isConnected) onClose();
       onNotice("个人资料已更新");
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "保存失败");
@@ -65,14 +66,7 @@ export function ProfileModal({
     }
   };
   return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title={t("让朋友认识你")}
-      description={t("设置一个喜欢的头像和名字，在线设备都能看到。")}
-      className="profile-modal"
-    >
-      <form onSubmit={(e) => void submit(e)}>
+      <form className="profile-form" onSubmit={(e) => void submit(e)}>
         <div className="profile-editor">
           <div className="profile-appearance">
             <div className="profile-identity">
@@ -199,11 +193,8 @@ export function ProfileModal({
           </div>
         </div>
         <div className="modal-actions">
-          <p className="profile-privacy-hint">
-            {t("请勿填写不想分享的信息。")}
-          </p>
           <button className="secondary-button" type="button" onClick={onClose}>
-            <X size={15} aria-hidden="true" />
+            <X size={16} aria-hidden="true" />
             {t("取消")}
           </button>
           <button
@@ -211,11 +202,10 @@ export function ProfileModal({
             disabled={busy || !name.trim()}
             type="submit"
           >
-            {busy ? t("保存中…") : t("保存资料")}
-            <Check size={16} />
+            <Save size={16} aria-hidden="true" />
+            {t(busy ? "保存中…" : "保存")}
           </button>
         </div>
       </form>
-    </Modal>
   );
 }

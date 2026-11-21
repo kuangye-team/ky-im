@@ -154,6 +154,7 @@ async fn main() {
                                 request["source"].as_str().unwrap().into(),
                                 request["address"].as_str().unwrap().into(),
                                 request["permitted"].as_bool().unwrap_or(false),
+                                request["useSystemProxy"].as_bool().unwrap_or(true),
                             )
                             .await?
                     }

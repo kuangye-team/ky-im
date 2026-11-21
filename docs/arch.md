@@ -6,13 +6,13 @@ English | [简体中文](arch.zh.md) · [Project overview](../README.md)
 
 ```mermaid
 flowchart TB
-    UI["React interface<br/>Browser / desktop WebView"]
+    UI["React interface<br/>Browser / desktop and Android WebViews"]
     Chat["ChatEngine<br/>Contacts, connections, history"]
     Tasks["TransferService<br/>Acceptance, progress, save receipts"]
     Web["Browser runtime<br/>BrowserTransferBackend + js-libp2p"]
-    Native["Desktop runtime<br/>NativeTransferBackend → Rust file tasks + rust-libp2p"]
+    Native["Native runtime<br/>NativeTransferBackend → Rust file tasks + rust-libp2p"]
     BrowserStore["Browser storage<br/>IndexedDB records / OPFS attachments"]
-    Disk["Desktop storage<br/>SQLite records / managed attachments"]
+    Disk["Native storage<br/>SQLite records / managed attachments"]
     Peer["Peer device"]
     UI <-->|Commands and state| Chat
     UI -->|Send, receive, cancel| Tasks

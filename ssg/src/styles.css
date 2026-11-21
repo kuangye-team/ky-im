@@ -106,25 +106,52 @@
   font-size: 17px;
   font-weight: 650;
 }
+.invite-modal {
+  width: 480px;
+}
+.invite-share {
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 16px;
+  margin-bottom: 22px;
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+.invite-qr {
+  border-radius: 8px;
+  forced-color-adjust: none;
+}
 .own-number {
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 24px 12px;
-  margin-bottom: 22px;
-  border-radius: 14px;
-  background: var(--surface-soft);
   color: var(--text-secondary);
-  gap: 8px;
+  gap: 6px;
   font-size: 12px;
 }
+.own-number .own-number-value {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  justify-items: center;
+  gap: 6px;
+}
+.own-number .copy-number-button {
+  justify-self: end;
+}
+.own-number .refresh-number-button {
+  justify-self: start;
+}
 .own-number output {
+  grid-column: 1 / -1;
   color: var(--primary);
-  font-size: 36px;
+  font-size: 32px;
   font-weight: 650;
-  letter-spacing: 7px;
+  letter-spacing: 3px;
   font-variant-numeric: tabular-nums;
-  padding-left: 7px;
+  padding-left: 3px;
 }
 .connect-error {
   margin: 10px 0 0;
@@ -322,13 +349,18 @@
     width: 25px;
     height: 25px;
   }
-  .own-number {
-    padding: 16px 12px;
+  .invite-share {
+    padding: 12px;
+    gap: 10px;
     margin-bottom: 16px;
-    gap: 6px;
+  }
+  .invite-qr {
+    width: 132px;
+    height: 132px;
   }
   .own-number output {
-    font-size: 32px;
+    font-size: 24px;
+    letter-spacing: 2px;
   }
   .invite-divider {
     margin: 18px 0 14px;
@@ -383,58 +415,58 @@
   border-radius: 14px;
   background: var(--surface-soft);
 }
-.profile-modal .profile-identity {
+.profile-form .profile-identity {
   padding: 0;
   gap: 14px;
   border: 0;
   background: none;
 }
-.profile-modal .profile-identity > .avatar {
+.profile-form .profile-identity > .avatar {
   width: 60px;
   height: 60px;
   font-size: 34px;
 }
-.profile-modal .profile-identity-copy > strong {
+.profile-form .profile-identity-copy > strong {
   margin-bottom: 8px;
   color: var(--text);
 }
-.profile-modal .own-number-compact {
+.profile-form .own-number-compact {
   margin: 16px 0 0;
   gap: 4px 8px;
 }
-.profile-modal .own-number-compact > span:first-child {
+.profile-form .own-number-compact > span:first-child {
   flex-basis: 100%;
 }
-.profile-modal .own-number-value {
+.profile-form .own-number-value {
   gap: 8px;
 }
-.profile-modal .own-number-value .icon-button {
+.profile-form .own-number-value .icon-button {
   width: 30px;
   height: 30px;
 }
-.profile-modal .own-number-compact output {
+.profile-form .own-number-compact output {
   font-size: 22px;
   letter-spacing: 3px;
 }
-.profile-modal .profile-status-hint {
+.profile-form .profile-status-hint {
   margin: 10px 0 18px;
   color: var(--text-secondary);
 }
-.profile-modal .avatar-options {
+.profile-form .avatar-options {
   gap: 6px;
 }
-.profile-modal .avatar-options button {
+.profile-form .avatar-options button {
   height: 36px;
   font-size: 21px;
   background: var(--surface);
   border-color: var(--line);
 }
-.profile-modal .avatar-options button.selected {
+.profile-form .avatar-options button.selected {
   border-color: var(--primary-border);
   background: var(--primary-subtle);
   box-shadow: 0 0 0 1px var(--primary-border);
 }
-.profile-modal .color-options {
+.profile-form .color-options {
   justify-content: space-between;
   margin: 16px 4px 2px;
 }
@@ -457,27 +489,23 @@
   min-height: 144px;
   max-height: 220px;
 }
-.profile-modal .profile-generate {
+.profile-form .profile-generate {
   border-color: var(--line);
   background: var(--surface-soft);
   color: var(--primary);
 }
-.profile-modal .profile-generate:hover:not(:disabled) {
+.profile-form .profile-generate:hover:not(:disabled) {
   background: var(--primary-subtle);
 }
-.profile-modal .modal-actions {
-  align-items: center;
-  flex-wrap: wrap;
+.profile-form .modal-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 22px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
+  padding: 0;
 }
-.profile-privacy-hint {
-  flex: 1;
-  margin: 0 auto 0 0;
-  color: var(--text-secondary);
-  font-size: 12px;
-  line-height: 1.6;
+.profile-form .modal-actions button {
+  min-height: 44px;
+  font-size: 14px;
 }
 @media (max-width: 680px) {
   .profile-editor {
@@ -487,23 +515,19 @@
   .profile-appearance {
     padding: 14px;
   }
-  .profile-modal .own-number-compact {
+  .profile-form .own-number-compact {
     margin-top: 10px;
   }
-  .profile-modal .own-number-compact > span:first-child {
+  .profile-form .own-number-compact > span:first-child {
     flex-basis: auto;
   }
-  .profile-modal .profile-status-hint {
+  .profile-form .profile-status-hint {
     margin: 8px 0 12px;
   }
   .profile-details textarea {
     min-height: 80px;
   }
-  .profile-modal .modal-actions {
+  .profile-form .modal-actions {
     margin-top: 16px;
-    padding-top: 14px;
-  }
-  .profile-privacy-hint {
-    flex-basis: 100%;
   }
 }

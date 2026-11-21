@@ -12,6 +12,7 @@ For a source checkout, copy `.env.json.example` to `.env.json` once. Edit the se
 | Native server and production website | `production.api`, `production.ssg` | `api/.env.production` for the native build and preview, `ssg/.env.production` for the web build |
 | Docker built from source | `compose.root`, `compose.api`, `compose.ssg` | Root `.env` combines the host port and registry with frontend build arguments. `api/.env.compose` configures the running server. Initialization also writes `ssg/.env.compose`. |
 | Desktop | `desktop.app`, `desktop.ssg` | `app/.env` configures packaging, `ssg/.env.desktop` configures the frontend. Desktop commands refresh these files and process environment values take precedence. |
+| Android | `android.app`, `production.ssg` | Android commands read the version, signing and frontend settings directly. Non-empty environment variables take precedence. |
 | Cloudflare | `wrangler.api`, `wrangler.ssg` | `api/wrangler.jsonc` supplies Worker runtime variables. The frontend build reads `vars` from `ssg/wrangler.jsonc` in Cloudflare mode. |
 
 For a **prebuilt Docker image**, copy `docker/.env.example` to `docker/.env` and reapply changes with `docker compose up -d` from `docker/`. For an **extracted server package**, the startup script creates `release/.env` on first launch. Use literal `KEY=value` lines without quotes, `export`, or inline comments, then restart the service. Both files are maintained independently of `npm run init`. [Docker template](../docker/.env.example) · [Server package template](../release/.env.example)
@@ -118,3 +119,5 @@ For GitHub Actions desktop releases, use the repository's **Settings → Secrets
 | Variable | `VITE_WEB_URL`, `VITE_CLIENT_DOWNLOAD_URL`, `VITE_RTC_MAX_MESSAGE_SIZE`, `VITE_RTC_MAX_BUFFERED_AMOUNT`, `VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD`, `VITE_RTC_FILE_CHUNK_SIZE`, `VITE_MACOS_SEND_ACTIVITY`, `VITE_WINDOWS_SEND_ACTIVITY`, `VITE_SHOW_TRANSFER_SPEED` |
 
 With no repository overrides, Actions uses an empty signaling URL and preset key, the `local` namespace, and the ICE and transfer defaults listed above. Store the updater signing key and its password in Actions Secrets.
+
+See [Android builds, signing and device verification](android.md) for APK configuration.

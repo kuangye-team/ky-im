@@ -715,6 +715,9 @@ export class TransferService {
       try {
         await this.host.history.recordMessage(message, true);
         this.sendControl(channel, { type: "ack", id: packet.id });
+        if (import.meta.env.VITE_ANDROID) runtimeLog("debug", "message", "消息已保存并回复送达", {
+          peerId: link.peerId, raw: { messageId: packet.id, connectionId: channel.connectionId },
+        });
       } catch {
         this.sendControl(channel, {
           type: "transfer-error",

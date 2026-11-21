@@ -26,6 +26,7 @@ interface ImportMetaEnv {
   readonly VITE_WEB_URL?: string;
   /** Public download page, used by download and manual update links. */
   readonly VITE_CLIENT_DOWNLOAD_URL?: string;
+  readonly VITE_ANDROID?: boolean;
   readonly VITE_DESKTOP?: boolean;
   readonly TAURI_ENV_PLATFORM?: string;
   readonly VITE_DESKTOP_UPDATER_ENABLED?: string;

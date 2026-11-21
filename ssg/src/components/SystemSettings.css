@@ -38,6 +38,7 @@
   font-size: 16px;
 }
 .settings-card > p,
+.settings-ice-panel > p,
 .settings-feedback > p,
 .settings-server-modal .settings-hint {
   font-size: 13px;
@@ -66,6 +67,21 @@
 .settings-choice small {
   color: var(--muted);
   line-height: 1.6;
+}
+.settings-proxy-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 32px;
+}
+.settings-proxy-options .settings-choice {
+  align-items: center;
+  padding: 4px 0;
+}
+.settings-proxy-options input {
+  margin: 0;
+  width: 17px;
+  height: 17px;
+  accent-color: var(--primary);
 }
 .system-settings input[type="checkbox"],
 .settings-server-modal input[type="checkbox"] {
@@ -305,4 +321,153 @@
   .settings-ice-card .settings-server {
     grid-template-columns: minmax(140px, 1fr) minmax(0, 1.5fr) 180px;
   }
+}
+
+.settings-ice-tools[hidden] {
+  display: none;
+}
+.phone-workspace .system-settings .settings-sections {
+  margin-top: 0;
+  gap: 12px;
+  padding-bottom: 0;
+}
+.phone-workspace .system-settings .settings-feedback p:not(:empty) {
+  margin-bottom: 12px;
+}
+.phone-workspace .settings-card {
+  padding: 6px 14px;
+  border-color: var(--line);
+  border-radius: 12px;
+}
+.phone-workspace .settings-card legend {
+  padding: 0 4px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.phone-workspace .settings-background {
+  background: var(--surface-soft);
+}
+.phone-workspace .settings-choice {
+  min-height: 42px;
+  align-items: center;
+  padding: 5px 0;
+}
+.phone-workspace .settings-choice + .settings-choice {
+  border-top: 1px solid var(--line);
+}
+.phone-workspace .settings-choice strong {
+  font-weight: 500;
+}
+.phone-workspace .settings-choice input[type="checkbox"] {
+  appearance: none;
+  order: 1;
+  margin: 0 0 0 auto;
+  width: 34px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-muted);
+  cursor: pointer;
+}
+.phone-workspace .settings-choice input[type="checkbox"]::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+.phone-workspace .settings-choice input[type="checkbox"]:checked {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.phone-workspace .settings-choice input[type="checkbox"]:checked::before {
+  background: var(--on-primary);
+  transform: translateX(14px);
+}
+.phone-workspace .settings-choice input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.phone-workspace .settings-server-heading {
+  margin: 0;
+  gap: 0 8px;
+}
+.phone-workspace .settings-server-heading h2 {
+  font-size: 15px;
+}
+.phone-workspace .settings-ice-card h2 {
+  width: 100%;
+}
+.settings-disclosure {
+  padding: 0;
+  min-height: 42px;
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
+.settings-disclosure small {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+.settings-disclosure svg {
+  color: var(--muted);
+}
+.settings-disclosure[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.phone-workspace .settings-card .secondary-button {
+  min-height: 36px;
+  padding: 3px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 13px;
+}
+.phone-workspace .settings-ice-tools {
+  width: 100%;
+  gap: 4px 8px;
+  border-top: 1px solid var(--line);
+}
+.phone-workspace .settings-ice-tools > button:last-child {
+  margin-left: auto;
+}
+.phone-workspace .settings-server {
+  padding: 9px 0 3px;
+  grid-template-columns: minmax(0,1fr);
+  gap: 0;
+}
+.phone-workspace .settings-server-columns,
+.phone-workspace .settings-server-name small:empty {
+  display: none;
+}
+.phone-workspace .settings-server:last-child {
+  border-bottom: 0;
+}
+.phone-workspace .settings-server-name,
+.phone-workspace .settings-server-address,
+.phone-workspace .settings-server-actions {
+  grid-column: 1;
+  grid-row: auto;
+}
+.phone-workspace .settings-server-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+}
+.phone-workspace .settings-server-actions label:last-of-type {
+  margin-right: auto;
+}
+.phone-workspace .settings-server .icon-button {
+  width: 32px;
+  height: 34px;
+}
+.phone-workspace .settings-server .settings-probe {
+  width: auto;
+  padding: 0 4px;
+  gap: 4px;
+  font-size: 12px;
 }

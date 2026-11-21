@@ -15,6 +15,7 @@ pub mod network;
 mod rtc_signal;
 #[cfg(any(target_os = "macos", windows))]
 mod send_activity;
+mod signaling_socket;
 mod streams;
 pub mod transport;
 use futures::{AsyncReadExt, AsyncWriteExt, StreamExt};
@@ -240,6 +241,22 @@ impl Node {
             cancel: CancellationToken::new(),
             emit_data,
         };
+        // Watch interfaces even when direct listeners and mDNS are disabled.
+        if let Ok(mut interfaces) = if_watch::tokio::IfWatcher::new() {
+            let emit = emit.clone();
+            let cancel = node.cancel.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        change = interfaces.next() => match change {
+                            Some(Ok(_)) => emit(json!({"type":"network_changed"})),
+                            _ => break,
+                        }
+                    }
+                }
+            });
+        }
         let (pings, incoming_pings) = futures::channel::mpsc::channel(64);
         tokio::spawn(health::listen(incoming_pings, node.clone()));
         let service = if discover {

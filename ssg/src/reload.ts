@@ -1,4 +1,4 @@
-import { isDesktop } from "./core/network/settings";
+import { isNative } from "./platform";
 
 export const RELOAD_REQUEST_EVENT = "hummingbird:reload-request";
 let approved = false;
@@ -8,7 +8,7 @@ export const isReloadApproved = () => approved;
 export async function reloadApp() {
   approved = true;
   try {
-    if (isDesktop()) {
+    if (isNative()) {
       const { invoke } = await import("@tauri-apps/api/core");
       await invoke("reload_app");
     } else {
@@ -21,7 +21,7 @@ export async function reloadApp() {
 }
 
 export async function setNativeReloadGuard(ready: boolean) {
-  if (!isDesktop()) return;
+  if (!isNative()) return;
   const { invoke } = await import("@tauri-apps/api/core");
   await invoke("set_reload_guard", { ready });
 }

@@ -43,4 +43,9 @@ __pycache__/
 # Desktop generated output
 /ssg/desktop-dist/
 /app/dist/
-/app/gen/
+/app/android-dist/
+/app/gen/*
+!/app/gen/android/
+/ssg/android-dist/
+*.keystore
+*.jks

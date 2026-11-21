@@ -69,3 +69,9 @@ it("shares successful requests and retries after a failed request", async () => 
   await loadClientRelease();
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
+
+it("accepts a separately signed Android APK alongside older desktop installers", () => {
+  const android = "https://example.com/ky-im-1.2.3-android-arm.apk";
+  expect(parseClientRelease({ version: "1.2.3", downloads: { android } }).downloads).toEqual({ android });
+  expect(() => parseClientRelease({ version: "1.2.3", downloads: { android: android + ".exe" } })).toThrow();
+});

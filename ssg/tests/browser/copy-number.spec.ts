@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { capture } from "./helpers";
+import { capture, expectInviteQrMatchesAddress } from "./helpers";
 
 type CopyProbe = Window & {
   __copiedNumbers: string[];
@@ -104,6 +104,9 @@ for (const mode of ["clipboard", "unavailable", "denied"] as const) {
     expect(
       await page.evaluate(() => (window as CopyProbe).__fallbackInDialog),
     ).toEqual(mode === "clipboard" ? [] : [true, true, true]);
-    if (mode === "clipboard") await capture(page, "desktop-copy-number.png");
+    if (mode === "clipboard") {
+      await expectInviteQrMatchesAddress(connect);
+      await capture(page, "desktop-copy-number.png");
+    }
   });
 }

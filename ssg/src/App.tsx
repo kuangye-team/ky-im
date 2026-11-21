@@ -1,7 +1,10 @@
+import { PhoneDevices, PhoneMe, PhoneMessages, PhoneTabs } from "./components/PhoneHome";
+import { useMobileLayout, usePhoneOverlayBack } from "./mobile-layout";
 import { deviceLabel } from "./core/profile";
 import { ClientAccess } from "./components/ClientAccess";
 import { handleExternalLinkClick } from "./external-links";
 import { DesktopVersion } from "./components/DesktopVersion";
+import { AndroidVersion } from "./components/AndroidVersion";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router";
 import { i18n } from "./i18n";
@@ -10,8 +13,10 @@ import { ThemeSelector } from "./components/ThemeSelector";
 import { useCompatibilityHelp } from "./components/CompatibilityHelp";
 import { translateError } from "./localizeError";
 import "./i18n.css";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
+  ArrowLeft,
+  Menu,
   ArrowRight,
   ArrowUpRight,
   ChevronDown,
@@ -53,14 +58,20 @@ import { DesktopUpdateDialog } from "./components/DesktopUpdateDialog";
 import { isDesktop } from "./core/network/settings";
 import { Avatar, DeviceIcon, peerName } from "./components/Avatar";
 import { messageTime } from "./components/messageTime";
-import { ContactDetails } from "./components/ContactDetails";
+import { ContactDetails, SharedFiles } from "./components/ContactDetails";
 import { Welcome } from "./components/Welcome";
 import { ChatPanel } from "./components/ChatPanel";
 import { InviteModal } from "./components/InviteModal";
-import { ProfileModal } from "./components/ProfileModal";
+import { ProfileForm, ProfileModal } from "./components/ProfileModal";
+import { RuntimeLogsPage } from "./components/RuntimeLogs";
 
 type View =
   | "chat"
+  | "me"
+  | "profile"
+  | "contact"
+  | "files"
+  | "logs"
   | "nearby"
   | "history"
   | "storage"
@@ -69,6 +80,11 @@ type View =
   | "privacy";
 const pageNames: Record<View, string> = {
   chat: "聊天消息",
+  me: "我的",
+  profile: "个人资料",
+  contact: "联系人资料",
+  files: "聊天文件",
+  logs: "运行日志",
   nearby: "在线设备",
   history: "聊天记录",
   storage: "存储管理",
@@ -76,16 +92,10 @@ const pageNames: Record<View, string> = {
   licenses: "开源许可",
   privacy: "隐私协议",
 };
+const phonePageNames = { ...pageNames, chat: "消息", nearby: "设备", storage: "存储空间", settings: "连接设置" };
 function currentView(pathname: string): View {
   const path = pathname.replace(/^\/|\/$/g, "");
-  return path === "nearby" ||
-    path === "history" ||
-    path === "storage" ||
-    path === "settings" ||
-    path === "licenses" ||
-    path === "privacy"
-    ? path
-    : "chat";
+  return Object.hasOwn(pageNames, path) ? path as View : "chat";
 }
 
 export function App({ engine }: { engine: ChatEngine }) {
@@ -96,20 +106,60 @@ export function App({ engine }: { engine: ChatEngine }) {
   );
   const location = useLocation();
   const navigate = useNavigate();
+  const layout = useMobileLayout();
+  const phone = layout === "phone";
+  usePhoneOverlayBack(phone, location.key);
   const view = currentView(location.pathname);
+  const chatId = ["chat", "contact", "files", "logs"].includes(view) ? new URLSearchParams(location.search).get("chat") : null;
+  const [drawer, setDrawer] = useState(false);
+  const scrollPositions = useRef(new Map<string, number>());
+  const [inviteMode, setInviteMode] = useState<"share" | "number" | "both">("both");
+  const pageTitle = t((phone ? phonePageNames : pageNames)[view]);
+  const desktopProfile = !phone && view === "me";
   const setView = (next: View) => {
     const path = next === "chat" ? "/" : `/${next}`;
-    if (location.pathname !== path) void navigate(path);
+    setDrawer(false);
+    if (location.pathname !== path || location.search) void navigate(path, { replace: !!window.history.state?.phoneOverlay });
   };
   const [filter, setFilter] = useState("");
   const [listTab, setListTab] = useState<"recent" | "online">("recent");
   const [modal, setModal] = useState<
     "profile" | "invite" | "help" | "clear" | "delete" | "contact" | null
   >(null);
-  const [connectionPeer, setConnectionPeer] = useState<Profile | null>(null);
   const [details, setDetails] = useState(true);
-  const [mobileChat, setMobileChat] = useState(false);
+  const mobileChat = !!chatId;
+  const back = (fallback: string) => {
+    if (location.state?.parent) void navigate(-1);
+    else void navigate(fallback, { replace: true });
+  };
+  const peerSubpage = view === "contact" || view === "files" || (view === "logs" && !!chatId);
+  const tabPage = view === "me" || view === "chat" || view === "nearby";
+  const showBackbar = !tabPage && (phone || peerSubpage || view === "logs" || view === "profile");
+  const subpageParent = peerSubpage ? (chatId ? "/?chat=" + encodeURIComponent(chatId) : "/") : "/me";
+  const openPeerPage = (page: "contact" | "files" | "logs", peer: Profile) => {
+    void navigate(`/${page}?chat=${encodeURIComponent(peer.id)}`, {
+      state: { parent: location.pathname + location.search },
+      replace: !!window.history.state?.phoneOverlay,
+    });
+  };
   const [toast, setToast] = useState<{ message: string; source: "notice" | "error" } | null>(null);
+  const busyTransferring = engine.hasPendingTransfers();
+  useEffect(() => {
+    if (!import.meta.env.VITE_ANDROID || view !== "nearby" || !engine.needsNearbyPermission || busyTransferring) return;
+    let active = true;
+    async function enableNearby() {
+      const { nearbyPermission } = await import("./android-nearby");
+      if (!active) return;
+      const allowed = await nearbyPermission("automatic");
+      if (allowed && active && engine.needsNearbyPermission && !engine.hasPendingTransfers()) {
+        await engine.configureNetwork(engine.networkSettings);
+      }
+    }
+    void enableNearby().catch(error => {
+      if (active) setToast({ message: error instanceof Error ? error.message : "操作未完成，请重试", source: "error" });
+    });
+    return () => { active = false; };
+  }, [view, engine, engine.needsNearbyPermission, busyTransferring]);
   const compatibilityHelp = useCompatibilityHelp();
   const [deleteTarget, setDeleteTarget] = useState<Message | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -123,17 +173,30 @@ export function App({ engine }: { engine: ChatEngine }) {
   useEffect(() => {
     setModal(null);
   }, [location.key]);
-  useEffect(() => {
-    workspaceRef.current?.scrollTo(0, 0);
+  useLayoutEffect(() => {
+    workspaceRef.current?.scrollTo(0, phone ? scrollPositions.current.get(location.key) || 0 : 0);
     if (view === "licenses" || view === "privacy")
       workspaceRef.current?.querySelector<HTMLElement>("h1")?.focus();
-  }, [view]);
+  }, [view, location.key, phone]);
   const activePeer =
     snap.peers.find((p) => p.id === snap.activePeerId) ||
     snap.conversations.find((c) => c.peer.id === snap.activePeerId)?.peer;
-  const activeRemark =
-    snap.conversations.find((c) => c.peer.id === snap.activePeerId)?.remark ||
-    "";
+  const routedPeer = chatId ? snap.peers.find(p => p.id === chatId) ?? snap.conversations.find(c => c.peer.id === chatId)?.peer : undefined;
+  const restoredChat = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    if (!chatId || view === "logs") { restoredChat.current = null; return; }
+    if (!routedPeer || restoredChat.current === chatId) return;
+    restoredChat.current = chatId;
+    if (engine.getSnapshot().activePeerId !== chatId) void engine.selectPeer(routedPeer).catch(() => {});
+  }, [engine, chatId, routedPeer, view]);
+  const readingChat = view === "chat" && (chatId ? chatId === activePeer?.id : layout === "desktop");
+  const shownPeer = readingChat && !(phone && modal === "contact") ? activePeer?.id : null;
+  useLayoutEffect(() => {
+    const update = () => engine.setVisibleConversation(document.hidden ? null : shownPeer ?? null);
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, [engine, shownPeer]);
   const notify = (message: string) => setToast({ message, source: "notice" });
   useEffect(() => {
     if (snap.error) setToast({ message: snap.error, source: "error" });
@@ -179,12 +242,12 @@ export function App({ engine }: { engine: ChatEngine }) {
     setDeleteTarget(message);
   };
   const selectPeer = (peer: Profile) => {
+    if (chatId === peer.id) return;
     run(engine.selectPeer(peer));
-    setView("chat");
-    setMobileChat(true);
+    void navigate("/?chat=" + encodeURIComponent(peer.id), { state: { parent: location.pathname } });
   };
-  const openConnection = (peer: Profile | null = null) => {
-    setConnectionPeer(peer);
+  const openConnection = (number = false) => {
+    setInviteMode(phone ? (number ? "number" : "share") : "both");
     setModal("invite");
   };
   const onlinePeers = snap.peers.filter((peer) => isPeerOnline(snap, peer.id));
@@ -207,13 +270,14 @@ export function App({ engine }: { engine: ChatEngine }) {
   const connected = snap.status === "connected";
   const unread = snap.conversations.reduce((sum, c) => sum + c.unread, 0);
   useEffect(() => {
-    document.title = `${t(pageNames[view])} · ${t("蜂鸟")}`;
-  }, [t, view]);
+    document.title = `${pageTitle} · ${t("蜂鸟")}`;
+  }, [t, pageTitle]);
   return (
-    <div className="app-shell"
+    <div className={phone ? "phone-shell" : "app-shell"}
       onClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}
       onAuxClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}>
-      <header className="topbar">
+      {!phone && <header className="topbar">
+        <button className="tablet-menu icon-button" aria-label={t("主导航")} aria-expanded={drawer} onClick={() => setDrawer(!drawer)}><Menu /></button>
         <Link className="brand" to="/" aria-label={t("蜂鸟首页")}>
           <span className="brand-mark">
             <span className="hummingbird-logo" aria-hidden="true" />
@@ -236,12 +300,12 @@ export function App({ engine }: { engine: ChatEngine }) {
             <CircleHelp size={21} aria-hidden="true" />
           </button>
         </div>
-      </header>
-      <UpdateBanner engine={engine} />
+      </header>}
+      <UpdateBanner engine={engine} compact={layout !== "desktop" && !isDesktop()} />
       <RefreshGuard engine={engine} />
       {isDesktop() && <DesktopUpdateDialog />}
-      <div className="app-layout">
-        <aside className="sidebar">
+      <div className={phone ? "phone-layout" : "app-layout"}>
+        {!phone && <aside className={`sidebar ${drawer ? "tablet-open" : ""}`}>
           <button
             className="my-profile"
             onClick={() => setModal("profile")}
@@ -267,7 +331,7 @@ export function App({ engine }: { engine: ChatEngine }) {
               aria-label={t("聊天消息")}
               onClick={() => {
                 setView("chat");
-                setMobileChat(false);
+
               }}
             >
               <MessageCircle size={20} />
@@ -327,14 +391,37 @@ export function App({ engine }: { engine: ChatEngine }) {
               <LegalLinks current={view} className="sidebar-legal-links" />
             </div>
           </div>
-        </aside>
+        </aside>}
+        {!phone && drawer && <button className="tablet-scrim" aria-label={t("关闭")} onClick={() => setDrawer(false)} />}
         <main
           ref={workspaceRef}
-          className={`workspace ${view !== "chat" ? "workspace-full" : ""} ${mobileChat ? "mobile-chat" : ""}`}
+          onScroll={e => { if (phone) scrollPositions.current.set(location.key, e.currentTarget.scrollTop); }}
+          className={phone ? "phone-workspace" : `workspace ${view !== "chat" ? "workspace-full" : ""} ${mobileChat ? "mobile-chat" : ""}`}
         >
-          {view === "chat" ? (
+          {showBackbar && <header className="phone-backbar">
+            <button aria-label={t(peerSubpage ? "返回聊天" : "返回我的")} onClick={() => back(subpageParent)}><ArrowLeft aria-hidden="true" /></button>
+            <h1 tabIndex={-1}>{pageTitle}</h1>
+          </header>}
+          {view === "profile" ? <section className="full-page profile-page">
+            <ProfileForm profile={snap.profile} snap={snap} engine={engine} onNotice={notify} onClose={() => back("/me")} />
+          </section>
+          : peerSubpage && !routedPeer ? <div className="phone-empty"><h2>{t("未找到这段聊天")}</h2></div>
+          : view === "logs" ? <RuntimeLogsPage key={chatId || "all"} peer={routedPeer} />
+          : view === "files" && routedPeer ? <section className="full-page chat-files-page">
+            <SharedFiles allFiles heading={peerName(routedPeer, snap)} messages={snap.activePeerId === routedPeer.id ? snap.messages : []}
+              engine={engine} onDelete={requestDelete} onForward={setForwardTarget} onNotice={notify} />
+          </section>
+          : view === "contact" && routedPeer ? <section className="full-page contact-page">
+            <ContactDetails allFiles showFields={false} peer={routedPeer}
+              snap={snap} engine={engine}
+              onDelete={requestDelete} onForward={setForwardTarget} onNotice={notify} />
+          </section>
+          : phone && view === "me" ? <PhoneMe engine={engine} snap={snap} about={() => setModal("help")} notice={notify} />
+          : phone && view === "chat" && !chatId ? <PhoneMessages engine={engine} snap={snap} open={selectPeer} filter={filter} setFilter={setFilter} onInvite={() => openConnection()} onNotice={notify} />
+          : phone && view === "nearby" ? <PhoneDevices engine={engine} snap={snap} open={selectPeer} invite={openConnection} onNotice={notify} />
+          : view === "chat" || desktopProfile ? (
             <>
-              <section className="conversation-list">
+              {!phone && <section className="conversation-list">
                 <div className="list-heading">
                   <h1>
                     {t("消息")}
@@ -465,22 +552,30 @@ export function App({ engine }: { engine: ChatEngine }) {
                     {t("关于本站")}
                   </button>
                 </div>
-              </section>
-              {activePeer ? (
+              </section>}
+              {activePeer && (!chatId || activePeer.id === chatId) ? (
                 <ChatPanel
                   engine={engine}
                   snap={snap}
                   peer={activePeer}
-                  onBack={() => setMobileChat(false)}
+                  phone={phone}
+                  onBack={() => back("/")}
                   onDetails={() => {
-                    if (window.innerWidth <= 1250) setModal("contact");
+                    if (phone) openPeerPage("contact", activePeer);
+                    else if (window.innerWidth <= 1250) setModal("contact");
                     else setDetails((visible) => !visible);
                   }}
+                  onPeerLogs={() => openPeerPage("logs", activePeer)}
+                  onFiles={() => openPeerPage("files", activePeer)}
+                  onExport={() => run(exportConversation(engine, activePeer))}
+                  onDeleteHistory={() => setModal("delete")}
                   onNotice={notify}
                   onImage={setLightbox}
                   onDelete={requestDelete}
                   onForward={setForwardTarget}
                 />
+              ) : phone ? (
+                <div className="phone-empty"><h2>{t("未找到这段聊天")}</h2><button onClick={() => back("/")}>{t("返回列表")}</button></div>
               ) : (
                 <Welcome
                   count={onlinePeers.length}
@@ -489,11 +584,12 @@ export function App({ engine }: { engine: ChatEngine }) {
                   onNearby={() => setView("nearby")}
                 />
               )}
-              {activePeer && details && (
+              {!phone && activePeer && details && (
                 <aside className="detail-panel" aria-label={t("联系人资料")}>
                   <div className="detail-top">
                     <span>{t("联系人资料")}</span>
                     <ContactActions
+                      onFiles={() => openPeerPage("files", activePeer)}
                       onExport={() =>
                         run(exportConversation(engine, activePeer))
                       }
@@ -502,10 +598,8 @@ export function App({ engine }: { engine: ChatEngine }) {
                   </div>
                   <ContactDetails
                     peer={activePeer}
-                    remark={activeRemark}
                     snap={snap}
                     engine={engine}
-                    onConnectGroup={() => openConnection(activePeer)}
                     onDelete={requestDelete}
                     onForward={setForwardTarget}
                     onNotice={notify}
@@ -584,22 +678,23 @@ export function App({ engine }: { engine: ChatEngine }) {
               )}
             </section>
           ) : view === "history" ? (
-            <HistoryPage
+            <HistoryPage phone={phone}
               engine={engine}
               snap={snap}
               onClear={() => setModal("clear")}
               onNotice={notify}
             />
           ) : view === "storage" ? (
-            <StoragePage engine={engine} snap={snap} onNotice={notify} />
+            <StoragePage phone={phone} engine={engine} snap={snap} onNotice={notify} />
           ) : view === "settings" ? (
-            <SystemSettings engine={engine} onNotice={notify} />
+            <SystemSettings phone={phone} engine={engine} onNotice={notify} />
           ) : view === "licenses" ? (
-            <LicensesPage onNotice={notify} />
+            <LicensesPage phone={phone} onNotice={notify} />
           ) : (
-            <PrivacyPage onNotice={notify} />
+            <PrivacyPage phone={phone} onNotice={notify} />
           )}
         </main>
+        {phone && !chatId && tabPage && <PhoneTabs path={location.pathname} unread={unread} />}
       </div>
       {toast && (
         <div className="toast" role="status">
@@ -628,8 +723,11 @@ export function App({ engine }: { engine: ChatEngine }) {
       )}
       {compatibilityHelp.dialog}
       <ProfileModal
-        open={modal === "profile"}
-        onClose={() => setModal(null)}
+        open={modal === "profile" || desktopProfile}
+        onClose={() => {
+          setModal(null);
+          if (desktopProfile) void navigate("/", { replace: true });
+        }}
         profile={snap.profile}
         snap={snap}
         engine={engine}
@@ -640,7 +738,7 @@ export function App({ engine }: { engine: ChatEngine }) {
         onClose={() => setModal(null)}
         profile={snap.profile}
         connected={connected}
-        previousPeer={connectionPeer}
+        mode={inviteMode}
         engine={engine}
         onNotice={notify}
         onConnected={() => {
@@ -648,18 +746,20 @@ export function App({ engine }: { engine: ChatEngine }) {
           setFilter("");
           setListTab("online");
           setView("nearby");
-          setMobileChat(false);
+
           notify("已找到分组，正在连接在线设备");
         }}
       />
       <Modal
         open={modal === "contact"}
         onClose={() => setModal(null)}
+        className="contact-modal"
         title={t("联系人资料")}
         description={t("查看对方资料，管理你们的聊天记录。")}
         headerActions={
           activePeer && (
             <ContactActions
+              onFiles={() => openPeerPage("files", activePeer)}
               onExport={() => run(exportConversation(engine, activePeer))}
               onDelete={() => setModal("delete")}
             />
@@ -667,12 +767,10 @@ export function App({ engine }: { engine: ChatEngine }) {
         }
       >
         {activePeer && (
-          <ContactDetails
+          <ContactDetails allFiles={phone}
             peer={activePeer}
-            remark={activeRemark}
             snap={snap}
             engine={engine}
-            onConnectGroup={() => openConnection(activePeer)}
             onDelete={requestDelete}
             onForward={setForwardTarget}
             onNotice={notify}
@@ -686,7 +784,7 @@ export function App({ engine }: { engine: ChatEngine }) {
         description={t("轻快连接，自在分享。")}
         className="about-modal"
       >
-        <DesktopVersion engine={engine} />
+        {import.meta.env.VITE_ANDROID ? <AndroidVersion /> : <DesktopVersion engine={engine} />}
         <div className="about-layout">
           <div className="help-content">
             <div>
@@ -836,15 +934,17 @@ export function App({ engine }: { engine: ChatEngine }) {
           <button
             className="danger-button"
             onClick={() => {
+              const target = view === "contact" ? routedPeer : activePeer;
               const operation =
                 modal === "clear"
                   ? engine.clearHistory()
-                  : activePeer
-                    ? engine.deleteConversation(activePeer.id)
+                  : target
+                    ? engine.deleteConversation(target.id)
                     : Promise.resolve();
               run(
                 operation.then(() => {
                   setModal(null);
+                  if (modal === "delete" && chatId) void navigate("/", { replace: true });
                   notify("聊天记录已删除");
                 }),
               );

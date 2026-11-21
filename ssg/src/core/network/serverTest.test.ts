@@ -1,6 +1,8 @@
 import { localRuntime, CAP } from "../capabilities";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { testServer } from "./serverTest";
+const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 class Socket {
   static last: Socket;
   onopen: (() => void) | null = null;
@@ -18,6 +20,15 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("server capability probe", () => {
+  it.each(["direct", "system"] as const)("uses the selected %s desktop route to test a server", async (mode) => {
+    invoke.mockResolvedValue(JSON.stringify({ type: "capabilities", ...localRuntime() }));
+    const url = "wss://server.test/api/ws";
+    await expect(testServer(url, 5000, "sample", mode)).resolves.toHaveProperty("relay");
+    expect(invoke).toHaveBeenLastCalledWith("probe_signaling_server", {
+      address: expect.stringContaining(url + "?room="), authorization: "sample",
+      timeoutMs: 5000, useSystemProxy: mode === "system",
+    });
+  });
   it.each([true, false])(
     "returns live relay support %s without joining or uploading a profile",
     async (relay) => {

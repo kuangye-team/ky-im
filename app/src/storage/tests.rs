@@ -172,6 +172,10 @@ fn sqlite_history_and_files_survive_restart_and_delete_together() {
     let history = f.run(Request::GetMessages { id: "peer".into() });
     assert_eq!(history[0]["id"], other);
     assert_eq!(history[1], message);
+    assert_eq!(
+        f.run(Request::GetLatestMessage { id: "peer".into() }),
+        message
+    );
     assert_eq!(f.store.read(&key.clone(), 1, 3).unwrap(), b"ell");
     assert!(
         f.store
@@ -658,4 +662,27 @@ fn reset_can_retry_after_partial_deletion_and_rejects_redirected_or_dangling_pat
     fs::remove_file(default.join("cache")).unwrap();
     reset_store(&mut store, &default, &locator).unwrap();
     assert!(!external.join(CACHE).exists());
+}
+
+#[test]
+fn sparse_attachment_reads_across_the_four_gib_boundary() {
+    let mut f = Fixture::new();
+    let id = Uuid::new_v4().to_string();
+    let boundary = 1_u64 << 32;
+    let size = boundary + 1;
+    let token = f.begin(&id, size, false);
+    let pending = f.store.pending.get_mut(&token).unwrap();
+    let file = pending.file.as_mut().unwrap();
+    file.write_all(b"ab").unwrap();
+    file.seek(SeekFrom::Start(boundary - 1)).unwrap();
+    file.write_all(b"yz").unwrap();
+    pending.written = size;
+    f.run(Request::Finish { token });
+    // At offset 1, exactly 4 GiB remain. A premature usize cast returns EOF on ARMv7.
+    assert_eq!(f.store.read(&id, 0, 2).unwrap(), b"ab");
+    assert_eq!(f.store.read(&id, 1, 1).unwrap(), b"b");
+    assert_eq!(f.store.read(&id, 2, 1).unwrap(), [0]);
+    assert_eq!(f.store.read(&id, boundary - 1, 8).unwrap(), b"yz");
+    assert_eq!(f.store.read(&id, boundary, 1).unwrap(), b"z");
+    assert!(f.store.read(&id, size, 1).unwrap().is_empty());
 }

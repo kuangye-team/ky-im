@@ -1,0 +1,30 @@
+/* Window close is available even over the startup screen or another dialog. */
+.modal-overlay.desktop-close-overlay { z-index: 10001; }
+.modal.desktop-close-dialog { z-index: 10002; }
+.desktop-close-dialog .modal-heading { margin-bottom: 18px; }
+.close-choice {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  gap: 14px;
+  padding: 14px 16px;
+  text-align: start;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.close-choice + .close-choice { margin-top: 10px; }
+.close-choice > svg { color: var(--danger); }
+.close-choice-hide {
+  background: var(--primary-subtle);
+  border-color: var(--primary-border);
+}
+.close-choice-hide > svg { color: var(--primary); }
+.close-choice strong, .close-choice small { display: block; }
+.close-choice strong { font-size: 14px; color: var(--text); }
+.close-choice small {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}

@@ -1,7 +1,8 @@
+import { isNative } from "./platform";
 import { INVITE_CONFIG, SIGNALING_CONFIG } from "./config";
 
 export function getInviteUrl(pageOrigin: string): string {
-  if (!import.meta.env.VITE_DESKTOP) return pageOrigin;
+  if (!isNative()) return pageOrigin;
 
   try {
     const url = new URL(SIGNALING_CONFIG.url);

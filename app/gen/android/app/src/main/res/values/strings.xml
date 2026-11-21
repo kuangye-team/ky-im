@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Hummingbird</string>
+    <string name="main_activity_title">@string/app_name</string>
+    <string name="peer_session">Connected to a device</string>
+    <string name="peer_session_detail">Chat and file transfers can continue in the background.</string>
+    <string name="peer_session_stop">Stop background connection</string>
+</resources>

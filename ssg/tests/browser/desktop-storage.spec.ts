@@ -9,7 +9,7 @@ test("客户端目录迁移显示占用、阻止重复提交，并允许失败�
     page.getByRole("heading", { name: "数据存储目录" }),
   ).toBeVisible();
   await expect(
-    page.locator(".storage-metrics > div").filter({ hasText: "缓存占用" }),
+    page.getByRole("region", { name: "存储统计" }).getByText(/缓存占用/),
   ).toContainText("1.0 KB");
   await expect(
     page.getByText("/Users/test/Hummingbird/data", { exact: true }),
@@ -57,7 +57,7 @@ test("客户端目录迁移显示占用、阻止重复提交，并允许失败�
   const refresh = page.getByRole("button", { name: "Refresh storage usage" });
   await refresh.focus();
   await page.keyboard.press("Enter");
-  await expect(page.locator(".storage-metrics")).toContainText("4.0 KB");
+  await expect(page.getByRole("region", { name: "Storage statistics" })).toContainText("4.0 KB");
   await expectNoHorizontalOverflow(page);
   await capture(page, "native-storage-directory-english.png");
 });

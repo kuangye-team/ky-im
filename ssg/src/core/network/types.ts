@@ -9,6 +9,8 @@ export interface DiscoverySession {
   onmessage: Handler<{ data: unknown }> | null;
   onerror: Handler<Event> | null;
   onclose: Handler<Event> | null;
+  /** Recheck individual upstreams when this session combines discovery sources. */
+  recheckNetwork?(): void;
   updateLocalProfile?(profile: import("../types").Profile): void;
   send(packet: string): void;
   close(): void;
@@ -98,6 +100,7 @@ export interface TransportAdapter {
 }
 
 export interface NetworkAdapters {
+  needsNearbyPermission?: boolean;
   runtime?: import("../capabilities").RuntimeInfo;
   discovery: DiscoveryAdapter;
   transport: TransportAdapter;

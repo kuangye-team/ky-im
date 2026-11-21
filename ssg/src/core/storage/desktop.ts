@@ -1,3 +1,4 @@
+import { binaryPayload } from "../../native-ipc";
 import { fullProfile, publicProfile, storedProfile } from "../profile-wire";
 import { transferMetrics as metrics } from "../transferMetrics";
 import { invoke } from "@tauri-apps/api/core";
@@ -28,7 +29,7 @@ const native: StorageInvoke = async <T>(request: Request) => {
   const started = metrics.start();
   try {
     if (request.op === "write")
-      return await invoke<T>("storage_write", request.data as ArrayBuffer, {
+      return await invoke<T>("storage_write", binaryPayload(request.data as ArrayBuffer), {
         headers: { "x-storage-token": String(request.token) },
       });
     if (request.op === "read") {
@@ -73,6 +74,9 @@ export class DesktopStorageAdapter implements StorageAdapter {
   async saveConversation(value: Conversation) {
     await this.call({ op: "saveConversation", value });
   }
+  async getLatestMessage(id: string) {
+    return (await this.call<Message | null>({ op: "getLatestMessage", id })) ?? undefined;
+  }
   getMessages(id: string) {
     return this.call<Message[]>({ op: "getMessages", id });
   }
@@ -108,11 +112,11 @@ export class DesktopStorageAdapter implements StorageAdapter {
   }
 
   private async begin(
-    message: Pick<Message, "id" | "fileName" | "mimeType" | "size">,
+    message: Pick<Message, "id" | "fileName" | "mimeType" | "size" | "attachmentStorage">,
     folder: boolean,
   ) {
     return this.call<string>({
-      op: "begin",
+      op: import.meta.env.VITE_ANDROID && message.attachmentStorage === "managed" ? "beginReceived" : "begin",
       id: message.id,
       name: message.fileName || "attachment",
       mime: message.mimeType || "",
@@ -149,6 +153,11 @@ export class DesktopStorageAdapter implements StorageAdapter {
     };
   }
   async createExternalFileDestination(message: Message, path: string) {
+    if (import.meta.env.VITE_ANDROID) {
+      const token = await invoke<string | null>("android_export_writer", { id: message.id, size: message.size, name: message.fileName || "附件" });
+      if (!token) throw new DOMException("Cancelled", "AbortError");
+      return this.writer(token);
+    }
     const token = await this.call<string>({ op: "beginExternal", id: message.id, size: message.size, destination: path });
     return this.writer(token);
   }
@@ -238,6 +247,10 @@ export class DesktopStorageAdapter implements StorageAdapter {
       if (!target.nativeToken) throw new Error("请重新选择保存位置");
       await this.call({ op: "copyToExternal", saved: true, from: message.id, to: target.nativeToken });
       await target.close();
+      return;
+    }
+    if (import.meta.env.VITE_ANDROID) {
+      await invoke("android_export", { id: message.id });
       return;
     }
     const { save, open } = await import("@tauri-apps/plugin-dialog");

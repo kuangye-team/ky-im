@@ -9,7 +9,8 @@ test("系统配置自动应用，服务器通过弹窗添加和编辑", async ({
     page.getByRole("button", { name: "保存设置", exact: true }),
   ).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: /附近查找/ })).toBeDisabled();
-  await expect(page.getByRole("checkbox", { name: /快速直连/ })).toBeDisabled();
+  await expect(page.getByRole("group", { name: "怎么传送消息和文件" })).toHaveCount(0);
+  await expect(page.getByRole("checkbox", { name: /快速直连|兼容传输/ })).toHaveCount(0);
   const list = page.getByRole("list", { name: "信令服务器" });
   await expect(list.getByRole("textbox")).toHaveCount(0);
   await expect(list.getByText("默认服务器", { exact: true })).toBeVisible();
@@ -221,7 +222,11 @@ test("系统配置列表和编辑弹窗在手机宽度下不会横向溢出", as
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/settings");
   const { expectNoHorizontalOverflow } = await import("./helpers");
-  await expect(page.getByRole("heading", { name: "系统配置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "连接设置" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "运行日志" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "辅助服务器（STUN）", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "中转服务器（TURN）", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "重置应用数据" })).toHaveCount(0);
   await page.getByRole("region", { name: "信令服务器", exact: true }).getByRole("button", { name: "添加服务器", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await dialog
@@ -335,6 +340,13 @@ test("鉴权服务器拒绝错误密钥，正确密钥可测试、重连和聊�
   await relay.click();
   await expect(relay).toBeChecked();
   await expect(page.getByRole("status")).toHaveText("设置已生效。");
+  await page.context().setOffline(true);
+  await server.getByRole("button", { name: "测试服务器 2", exact: true }).click();
+  await expect(server.locator(".settings-test-error")).toBeVisible();
+  await expect(relay).toBeChecked();
+  await page.context().setOffline(false);
+  await expect(server.getByText("连接成功 · 支持中转", { exact: true })).toBeVisible();
+  await expect(relay).toBeChecked();
   const primary = page.getByLabel("启用服务器 1", { exact: true });
   await primary.click();
   await expect(primary).not.toBeChecked();

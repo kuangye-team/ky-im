@@ -11,6 +11,8 @@ import { cloudflareEnv } from "./build/cloudflare-env";
 export default defineConfig(({ mode }) => {
   // Cloudflare 构建从 Wrangler vars 读取，其余构建使用 ssg/.env*。
   const desktop = mode === "desktop";
+  const android = mode === "android";
+  const native = desktop || android;
   const cloudflare = mode === "cloudflare";
   const root = fileURLToPath(new URL(".", import.meta.url));
   const env: Record<string, string> = cloudflare ? {} : loadEnv(mode, root, "");
@@ -20,7 +22,7 @@ export default defineConfig(({ mode }) => {
     : env.VITE_RTC_MAX_MESSAGE_SIZE);
   const releaseVersion = String(process.env.RELEASE_VERSION || env.RELEASE_VERSION || JSON.parse(cloudflareConfig.define?.["import.meta.env.RELEASE_VERSION"] || '"0.1.0"')).trim().replace(/^v/, "");
   if (!/^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$/.test(releaseVersion)) throw new Error("Invalid RELEASE_VERSION");
-  const port = desktop ? 1420 : Number(env.WEB_PORT || 5173);
+  const port = native ? 1420 : Number(env.WEB_PORT || 5173);
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error("WEB_PORT 必须是 1–65535 之间的整数");
 
@@ -31,7 +33,8 @@ export default defineConfig(({ mode }) => {
     define: {
       ...cloudflareConfig.define,
       "import.meta.env.VITE_DESKTOP": JSON.stringify(desktop),
-      "import.meta.env.TAURI_ENV_PLATFORM": JSON.stringify(desktop ? process.env.TAURI_ENV_PLATFORM || "" : ""),
+      "import.meta.env.VITE_ANDROID": JSON.stringify(android),
+      "import.meta.env.TAURI_ENV_PLATFORM": JSON.stringify(android ? "android" : desktop ? process.env.TAURI_ENV_PLATFORM || "" : ""),
       "import.meta.env.RELEASE_VERSION": JSON.stringify(releaseVersion),
     },
     plugins: [
@@ -39,7 +42,7 @@ export default defineConfig(({ mode }) => {
       react({ exclude: [/\/node_modules\//, /\/temp\/cache\//] }),
       appIcons(),
       VitePWA({
-        disable: desktop,
+        disable: native,
         // The app prompts before activating an update or reloading an open window.
         registerType: "prompt",
         injectRegister: "auto",
@@ -61,6 +64,8 @@ export default defineConfig(({ mode }) => {
           order: "pre",
           handler: (html) =>
             html
+              .replace('/src/main.tsx', android ? '/src/android-main.ts' : '/src/main.tsx')
+              .replace("__ANDROID_ZOOM_LIMIT__", android ? ", maximum-scale=1, user-scalable=no" : "")
               .replace("__BOOT_BIRD__", () => brandSvg)
               .replace("__THEME_CONFIG__", () =>
                 JSON.stringify(THEME_CONFIG).replace(/</g, "\\u003c"),
@@ -77,6 +82,23 @@ export default defineConfig(({ mode }) => {
                   copy: LOADING_CONFIG.copy,
                 }).replace(/</g, "\\u003c"),
               ),
+        },
+      },
+      android && {
+        name: "android-webview-compatibility",
+        transformIndexHtml() {
+          // This also runs on the original Android 7 WebView, which ignores module scripts.
+          return [{ tag: "script", injectTo: "body", children: `
+            if (!window.BigInt || !window.AbortSignal || typeof AbortSignal.any !== "function") {
+              var chinese = /^zh/i.test(navigator.language || "");
+              document.getElementById("boot-brand").textContent = chinese ? "蜂鸟" : "Hummingbird";
+              document.getElementById("boot-tagline").textContent = "";
+              document.getElementById("boot-message").textContent = chinese
+                ? "请在应用商店更新 Android System WebView 或 Chrome，然后重新打开蜂鸟。"
+                : "Update Android System WebView or Chrome in your app store, then reopen Hummingbird.";
+              document.querySelector(".boot-orbit").hidden = true;
+            }
+          ` }];
         },
       },
       {
@@ -110,7 +132,7 @@ export default defineConfig(({ mode }) => {
       // 开发服务器：监听局域网，端口占用时直接报错，避免悄悄切换来源。
       port,
       strictPort: true,
-      host: desktop ? "localhost" : "0.0.0.0",
+      host: android && process.env.TAURI_DEV_HOST ? process.env.TAURI_DEV_HOST : native ? "localhost" : "0.0.0.0",
       proxy: {
         "/api": {
           // 仅开发代理使用；生产信令地址由 VITE_SIGNAL_URL 决定。
@@ -121,7 +143,7 @@ export default defineConfig(({ mode }) => {
     },
     // 静态产物可由 Rust 服务、反向代理或 Cloudflare Workers Static Assets 托管。
     build: {
-      outDir: desktop ? "desktop-dist" : "dist",
+      outDir: android ? "android-dist" : desktop ? "desktop-dist" : "dist",
       rollupOptions: {
         // 将动态导入合并到入口，网页和桌面构建的 assets 均只输出一个 JS。
         output: { inlineDynamicImports: true },

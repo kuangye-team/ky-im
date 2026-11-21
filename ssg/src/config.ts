@@ -20,6 +20,7 @@ export const SIGNALING_CONFIG = {
   joinTimeoutMs: 10_000, // 等待发现服务加入确认。
   heartbeatIntervalMs: 20_000, // 发送心跳的间隔。
   heartbeatTimeoutMs: 55_000, // 超过此时间没有 pong 则断开并重连。
+  networkChangeDelayMs: 250, // 合并同一次切网产生的多个通知。
   heartbeatResumeGraceMs: 10_000, // 页面恢复后先探测，给对端回复的宽限时间。
   reconnectInitialDelayMs: 1_000, // 指数退避的起始等待时间。
   reconnectMaxDelayMs: 120_000, // 持续失败时，随机等待 60–120 秒。
@@ -32,6 +33,7 @@ export const SIGNALING_CONFIG = {
 export const CLIENT_CONFIG = {
   webUrl: import.meta.env?.VITE_WEB_URL?.trim() || "https://im.kuangye.team/",
   downloadUrl: import.meta.env?.VITE_CLIENT_DOWNLOAD_URL?.trim() || "https://github.com/kuangye-team/ky-im/releases/latest",
+  androidApkUrl: "https://github.com/kuangye-team/ky-im/releases/latest/download/ky-im-android-arm.apk",
   // Keep the scheme in sync with app/tauri.conf.json.
   launchUrl: "ky-im://open",
 } as const;

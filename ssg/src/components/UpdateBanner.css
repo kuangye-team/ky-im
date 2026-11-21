@@ -79,3 +79,45 @@
     min-height: 42px;
   }
 }
+
+.update-banner.update-banner-compact {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 8px;
+  padding: 3px 6px 3px 16px;
+  border: 0;
+  border-bottom: 1px solid var(--primary-border);
+  border-radius: 0;
+  background: var(--primary-subtle);
+  box-shadow: none;
+}
+.update-banner-compact .update-banner-icon {
+  padding: 0;
+  background: transparent;
+}
+.update-banner-compact .update-banner-actions {
+  width: auto;
+  flex-direction: row-reverse;
+  gap: 2px;
+}
+.update-banner-compact .primary-button {
+  min-height: 44px;
+  padding: 0 10px;
+  font-size: 14px;
+  color: var(--primary);
+  background: transparent;
+  box-shadow: none;
+}
+.update-banner-compact .update-banner-later {
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+}
+.update-banner-notice {
+  grid-column: 1 / -1;
+  padding: 0 8px 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}

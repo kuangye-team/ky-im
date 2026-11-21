@@ -75,6 +75,9 @@ test("辅助服务器支持逐项添加、编辑、启停、删除和恢复默�
   await edit.getByRole("button", { name: "保存", exact: true }).click();
   await expect(edit).toBeHidden();
   await page.reload();
+  const disclosure = card(page).getByRole("button", { name: /^辅助服务器（STUN）/ });
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await disclosure.click();
   await expect(card(page).getByRole("checkbox", { name: "启用辅助服务器 5", exact: true })).not.toBeChecked();
   expect((await storedServers(page)).at(-1)).toEqual({
     urls: "stuns:backup.example:5349", name: "备用辅助服务器", enabled: false, username: "demo-user", credential: " secret password ",

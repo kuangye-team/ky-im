@@ -6,7 +6,7 @@ import { identityFor } from "../../src/core/network/libp2p/identity";
 import { browserNetwork } from "../../src/core/network";
 import { desktopNetwork } from "../../src/core/network/desktop";
 import { defaultSettings } from "../../src/core/network/settings";
-import { configuredRuntime } from "../../src/core/capabilities";
+import { transportRuntime } from "../transport-runtime";
 import { decodeNativeEvent, type P2pBridge } from "../../src/core/network/libp2p/native";
 import { priorityControl } from "../../src/core/network/sendQueue";
 
@@ -43,14 +43,13 @@ host.start = async (name, kind, mode) => {
     authorization: new URLSearchParams(location.search).get("authorization") ?? undefined,
   };
   settings.iceServers = [];
-  settings.transport.webrtc = ["rtc", "turn", "mixed", "fallback", "mdns-rtc", "webtransport-rtc"].includes(mode)
-    || (mode === "webtransport" && !native);
-  settings.transport.tcp = ["native", "tcp", "quic", "fallback", "webtransport", "webtransport-rtc"].includes(mode);
   settings.discovery.mdns = mode.startsWith("mdns");
-  if (mode.startsWith("mdns")) {
-    settings.discovery.signaling = false;
-    settings.transport.tcp = true;
-  }
+  settings.discovery.signaling = !settings.discovery.mdns;
+  const runtime = transportRuntime(native, settings, {
+    tcp: settings.discovery.mdns || ["native", "tcp", "quic", "fallback", "webtransport", "webtransport-rtc"].includes(mode),
+    webrtc: ["rtc", "turn", "mixed", "fallback", "mdns-rtc", "webtransport-rtc"].includes(mode)
+      || (mode === "webtransport" && !native),
+  });
   if (mode === "turn")
     settings.iceServers = [
       {
@@ -140,10 +139,10 @@ host.start = async (name, kind, mode) => {
     };
   }
   const network = native
-    ? desktopNetwork(bridge, settings, identity)
-    : browserNetwork(settings, identity);
+    ? desktopNetwork(bridge, settings, identity, runtime)
+    : browserNetwork(settings, identity, runtime);
   const profile = {
-    ...configuredRuntime(native, settings),
+    ...runtime,
     id,
     name,
     numericId: name === "A" ? "123456" : "234567",

@@ -194,11 +194,15 @@ test("publishes the macOS DMG directly, preserves signed update bytes and assemb
     writeFileSync(join(root, "bundle/nsis/Ky IM_1.2.3_x64-setup.exe"), "installer");
     writeFileSync(join(root, "bundle/nsis/Ky IM_1.2.3_x64-setup.exe.sig"), signature);
     collectArtifacts(join(root, "bundle"), directory, "x86_64-pc-windows-msvc", "1.2.3");
+    const apk = "ky-im-1.2.3-android-arm.apk";
+    mkdirSync(join(root, "android-dist"));
+    writeFileSync(join(root, "android-dist", apk), "signed apk");
     const manifest = writeManifest(directory, "v1.2.3", env);
     assert.equal(manifest.platforms["windows-x86_64"].url, `https://github.com/example/hummingbird/releases/download/v1.2.3/${exe}`);
     assert.equal(manifest.platforms["darwin-aarch64"].signature, signature);
     assert.equal(manifest.platforms["darwin-aarch64"].url, manifest.platforms["darwin-x86_64"].url);
     assert.deepEqual(manifest.downloads, {
+      android: `https://github.com/example/hummingbird/releases/download/v1.2.3/${apk}`,
       macos: "https://github.com/example/hummingbird/releases/download/v1.2.3/ky-im-1.2.3-macos-universal.dmg",
       windows: `https://github.com/example/hummingbird/releases/download/v1.2.3/${exe}`,
     });

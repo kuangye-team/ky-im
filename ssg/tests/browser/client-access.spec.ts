@@ -9,6 +9,7 @@ const manifest = {
     "darwin-aarch64": { url: "https://example.com/ky-im-macos-universal.app.tar.gz" },
     "windows-x86_64": { url: "https://example.com/ky-im-windows-x64-setup.exe" },
   },
+  downloads: { android: "https://example.com/ky-im-1.2.3-android-arm.apk" },
 };
 
 test("客户端入口按系统推荐下载，悬浮区可进入，键盘与关闭行为正常", async ({ page }) => {
@@ -52,15 +53,27 @@ test("下载失败可重试，手机可点击查看下载且不会横向溢出",
   await page.addInitScript(() => {
     Object.defineProperty(navigator, "platform", { value: "iPhone" });
     Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0)" });
+    // Observe the browser handoff without opening an installed app on the test host.
+    document.addEventListener("click", event => {
+      const link = (event.target as Element).closest("a");
+      if (link?.protocol !== "ky-im:") return;
+      document.documentElement.dataset.launchRequest = event.defaultPrevented ? "" : link.href;
+      event.preventDefault();
+    });
   });
   let requests = 0;
   await page.route(manifestURL, (route) => ++requests === 1 ? route.fulfill({ status: 503 }) : route.fulfill({ json: manifest }));
   await page.goto("/");
   await page.getByRole("button", { name: "打开客户端", exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-launch-request", "ky-im://open");
   const panel = page.getByRole("dialog", { name: "下载蜂鸟客户端" });
   await expect(panel.getByRole("alert")).toContainText("下载地址暂时无法获取");
+  const apk = panel.getByRole("link", { name: /Android.*APK/ });
+  await expect(apk).toHaveAttribute("href", /\/releases\/latest\/download\/ky-im-android-arm\.apk$/);
+  await expect(panel.getByText("若未打开，请先下载并安装客户端。")).toBeVisible();
   await panel.getByRole("button", { name: "重试", exact: true }).click();
   await expect(panel.getByText("v1.2.3")).toBeVisible();
+  await expect(apk).toHaveAttribute("href", manifest.downloads.android);
   await expect(panel.getByText("适合此设备")).toHaveCount(0);
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: "../temp/screenshot/client-access-mobile.png", fullPage: true });

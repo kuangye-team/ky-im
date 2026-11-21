@@ -5,7 +5,7 @@ import { browserNetwork } from "../../src/core/network";
 import { desktopNetwork } from "../../src/core/network/desktop";
 import { identityFor } from "../../src/core/network/libp2p/identity";
 import { defaultSettings } from "../../src/core/network/settings";
-import { configuredRuntime } from "../../src/core/capabilities";
+import { transportRuntime } from "../transport-runtime";
 import { transferMetrics as metrics } from "../../src/core/transferMetrics";
 import { localMessageSize } from "../../src/core/network/libp2p/rtc-limits";
 import { setFileDiagnostics } from "../../src/core/transfers/diagnostics";
@@ -67,10 +67,10 @@ const operations: Record<string, (arg: any) => Promise<any>> = {
     settings.servers = [{ ...settings.servers[0], url: query.get("api")!, enabled: true,
       authorization: "", relay: mode === "relay", relaySupported: mode === "relay" }];
     settings.iceServers = [];
-    settings.transport = { tcp: ["tcp", "quic", "webtransport"].includes(mode), webrtc: mode === "rtc" };
+    const runtime = transportRuntime(native, settings, { tcp: ["tcp", "quic", "webtransport"].includes(mode), webrtc: mode === "rtc" });
     settings.discovery.mdns = false;
     const identity = identityFor(store), id = (await identity).id;
-    const network = native ? desktopNetwork(undefined, settings, identity) : browserNetwork(settings, identity);
+    const network = native ? desktopNetwork(undefined, settings, identity, runtime) : browserNetwork(settings, identity, runtime);
     if (native && (macosSendActivity !== undefined || ["tcp", "quic"].includes(mode))) {
       const t: any = network.transport, original = t.bridge.request.bind(t.bridge);
       t.bridge.request = (session: string, request: any, handler: any) => {
@@ -80,7 +80,7 @@ const operations: Record<string, (arg: any) => Promise<any>> = {
         return original(session, request, handler);
       };
     }
-    const profile = { ...configuredRuntime(native, settings), id, name,
+    const profile = { ...runtime, id, name,
       numericId: name === "A" ? "123456" : "234567", bio: "", avatar: "🌿", color: "#597461",
       device: "Linux" as const, clientType: native ? "desktop" as const : "web" as const, revision: 1,
       maxMessageSize: await localMessageSize(native) };

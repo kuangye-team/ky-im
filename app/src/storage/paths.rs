@@ -67,9 +67,19 @@ pub(super) fn safe_name(name: &str) -> String {
         "attachment".into()
     }
 }
+#[cfg(target_os = "android")]
+pub(super) static PRIVATE_ROOTS: std::sync::OnceLock<[PathBuf; 2]> = std::sync::OnceLock::new();
+
 pub(super) fn no_links(path: &Path) -> Result<()> {
     // Reject symbolic links along the entire path before reading or writing managed data.
     for parent in path.ancestors() {
+        #[cfg(target_os = "android")]
+        if PRIVATE_ROOTS
+            .get()
+            .is_some_and(|roots| roots.iter().any(|r| r == parent))
+        {
+            break;
+        }
         if metadata(parent)?.is_some_and(|m| m.file_type().is_symlink()) {
             return Err("存储目录不能包含符号链接".into());
         }

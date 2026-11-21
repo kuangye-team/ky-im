@@ -6,13 +6,13 @@
 
 ```mermaid
 flowchart TB
-    UI["界面层 · React 网页 / 桌面 WebView"]
+    UI["界面层 · React 网页 / 桌面与 Android WebView"]
     Chat["业务层 · ChatEngine<br/>联系人、连接、消息记录"]
     Tasks["业务层 · TransferService<br/>接收许可、任务进度、保存回执"]
     Web["网页执行层<br/>BrowserTransferBackend + js-libp2p"]
-    Native["桌面执行层<br/>NativeTransferBackend → Rust 文件任务 + rust-libp2p"]
+    Native["客户端执行层<br/>NativeTransferBackend → Rust 文件任务 + rust-libp2p"]
     BrowserStore["浏览器存储<br/>IndexedDB 记录 / OPFS 附件"]
-    Disk["桌面存储<br/>SQLite 记录 / 托管附件目录"]
+    Disk["客户端存储<br/>SQLite 记录 / 托管附件目录"]
     Peer["对端设备"]
     UI <-->|命令与状态| Chat
     UI -->|发送、接收、取消| Tasks

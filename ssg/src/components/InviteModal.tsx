@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { translateError } from "../localizeError";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Check, Copy, LoaderCircle } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import type { ChatEngine } from "../core";
 import type { Profile } from "../core/types";
 import { Modal } from "./Modal";
@@ -14,7 +15,7 @@ export function InviteModal({
   onClose,
   profile,
   connected,
-  previousPeer,
+  mode = "both",
   engine,
   onNotice,
   onConnected,
@@ -23,7 +24,7 @@ export function InviteModal({
   onClose: () => void;
   profile: Profile;
   connected: boolean;
-  previousPeer: Profile | null;
+  mode?: "share" | "number" | "both";
   engine: ChatEngine;
   onNotice: (message: string) => void;
   onConnected: () => void;
@@ -38,10 +39,10 @@ export function InviteModal({
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(url).hostname);
   useEffect(() => {
     if (!open) return;
-    setNumericId(previousPeer?.numericId || "");
+    setNumericId("");
     setError("");
     setCopied(false);
-  }, [open, previousPeer]);
+  }, [open]);
   const copyAddress = async () => {
     try {
       await copyText(
@@ -92,14 +93,26 @@ export function InviteModal({
     <Modal
       open={open}
       onClose={() => !busy && onClose()}
-      title={t("邀请朋友")}
-      description={t("分享网址和蜂鸟号，找到彼此的在线设备。")}
+      title={t(mode === "number" ? "输入蜂鸟号" : "邀请朋友")}
+      description={mode === "number" ? undefined : t("让朋友扫码或打开下方网址，再用蜂鸟号找到你。")}
+      className={mode === "number" ? "invite-modal number-modal" : "invite-modal"}
     >
-      <OwnNumber
-        numericId={profile.numericId}
-        onNotice={onNotice}
-        onRefresh={() => engine.refreshNumericId()}
-      />
+      {mode !== "number" && <>
+      <div className="invite-share">
+        <QRCodeSVG
+          className="invite-qr"
+          value={url}
+          size={156}
+          level="M"
+          marginSize={4}
+          title={t("访问地址二维码")}
+        />
+        <OwnNumber
+          numericId={profile.numericId}
+          onNotice={onNotice}
+          onRefresh={mode === "both" ? () => engine.refreshNumericId() : undefined}
+        />
+      </div>
       <label className="form-label" htmlFor="invite-address">
         {t("访问地址")}
       </label>
@@ -126,10 +139,11 @@ export function InviteModal({
           {t("当前地址只能在这台设备打开，请使用朋友也能访问的蜂鸟网址。")}
         </p>
       )}
-      <div className="invite-divider">
+      </>}
+      {mode === "both" && <div className="invite-divider">
         <span>{t("找不到朋友的设备？")}</span>
-      </div>
-      <form onSubmit={(event) => void submit(event)} aria-busy={busy}>
+      </div>}
+      {mode !== "share" && <form onSubmit={(event) => void submit(event)} aria-busy={busy}>
         <label className="form-label" htmlFor="connect-number">
           {t("朋友的蜂鸟号")}
         </label>
@@ -169,7 +183,7 @@ export function InviteModal({
             {translateError(error)}
           </p>
         )}
-      </form>
+      </form>}
     </Modal>
   );
 }

@@ -17,7 +17,7 @@ interface DiscoveryHost {
   updatePeers(peers: Profile[], removed?: string[], replaceAll?: boolean): void;
   refreshPeer(peer: Profile): Promise<void>;
   ensureLink(peerId: string): void;
-  checkPeers(resumed: boolean): void;
+  networkChanged(): void;
   patch(values: Partial<ChatSnapshot>): void;
   showError(error: unknown): void;
   stop(): void;
@@ -46,6 +46,7 @@ export class DeviceDiscovery {
   private lastHeartbeatAt = Date.now();
   private welcomedAt?: number;
   private reconnectAttempt = 0;
+  private openedAfterNetworkChange = false;
   private lastReceivedAt = Date.now();
   private lookups = new Map<string, PendingLookup>();
   private groupLookups = new Map<string, PendingGroupLookup>();
@@ -123,15 +124,24 @@ export class DeviceDiscovery {
     socket?.close();
     this.rejectLookups("连接已关闭，请重试");
   }
-  resume() {
-    if (this.session?.readyState === DISCOVERY_OPEN) this.checkHeartbeat(true);
-    else if (!this.session) this.connect();
+  recheckNetwork() {
+    this.resetBackoff();
+    const socket = this.session;
+    if (socket?.recheckNetwork) {
+      socket.recheckNetwork();
+    } else if (socket?.readyState === DISCOVERY_OPEN && this.welcomedAt !== undefined) {
+      if (!this.heartbeatProbe) this.probeHeartbeat(socket);
+    } else if (!socket || socket.readyState > DISCOVERY_OPEN || !this.openedAfterNetworkChange) {
+      // Replace a handshake on the old route once. Further notifications share the new attempt.
+      if (socket) this.disconnect();
+      this.connect(true);
+    }
   }
 
   resetBackoff() {
     this.reconnectAttempt = 0;
   }
-  connect() {
+  connect(afterNetworkChange = false) {
     if (!this.host.running || this.host.snapshot.availability === "offline") return;
     clearTimeout(this.reconnectTimer);
     if (
@@ -153,6 +163,7 @@ export class DeviceDiscovery {
       return;
     }
     this.session = socket;
+    this.openedAfterNetworkChange = afterNetworkChange;
     this.welcomedAt = undefined;
     this.armDiscoveryDeadline(socket, SIGNALING_CONFIG.openTimeoutMs);
     socket.onopen = () => {
@@ -190,36 +201,30 @@ export class DeviceDiscovery {
       );
     };
     socket.onerror = (event) => {
-      if (event && "cause" in event && event.cause instanceof CompatibilityError) { this.host.showError(event.cause); return; }
-      if (this.session === socket)
-        runtimeLog("error", "discovery", "设备查找遇到问题", {
-          detail:
-            event && "message" in event ? String(event.message) : undefined,
-        });
-      if (this.session === socket)
-        this.host.patch({
-          error:
-            event &&
-            "message" in event &&
-            typeof event.message === "string" &&
-            event.message
-              ? event.message
-              : "暂时连不上蜂鸟，请检查网络后重试。",
-        });
-    };
-    socket.onclose = () => {
       if (this.session !== socket) return;
-      runtimeLog("warn", "discovery", "设备查找已断开，准备重试");
-      this.session = undefined;
-      this.rejectLookups("连接已断开，请稍后重试");
-      clearInterval(this.heartbeat);
-      clearTimeout(this.discoveryDeadline);
-      this.clearHeartbeatProbe();
-      this.welcomedAt = undefined;
-      this.host.updatePeers([], [], true);
-      this.host.patch({ status: "disconnected" });
-      this.scheduleReconnect();
+      if (event && "cause" in event && event.cause instanceof CompatibilityError) { this.host.showError(event.cause); return; }
+      const message = event && "message" in event && typeof event.message === "string" ? event.message : undefined;
+      runtimeLog("error", "discovery", "设备查找遇到问题", { detail: message });
+      this.host.patch({ error: message || "暂时连不上蜂鸟，请检查网络后重试。" });
     };
+    socket.onclose = () => this.connectionLost(socket);
+  }
+  private connectionLost(socket: DiscoverySession) {
+    if (this.session !== socket) return;
+    runtimeLog("warn", "discovery", "设备查找已断开，准备重试");
+    this.session = undefined;
+    this.rejectLookups("连接已断开，请稍后重试");
+    clearInterval(this.heartbeat);
+    clearTimeout(this.discoveryDeadline);
+    this.clearHeartbeatProbe();
+    this.welcomedAt = undefined;
+    this.host.updatePeers([], [], true);
+    this.scheduleReconnect();
+  }
+  private closeUnresponsive(socket: DiscoverySession) {
+    // A broken route can leave a WebSocket in CLOSING until the OS times out.
+    this.connectionLost(socket);
+    socket.close();
   }
   private armDiscoveryDeadline(socket: DiscoverySession, delay: number) {
     clearTimeout(this.discoveryDeadline);
@@ -228,7 +233,7 @@ export class DeviceDiscovery {
       if (this.session !== socket || this.welcomedAt !== undefined) return;
       if (Date.now() - deadline > SIGNALING_CONFIG.heartbeatIntervalMs)
         this.armDiscoveryDeadline(socket, SIGNALING_CONFIG.joinTimeoutMs);
-      else socket.close();
+      else this.closeUnresponsive(socket);
     }, delay);
   }
   private clearHeartbeatProbe() {
@@ -244,17 +249,17 @@ export class DeviceDiscovery {
   private probeHeartbeat(socket: DiscoverySession) {
     this.clearHeartbeatProbe();
     const deadline = Date.now() + SIGNALING_CONFIG.heartbeatResumeGraceMs;
-    // Keep the payload exact so Cloudflare can answer without waking the hub.
-    socket.send(JSON.stringify({ type: "ping" }));
     this.heartbeatProbe = setTimeout(() => {
       this.heartbeatProbe = undefined;
-      if (this.session !== socket || socket.readyState !== DISCOVERY_OPEN)
-        return;
+      if (this.session !== socket) return;
       // The page may have been suspended again while waiting for this probe.
-      if (Date.now() - deadline > SIGNALING_CONFIG.heartbeatIntervalMs)
+      if (socket.readyState === DISCOVERY_OPEN && Date.now() - deadline > SIGNALING_CONFIG.heartbeatIntervalMs)
         this.probeHeartbeat(socket);
-      else socket.close();
+      else this.closeUnresponsive(socket);
     }, SIGNALING_CONFIG.heartbeatResumeGraceMs);
+    // Keep the payload exact so Cloudflare can answer without waking the hub.
+    try { socket.send('{"type":"ping"}'); }
+    catch { this.closeUnresponsive(socket); }
   }
   checkHeartbeat(resumed = false) {
     const socket = this.session;
@@ -271,7 +276,7 @@ export class DeviceDiscovery {
       return;
     }
     if (this.heartbeatProbe) return;
-    if (stale) socket.close();
+    if (stale) this.closeUnresponsive(socket);
     else socket.send(JSON.stringify({ type: "ping" }));
   }
   private scheduleReconnect() {
@@ -414,7 +419,7 @@ export class DeviceDiscovery {
     if (!data || typeof data !== "object") return;
     if (confirmsActivity(data)) this.receivedTraffic();
     if (data.type === "network_changed") {
-      this.host.checkPeers(true);
+      if (!this.host.adapter.usesBrowserNetworkStatus) this.host.networkChanged();
       return;
     }
     if (data.type === "discovery_updated") {

@@ -1,9 +1,10 @@
+import { isNative } from "./platform";
 import { pngIcons, themeIcons } from "virtual:app-icons";
 import { THEME_CONFIG } from "./theme-config";
 
 /** Installation metadata and PNGs travel with the entry bundle, including offline. */
 export function initializeAppIcons() {
-  if (import.meta.env.VITE_DESKTOP) return;
+  if (isNative()) return;
 
   const appleTouchIcon = document.createElement("link");
   appleTouchIcon.rel = "apple-touch-icon";

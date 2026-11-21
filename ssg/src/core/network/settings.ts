@@ -1,3 +1,4 @@
+import { isNative } from "../../platform";
 import { CONNECTION_CONFIG, SIGNALING_CONFIG } from "../../config";
 import { validateIceServers, type IceServer } from "../../ice-servers";
 
@@ -11,17 +12,18 @@ export type SignalServer = {
   relaySupported?: boolean;
   extend?: Record<string, unknown>;
 };
+export type ProxyMode = "system" | "direct";
 export type NetworkSettings = {
+  proxyMode: ProxyMode;
   iceServers: IceServer[];
   servers: SignalServer[];
   discovery: { signaling: boolean; mdns: boolean };
-  transport: { tcp: boolean; webrtc: boolean };
 };
 export const NETWORK_SETTINGS_KEY = "hummingbird.network";
 export const DEFAULT_SERVER_ID = "default";
 export const isDesktop = () => Boolean(import.meta.env.VITE_DESKTOP);
 
-export function defaultSettings(desktop = isDesktop()): NetworkSettings {
+export function defaultSettings(desktop = isNative()): NetworkSettings {
   const localServer =
     desktop &&
     import.meta.env.DEV &&
@@ -30,6 +32,7 @@ export function defaultSettings(desktop = isDesktop()): NetworkSettings {
       ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/ws`
       : "ws://127.0.0.1:8080/api/ws";
   return {
+    proxyMode: import.meta.env.VITE_ANDROID ? "direct" : "system",
     iceServers: CONNECTION_CONFIG.rtc.iceServers.map((server) => ({ ...server })),
     servers: [
       {
@@ -41,40 +44,26 @@ export function defaultSettings(desktop = isDesktop()): NetworkSettings {
       },
     ],
     discovery: { signaling: true, mdns: desktop },
-    transport: { tcp: desktop, webrtc: true },
   };
 }
 
 export function validateSettings(
   value: NetworkSettings,
-  desktop = isDesktop(),
+  desktop = isNative(),
 ): NetworkSettings {
   if (
     !value ||
+    (value.proxyMode !== undefined && value.proxyMode !== "system" && value.proxyMode !== "direct") ||
     !Array.isArray(value.servers) ||
     value.servers.length > 16 ||
     !value.discovery ||
-    !value.transport ||
-    [
-      value.discovery.signaling,
-      value.discovery.mdns,
-      value.transport.tcp,
-      value.transport.webrtc,
-    ].some((flag) => typeof flag !== "boolean")
+    [value.discovery.signaling, value.discovery.mdns].some((flag) => typeof flag !== "boolean")
   )
     throw new Error("配置格式不正确，请重新设置");
   if (!value.discovery.signaling && !value.discovery.mdns)
     throw new Error("请至少选择一种查找设备的方式");
-  if (!value.transport.tcp && !value.transport.webrtc)
-    throw new Error("请至少选择一种传输方式");
-  if (
-    !desktop &&
-    (value.discovery.mdns ||
-      value.transport.tcp ||
-      !value.discovery.signaling ||
-      !value.transport.webrtc)
-  )
-    throw new Error("网页版使用在线查找和兼容传输，其他方式请使用客户端");
+  if (!desktop && (value.discovery.mdns || !value.discovery.signaling))
+    throw new Error("网页版仅支持在线查找设备");
   const builtIn = defaultSettings(desktop).servers[0];
   const defaults = value.servers.filter(
     (server) => server?.id === DEFAULT_SERVER_ID,
@@ -158,14 +147,14 @@ export function validateSettings(
   if (value.discovery.signaling && !servers.some((server) => server.enabled))
     throw new Error("使用在线查找时，请至少启用一个服务器");
   return {
+    proxyMode: desktop ? value.proxyMode ?? "system" : "system",
     iceServers: validateIceServers(value.iceServers),
     servers,
     discovery: { ...value.discovery },
-    transport: { ...value.transport },
   };
 }
 
-export function readSettings(desktop = isDesktop()): NetworkSettings {
+export function readSettings(desktop = isNative()): NetworkSettings {
   try {
     const raw = localStorage.getItem(NETWORK_SETTINGS_KEY);
     if (raw) {

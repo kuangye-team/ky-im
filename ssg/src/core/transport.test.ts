@@ -3,6 +3,9 @@ import { testStorage } from "./storage/test-opfs";
 import { testNetwork } from "./test-network";
 import { describe, expect, it, vi } from "vitest";
 import { ChatEngine } from "./engine";
+import { desktopNetwork, type NativeBridge } from "./network/desktop";
+import { identityFor } from "./network/libp2p/identity";
+import { defaultSettings } from "./network/settings";
 import { MAX_BUFFERED_FILE_BYTES, decodeChunk, encodeChunk, newId } from "./protocol";
 import type { Message, Profile } from "./types";
 import { CONNECTION_CONFIG, SIGNALING_CONFIG } from "../config";
@@ -135,11 +138,114 @@ describe("idle signaling and reconnect costs", () => {
     expect(Socket.instances).toHaveLength(before + 1);
   });
 
-  it("does not replace a healthy signaling socket on duplicate online events", async () => {
-    const { socket } = await discoveryOnly();
+  it("skips a long backoff after a network change and starts the next retry at the initial delay", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const connection = new EventTarget();
+    Object.assign(navigator, { connection });
+    let { socket } = await discoveryOnly();
+    for (const ceiling of [1000, 2000, 4000, 8000, 16000, 32000, 64000]) {
+      socket.close();
+      await vi.advanceTimersByTimeAsync(ceiling * 0.75);
+      socket = Socket.instances.at(-1)!;
+    }
+    socket.close(); // The scheduled retry is now 90 seconds away.
+    const count = Socket.instances.length;
+    connection.dispatchEvent(new Event("change"));
     window.dispatchEvent(new Event("online"));
-    expect(Socket.instances).toHaveLength(1);
-    expect(socket.readyState).toBe(Socket.OPEN);
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.networkChangeDelayMs);
+    expect(Socket.instances).toHaveLength(count + 1);
+    Socket.instances.at(-1)!.close();
+    await vi.advanceTimersByTimeAsync(750);
+    expect(Socket.instances).toHaveLength(count + 2);
+  });
+
+  it("replaces a pending web handshake once and ignores a late reply from the old socket", async () => {
+    vi.useFakeTimers();
+    const { engine, socket } = await discoveryOnly();
+    socket.close();
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.reconnectInitialDelayMs);
+    const pending = Socket.instances.at(-1)!;
+    pending.onopen?.();
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.networkChangeDelayMs);
+    const replacement = Socket.instances.at(-1)!;
+    expect(replacement).not.toBe(pending);
+    pending.receive({ type: "welcome", peers: [] });
+    expect(engine.getSnapshot().status).toBe("connecting");
+    window.dispatchEvent(new Event("online"));
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.networkChangeDelayMs);
+    expect(Socket.instances.at(-1)).toBe(replacement);
+    replacement.onopen?.();
+    replacement.receive({ type: "welcome", peers: [] });
+    expect(engine.getSnapshot().status).toBe("connected");
+  });
+
+  it("recovers a desktop signaling handshake on native interface changes without browser events", async () => {
+    const storage = bufferedStorage(`desktop-recovery-${newId()}`);
+    adapters.push(storage);
+    const identity = await identityFor(storage);
+    const settings = defaultSettings(true);
+    settings.discovery.mdns = false;
+    settings.servers[0].url = "ws://127.0.0.1/api/ws";
+    let emit: Parameters<NativeBridge["request"]>[2];
+    const starts = vi.fn();
+    const network = desktopNetwork({
+      async request<T>(...[, command, handler]: Parameters<NativeBridge["request"]>) {
+        if (command.op === "start") { emit = handler; starts(); }
+        return undefined as T;
+      },
+      async write() {},
+    }, settings, Promise.resolve(identity));
+    const engine = new ChatEngine(storage, { ...me, id: identity.id, clientType: "desktop" }, [], network);
+    engines.push(engine);
+    vi.useFakeTimers();
+    engine.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(engine.getSnapshot().status).toBe("connected");
+    const stale = Socket.instances[0];
+    emit!({ type: "network_changed", id: identity.id });
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.networkChangeDelayMs);
+    expect(stale.readyState).toBe(3);
+    expect(Socket.instances).toHaveLength(2);
+    emit!({ type: "network_changed", id: identity.id });
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.networkChangeDelayMs);
+    expect(Socket.instances).toHaveLength(2);
+    expect(starts).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([true, false])("checks even a recently active socket once and keeps it only if it replies, pong=%s", async pong => {
+    vi.useFakeTimers();
+    const connection = new EventTarget();
+    Object.assign(navigator, { connection });
+    const { engine, socket } = await discoveryOnly();
+    // The old OS connection can take much longer to report close.
+    vi.spyOn(socket, "close").mockImplementation(() => { socket.readyState = 2; });
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(SIGNALING_CONFIG.networkChangeDelayMs);
+    expect(requests(socket, "ping")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    window.dispatchEvent(new Event("online"));
+    if (pong) socket.receive({ type: "pong" });
+    await vi.advanceTimersByTimeAsync(6000);
+    if (pong) {
+      expect(socket.readyState).toBe(Socket.OPEN);
+      expect(Socket.instances).toHaveLength(1);
+    } else {
+      expect(requests(socket, "ping")).toHaveLength(1);
+      expect(Socket.instances).toHaveLength(2);
+      const replacement = Socket.instances.at(-1)!;
+      replacement.onopen?.();
+      replacement.receive({ type: "welcome", peers: [] });
+      socket.onclose?.();
+      expect(engine.getSnapshot().status).toBe("connected");
+    }
+    connection.dispatchEvent(new Event("change"));
+    engine.setAvailability("offline");
+    const count = Socket.instances.length;
+    connection.dispatchEvent(new Event("change"));
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(Socket.instances).toHaveLength(count);
   });
 });
 
@@ -707,7 +813,7 @@ describe("my availability", () => {
     );
     vi.stubGlobal("navigator", { storage: testStorage, onLine: true });
     window.dispatchEvent(new Event("online"));
-    expect(Socket.instances).toHaveLength(2);
+    await vi.waitFor(() => expect(Socket.instances).toHaveLength(2));
     expect(engine.getSnapshot().status).toBe("connecting");
   });
 });

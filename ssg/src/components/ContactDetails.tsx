@@ -1,35 +1,37 @@
 import { deviceLabel } from "../core/profile";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
-import { ArrowRight, File, FolderOpen, Image as ImageIcon } from "lucide-react";
+import { File, FolderOpen, Image as ImageIcon } from "lucide-react";
 import type { ChatEngine } from "../core";
 import { isPeerOnline } from "../core/types";
 import type { Profile, Message, ChatSnapshot } from "../core/types";
 import { RemarkEditor } from "./RemarkEditor";
+import { CopyNumberButton } from "./OwnNumber";
 import { SharedFileActions } from "./SharedFileActions";
 import { readableSize, downloadAttachment } from "./fileDownloads";
 import { Avatar, DeviceIcon, peerName } from "./Avatar";
 
 export function ContactDetails({
+  allFiles = false,
   peer,
-  remark,
   snap,
   engine,
-  onConnectGroup,
+  showFields = true,
   onNotice,
   onDelete,
   onForward,
 }: {
+  allFiles?: boolean;
   peer: Profile;
-  remark: string;
   snap: ChatSnapshot;
   engine: ChatEngine;
-  onConnectGroup: () => void;
+  showFields?: boolean;
   onDelete: (message: Message) => void;
   onForward: (message: Message) => void;
   onNotice: (message: string) => void;
 }) {
   const { t } = useTranslation();
+  const remark = snap.conversations.find(c => c.peer.id === peer.id)?.remark;
   return (
     <>
       <div className="contact-profile">
@@ -50,30 +52,11 @@ export function ContactDetails({
           <DeviceIcon peer={peer} />
           {deviceLabel(peer)}
         </span>
-        <div className="contact-profile-fields">
-          <RemarkEditor
-            key={peer.id}
-            peerId={peer.id}
-            remark={remark}
-            engine={engine}
-            onNotice={onNotice}
-          />
-          <AutoAcceptFiles
-            key={`auto-accept-${peer.id}`}
-            peerId={peer.id}
-            enabled={snap.conversations.some(
-              (conversation) =>
-                conversation.peer.id === peer.id &&
-                conversation.autoAcceptFiles === true,
-            )}
-            engine={engine}
-            onNotice={onNotice}
-          />
-          <ContactNumber peer={peer} onConnect={onConnectGroup} />
-        </div>
+        {showFields && <ContactFields key={peer.id} peer={peer} snap={snap} engine={engine} onNotice={onNotice} />}
       </div>
       <SharedFiles
-        messages={snap.messages}
+        allFiles={allFiles}
+        messages={snap.activePeerId === peer.id ? snap.messages : []}
         engine={engine}
         onNotice={onNotice}
         onDelete={onDelete}
@@ -81,6 +64,17 @@ export function ContactDetails({
       />
     </>
   );
+}
+
+export function ContactFields({ peer, snap, engine, onNotice }: {
+  peer: Profile; snap: ChatSnapshot; engine: ChatEngine; onNotice: (message: string) => void;
+}) {
+  const conversation = snap.conversations.find(c => c.peer.id === peer.id);
+  return <div className="contact-profile-fields">
+    <RemarkEditor peerId={peer.id} remark={conversation?.remark || ""} engine={engine} onNotice={onNotice} />
+    <AutoAcceptFiles peerId={peer.id} enabled={conversation?.autoAcceptFiles === true} engine={engine} onNotice={onNotice} />
+    <ContactNumber peer={peer} onNotice={onNotice} />
+  </div>;
 }
 
 function AutoAcceptFiles({
@@ -125,13 +119,17 @@ function AutoAcceptFiles({
   );
 }
 
-function SharedFiles({
+export function SharedFiles({
+  allFiles,
+  heading,
   messages,
   engine,
   onNotice,
   onDelete,
   onForward,
 }: {
+  allFiles: boolean;
+  heading?: string;
   messages: Message[];
   engine: ChatEngine;
   onNotice: (message: string) => void;
@@ -143,12 +141,12 @@ function SharedFiles({
   return (
     <div className="detail-section">
       <h3>
-        {t("共享文件")}
+        {heading || t("共享文件")}
         <span>{files.length.toString().padStart(2, "0")}</span>
       </h3>
       {files.length ? (
         files
-          .slice(-3)
+          .slice(allFiles ? 0 : -3)
           .reverse()
           .map((file) => (
             <div className="shared-file" key={file.id}>
@@ -202,10 +200,10 @@ function SharedFiles({
 
 function ContactNumber({
   peer,
-  onConnect,
+  onNotice,
 }: {
   peer: Profile;
-  onConnect: () => void;
+  onNotice: (message: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -214,16 +212,7 @@ function ContactNumber({
         <span className="contact-field-label">{t("蜂鸟号")}</span>
         <span className="contact-field-value">
           <b>{peer.numericId || t("暂无蜂鸟号")}</b>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={t("连接此分组")}
-            title={t("连接此分组")}
-            onClick={onConnect}
-            disabled={!peer.numericId}
-          >
-            <ArrowRight size={15} />
-          </button>
+          <CopyNumberButton key={peer.numericId} numericId={peer.numericId} onNotice={onNotice} />
         </span>
       </div>
     </div>

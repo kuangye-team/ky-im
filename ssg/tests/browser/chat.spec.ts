@@ -6,6 +6,7 @@ import {
   openContact,
   openPeer,
   enableAutoAcceptFiles,
+  expectPeerNumberCopy,
   selectContactAction,
   sendText,
   editProfile,
@@ -212,13 +213,15 @@ test("两个独立浏览器可发现、传输内容、更新资料，并保留�
     await expect(sidebar).toBeVisible();
     await expect(contactDialog).toBeHidden();
     const contact = await openContact(alice);
+    await expectPeerNumberCopy(alice, contact);
     const actions = contact.getByRole("button", {
       name: "聊天操作",
       exact: true,
     });
     await actions.click();
     await expect(alice.getByRole("menu")).toBeVisible();
-    await expect(alice.getByRole("menuitem")).toHaveCount(2);
+    await expect(alice.getByRole("menuitem", { name: "查看聊天文件" })).toBeVisible();
+    await expect(alice.getByRole("menuitem").locator("svg.lucide-chevron-right:last-child")).toHaveCount(3);
     await capture(alice, "desktop-contact-menu.png");
     await alice.keyboard.press("Escape");
     await expect(alice.getByRole("menu")).toBeHidden();

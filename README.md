@@ -2,17 +2,20 @@
 
 English | [简体中文](README.zh.md) · [GitHub](https://github.com/kuangye-team/ky-im)
 
-Hummingbird is a local-network chat and file-sharing app for browsers, PWAs, and macOS and Windows desktops (Ky IM). Devices exchange text, images, files, and folders directly whenever possible. Each device keeps its own history. No account is required.
+Hummingbird is a local-network chat and file-sharing app for browsers, PWAs, Android phones, and macOS and Windows desktops (Ky IM). Devices exchange text, images, files, and folders directly whenever possible. Each device keeps its own history. No account is required.
 
 ## Features
 
 | Capability | Browser / PWA | Desktop app |
 | --- | --- | --- |
 | Find a device | Discover nearby devices through a signaling server or look up a six-digit Hummingbird number | Also discover devices on the LAN through mDNS, even without a server or internet access |
+| Recover after network loss | Automatically resume discovery when the network returns | Also recheck discovery when a local interface address changes |
 | Chat and share | Share with other browsers over WebRTC or connect directly to a desktop | Connect to browsers over WebTransport or WebRTC or to desktops over TCP, QUIC, or WebRTC |
 | Reach a peer through a relay | Both peers can opt in to an end-to-end encrypted relay on the same server | Same as browser |
 | Keep history offline | History and attachments stay in browser storage, subject to the site's quota | History stays on the device. Attachments can live on a separate drive |
 | Transfer large files and folders | Stream to storage and resume interruptions while the page stays open | Stream to disk and resume interruptions while the app stays open |
+
+Android uses the same chat engine. Its universal APK includes ARM64 and ARMv7, and received attachments can be saved to a folder selected on the phone. [Android build and verification](docs/android.md)
 
 ## Architecture
 
@@ -21,7 +24,7 @@ The signaling service introduces devices and helps them establish a connection. 
 ```mermaid
 flowchart LR
     Browser["Browser / PWA<br/>js-libp2p"] <-->|Discovery and signaling| API["Signaling service<br/>Rust server or Cloudflare Worker"]
-    App["Desktop app<br/>rust-libp2p"] <-->|Discovery and signaling| API
+    App["Desktop / Android<br/>rust-libp2p"] <-->|Discovery and signaling| API
     Browser <-->|Chat and file transfers| App
     Browser --- WebDB["IndexedDB + OPFS"]
     App --- AppDB["SQLite + local files"]
@@ -33,6 +36,7 @@ The clients share the React interface and the engine for contacts, messages, and
 
 | Goal | Start here |
 | --- | --- |
+| Install or update on Android | Download `ky-im-<version>-android-arm.apk` from a release that includes Android. Once installed, check for updates in Me → About Hummingbird. |
 | Install the desktop app | Download the universal macOS installer or Windows x64 installer from [GitHub Releases](https://github.com/kuangye-team/ky-im/releases). |
 | Host the website and API | Extract `ky-im-<version>-bin.tar.gz` from the same release. Run `start_linux.sh`, `start_mac.sh`, or `start_win.bat` in the extracted `release/` directory. |
 | Run with Docker | Use the [prebuilt image](docker/compose.yml) as shown below. To build a custom image, complete source setup and run `npm run compose` from the repository root. |

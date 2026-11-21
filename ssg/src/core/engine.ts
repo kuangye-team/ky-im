@@ -1,3 +1,4 @@
+import { isNative } from "../platform";
 import { storageUsage } from "./storage/usage";
 import { fitsProfileResponse } from "./profile-wire";
 import { localMessageSize } from "./network/libp2p/rtc-limits";
@@ -7,6 +8,7 @@ import { DeviceDiscovery } from "./discovery";
 import {
   PROFILE_AVATARS,
   PROFILE_COLORS,
+  SIGNALING_CONFIG,
   STORAGE_CONFIG
 } from "../config";
 import { readLanguagePreference, resolveLanguage } from "../i18n/language";
@@ -17,7 +19,6 @@ import { generateNumericId } from "./device-number";
 import { identityFor } from "./network/libp2p/identity";
 import { errorMessage } from "./transfers/io";
 import {
-  isDesktop,
   readSettings,
   saveSettings,
   validateSettings,
@@ -93,9 +94,18 @@ export class ChatEngine {
   private resettingData = false;
   private running = false;
   private numberRefresh?: Promise<void>;
-  private readonly onOnline = () => {
-    this.connections.checkPeers(true);
-    this.discovery.resume();
+  private readonly networkChangeListeners = new Set<() => void>();
+  private browserConnection?: EventTarget;
+  private networkChangeTimer?: ReturnType<typeof setTimeout>;
+  private readonly onNetworkChange = () => {
+    if (!this.running || this.networkChangeTimer !== undefined) return;
+    this.networkChangeTimer = setTimeout(() => {
+      this.networkChangeTimer = undefined;
+      if (this.network.discovery.usesBrowserNetworkStatus && navigator.onLine === false) return;
+      this.discovery.recheckNetwork();
+      this.connections.checkPeers(true);
+      for (const listener of this.networkChangeListeners) listener();
+    }, SIGNALING_CONFIG.networkChangeDelayMs);
   };
   private readonly onVisible = () => {
     if (document.visibilityState === "visible") {
@@ -155,7 +165,7 @@ export class ChatEngine {
       updatePeers: (peers, removed, replaceAll) => this.connections.updatePeers(peers, removed, replaceAll),
       refreshPeer: peer => this.history.refreshPeer(this.cachedProfiles.get(peer.id) ?? peer),
       ensureLink: id => this.connections.ensureLink(id),
-      checkPeers: resumed => this.connections.checkPeers(resumed),
+      networkChanged: this.onNetworkChange,
       stop: () => this.stop(),
     });
     this.connections = new PeerConnections({
@@ -219,6 +229,9 @@ export class ChatEngine {
     const info = this.network.runtime ?? localRuntime();
     return { version: info.version, capabilities: [...info.capabilities] };
   }
+  get needsNearbyPermission() {
+    return this.network.needsNearbyPermission === true;
+  }
   get networkSettings() {
     return readSettings();
   }
@@ -277,6 +290,10 @@ export class ChatEngine {
       this.patch({});
     }
   }
+  subscribeNetworkChange(listener: () => void) {
+    this.networkChangeListeners.add(listener);
+    return () => { this.networkChangeListeners.delete(listener); };
+  }
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
@@ -317,7 +334,9 @@ export class ChatEngine {
     });
     this.network.transport.publish?.(this.snapshot.profile);
     this.connections.start();
-    window.addEventListener("online", this.onOnline);
+    this.browserConnection = (navigator as Navigator & { connection?: EventTarget }).connection;
+    this.browserConnection?.addEventListener("change", this.onNetworkChange);
+    window.addEventListener("online", this.onNetworkChange);
     window.addEventListener("offline", this.onOffline);
     if (typeof document !== "undefined")
       document.addEventListener("visibilitychange", this.onVisible);
@@ -327,7 +346,11 @@ export class ChatEngine {
     this.running = false;
     this.transferService.stop();
     this.connections.stop();
-    window.removeEventListener("online", this.onOnline);
+    clearTimeout(this.networkChangeTimer);
+    this.networkChangeTimer = undefined;
+    this.browserConnection?.removeEventListener("change", this.onNetworkChange);
+    this.browserConnection = undefined;
+    window.removeEventListener("online", this.onNetworkChange);
     window.removeEventListener("offline", this.onOffline);
     if (typeof document !== "undefined")
       document.removeEventListener("visibilitychange", this.onVisible);
@@ -379,6 +402,12 @@ export class ChatEngine {
   }
   connectByNumericId(numericId: string) {
     return this.discovery.connectByNumericId(numericId);
+  }
+  getConversationPreview(peerId: string) {
+    return this.history.getPreview(peerId);
+  }
+  setVisibleConversation(peerId: string | null) {
+    void this.history.setVisiblePeer(peerId).catch(error => this.showError(error));
   }
   async selectPeer(peer: Profile) {
     this.connections.focus(peer);
@@ -500,7 +529,7 @@ export async function createChatEngine(
   const identity = !network ? identityFor(adapter) : undefined;
   let profile = await adapter.getProfile();
   const adapters = network ?? (await defaultNetwork(undefined, identity));
-  const desktop = isDesktop();
+  const desktop = isNative();
   const runtime = adapters.runtime ?? localRuntime(desktop);
   const maxMessageSize = await localMessageSize(desktop);
   const saved = profile && isProfile(profile) ? profile : undefined;

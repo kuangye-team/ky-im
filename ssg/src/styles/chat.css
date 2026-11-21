@@ -298,11 +298,20 @@
   color: var(--muted);
 }
 .composer-presence-hint {
-  margin: 0 0 10px;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 16px;
+  background: var(--surface-soft);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
+  text-align: center;
 }
+.composer-presence-hint svg { flex: none; }
 .composer-tools {
   display: flex;
   align-items: center;

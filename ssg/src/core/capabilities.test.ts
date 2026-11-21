@@ -27,8 +27,6 @@ describe("runtime capability policies", () => {
     expect(requirePeer(desktop, web)).toEqual([CAP.webtransport]);
     expect(availableTransports(web, web)).toEqual([]);
     expect(availableTransports(desktop, desktop)).toEqual([]);
-    expect(configuredRuntime(true, {transport: {tcp: false, webrtc: true}, servers: []}).capabilities)
-      .not.toContain(CAP.webtransport);
   });
   it("separates minimum requirements from optional resume", () => {
     const peer = { ...localRuntime(), capabilities: [CAP.query, CAP.chat, CAP.file, CAP.webrtc] };
@@ -43,11 +41,12 @@ describe("runtime capability policies", () => {
     catch (error) { expect((error as CompatibilityError).reasons).toEqual(["server-update", "server-unsupported"]); }
     expect(() => requireServer({ relay: true, relayVersion: 2 })).toThrow(CompatibilityError);
   });
-  it("advertises enabled transport methods and preserves optional feature support", () => {
-    const info = configuredRuntime(true, { transport: { tcp: false, webrtc: true }, servers: [] });
-    expect(info.capabilities).not.toContain(CAP.tcp);
-    expect(info.capabilities).not.toContain(CAP.relay);
-    expect(info.capabilities).toContain(CAP.resume);
-    expect(info.capabilities).toContain(CAP.webrtc);
+  it("offers platform transports automatically and advertises relay only with consent", () => {
+    const native = configuredRuntime(true, { servers: [] });
+    expect(native.capabilities).toEqual(expect.arrayContaining([CAP.tcp, CAP.webtransport, CAP.webrtc, CAP.resume]));
+    expect(native.capabilities).not.toContain(CAP.relay);
+    const web = configuredRuntime(false, { servers: [{ enabled: true, relay: true, relaySupported: true }] });
+    expect(web.capabilities).toEqual(expect.arrayContaining([CAP.webrtc, CAP.relay]));
+    expect(web.capabilities).not.toContain(CAP.tcp);
   });
 });

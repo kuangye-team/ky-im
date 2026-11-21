@@ -81,6 +81,7 @@ test("真实新版就绪后显示顶部提示，点击后刷新到新版，草�
     page.getByRole("textbox", { name: "消息内容" }),
   ).toBeInViewport();
   await capture(page, "update-banner-mobile.png");
+  expect((await page.getByRole("region", { name: "网站更新" }).boundingBox())!.height).toBeLessThan(64);
   await page.setViewportSize({ width: 360, height: 640 });
   await expectNoHorizontalOverflow(page);
   await expect(
@@ -89,13 +90,16 @@ test("真实新版就绪后显示顶部提示，点击后刷新到新版，草�
   await expect(
     page.getByRole("textbox", { name: "消息内容" }),
   ).toBeInViewport();
+  await page.getByRole("button", { name: "返回列表", exact: true }).click();
+  await capture(page, "update-banner-messages.png");
+  await page.getByRole("link", { name: "我的", exact: true }).click();
   await page.getByRole("button", { name: "切换主题", exact: true }).click();
   await page.getByRole("button", { name: "静夜紫", exact: true }).click();
   await page.getByRole("button", { name: "就用这个", exact: true }).click();
   await page.getByRole("button", { name: "语言", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "English", exact: true }).click();
   await expect(page.getByRole("region", { name: "App update" })).toContainText(
-    "A new version of Hummingbird is ready",
+    "Update available",
   );
   await expectNoHorizontalOverflow(page);
   await expect(
@@ -106,6 +110,7 @@ test("真实新版就绪后显示顶部提示，点击后刷新到新版，草�
   await page
     .getByRole("menuitemradio", { name: "中文", exact: true })
     .click();
+  await page.getByRole("link", { name: "消息", exact: true }).click();
   await page.getByRole("button", { name: "更新并刷新" }).click();
   await expect(page.locator("html")).toHaveAttribute("data-release", "2");
   await expect(page.getByRole("region", { name: "网站更新" })).toBeHidden();

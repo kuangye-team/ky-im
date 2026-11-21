@@ -12,6 +12,7 @@
 | 原生服务与正式网页 | `production.api`、`production.ssg` | `api/.env.production` 用于原生构建和预览，`ssg/.env.production` 用于网页构建。 |
 | 从源码构建 Docker 镜像 | `compose.root`、`compose.api`、`compose.ssg` | 根目录 `.env` 汇总宿主机端口、npm 镜像源和前端构建参数。`api/.env.compose` 供容器内的服务启动时读取。初始化脚本还会生成 `ssg/.env.compose`。 |
 | 桌面客户端 | `desktop.app`、`desktop.ssg` | `app/.env` 配置打包，`ssg/.env.desktop` 配置前端。桌面命令会刷新这两个文件，进程环境变量优先。 |
+| Android 客户端 | `android.app`、`production.ssg` | Android 命令直接读取版本、签名和前端配置。非空环境变量优先。 |
 | Cloudflare | `wrangler.api`、`wrangler.ssg` | `api/wrangler.jsonc` 为 Worker 提供运行时变量。Cloudflare 模式的前端构建读取 `ssg/wrangler.jsonc` 中的 `vars`。 |
 
 使用 **Docker 预构建镜像**时，将 `docker/.env.example` 复制为 `docker/.env`。修改后在 `docker/` 目录运行 `docker compose up -d`。使用**服务端发布包**时，启动脚本会在首次运行时创建 `release/.env`。每行写一个 `KEY=value`，值按原文读取，省略引号、`export` 和行尾注释。修改后重启服务。这两个文件均独立于 `npm run init` 管理。[Docker 模板](../docker/.env.example) · [服务端发布包模板](../release/.env.example)
@@ -118,3 +119,5 @@ npm run deploy
 | Variable | `VITE_WEB_URL`、`VITE_CLIENT_DOWNLOAD_URL`、`VITE_RTC_MAX_MESSAGE_SIZE`、`VITE_RTC_MAX_BUFFERED_AMOUNT`、`VITE_RTC_BUFFERED_AMOUNT_LOW_THRESHOLD`、`VITE_RTC_FILE_CHUNK_SIZE`、`VITE_MACOS_SEND_ACTIVITY`、`VITE_WINDOWS_SEND_ACTIVITY`、`VITE_SHOW_TRANSFER_SPEED` |
 
 未配置仓库参数时，Actions 使用空信令地址和空预设密钥、`local` 命名空间，以及上文的 ICE 和传输默认值。更新签名私钥及密码应存放在 Actions Secrets 中。
+
+Android 构建、签名变量及设备验收见 [Android 客户端](android.zh.md)。

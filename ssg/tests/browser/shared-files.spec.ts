@@ -156,7 +156,7 @@ test("共享文件仅下载按钮触发下载，更多菜单支持键盘和实�
     await openPeer(recipient, fixture.owner);
     await enableAutoAcceptFiles(recipient);
 
-    // On mobile, the same dropdown must open forwarding over the contact dialog.
+    // On mobile, the same dropdown opens forwarding from the contact page.
     await page.setViewportSize({ width: 390, height: 844 });
     const mobileContact = await openContact(page);
     await mobileContact
@@ -190,6 +190,7 @@ test("共享文件仅下载按钮触发下载，更多菜单支持键盘和实�
     expect(await readFile((await (await receiving).path())!, "utf8")).toBe(
       fixture.contents,
     );
+    await page.getByRole("button", { name: "返回聊天", exact: true }).click();
     await expect(page.locator(".chat-heading h2")).toHaveText(fixture.peer);
     expect(downloads).toEqual([fixture.name]);
     expect(
@@ -280,7 +281,6 @@ test("共享文件删除可取消，手机确认后清除附件并保留其他�
   });
   expect(attachmentCount).toBe(0);
   await page.reload();
-  await openPeer(page, fixture.peer);
   await expect(page.getByRole("log")).toContainText(fixture.retainedText);
   await expect(message).toHaveCount(0);
   const restoredContact = await openContact(page);

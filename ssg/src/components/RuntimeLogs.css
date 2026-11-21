@@ -8,6 +8,9 @@
 .runtime-logs .modal-heading {
   margin-bottom: 0;
 }
+.logs-page { display: grid; align-content: start; gap: 16px; }
+.logs-page .log-entries { overflow: visible; }
+
 .runtime-logs .modal-heading p {
   max-width: 640px;
   line-height: 1.6;
@@ -198,4 +201,64 @@
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.log-filter[data-active="true"] {
+  color: var(--primary);
+  border-color: var(--primary-border);
+  background: var(--primary-subtle);
+}
+.log-options-menu {
+  max-width: min(290px, calc(100vw - 24px));
+}
+.log-retention {
+  padding: 9px 10px 5px;
+  border-top: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.logs-page {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.logs-page .log-toolbar {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.logs-page .log-toolbar .search-field {
+  flex: 1;
+  min-width: 0;
+}
+.logs-page .search-field input {
+  min-width: 0;
+  font-size: 16px;
+}
+.logs-page .log-toolbar .icon-button {
+  flex: none;
+  width: 36px;
+  height: 38px;
+}
+.logs-page .log-filters { gap: 4px; }
+.logs-page .log-filter {
+  padding: 5px 8px;
+  min-height: 32px;
+  gap: 4px;
+  font-size: 12px;
+}
+.logs-page .log-source {
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.logs-page .log-source summary { padding: 4px 0; }
+.log-source small {
+  display: block;
+  padding: 4px 10px 8px;
+}
+.logs-page .log-clear .secondary-button,
+.logs-page .log-footer .secondary-button {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 12px;
 }

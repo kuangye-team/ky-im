@@ -1,19 +1,18 @@
+import { isNative } from "../platform";
 import catalog from "../../../shared/capabilities.json";
 export const CAP = Object.freeze(catalog);
 export const RELEASE_VERSION = import.meta.env.RELEASE_VERSION || "0.1.0";
 export interface RuntimeInfo { version: string; capabilities: string[] }
 export const canDialWebTransport = () => globalThis.isSecureContext === true && typeof globalThis.WebTransport === "function";
-export function localRuntime(desktop = !!import.meta.env.VITE_DESKTOP): RuntimeInfo {
+export function localRuntime(desktop = isNative()): RuntimeInfo {
   return { version: RELEASE_VERSION, capabilities: [desktop ? CAP.app : CAP.web,
     CAP.discovery, CAP.signaling, CAP.reverseDial, CAP.query, CAP.chat, CAP.file, CAP.resume, CAP.folder, CAP.folderResume,
     CAP.receipts, CAP.webrtc, CAP.relay, ...(desktop || canDialWebTransport() ? [CAP.webtransport] : []), ...(desktop ? [CAP.tcp] : [])] };
 }
-export function configuredRuntime(desktop: boolean, settings: { transport: { tcp: boolean; webrtc: boolean }; servers: { enabled: boolean; relay?: boolean; relaySupported?: boolean }[] }): RuntimeInfo {
+export function configuredRuntime(desktop: boolean, settings: { servers: { enabled: boolean; relay?: boolean; relaySupported?: boolean }[] }): RuntimeInfo {
   const info = localRuntime(desktop);
-  info.capabilities = info.capabilities.filter(c => (c !== CAP.tcp || settings.transport.tcp) &&
-    (c !== CAP.webtransport || !desktop || settings.transport.tcp) &&
-    (c !== CAP.webrtc || settings.transport.webrtc) &&
-    (c !== CAP.relay || settings.servers.some(s => s.enabled && s.relay && s.relaySupported)));
+  if (!settings.servers.some(s => s.enabled && s.relay && s.relaySupported))
+    info.capabilities = info.capabilities.filter(c => c !== CAP.relay);
   return info;
 }
 export function isRuntimeInfo(value: unknown): value is RuntimeInfo {

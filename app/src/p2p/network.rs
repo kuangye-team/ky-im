@@ -1,7 +1,7 @@
 //! Central WebSockets, relay tunnels and SDP exchange over authenticated desktop streams.
 use super::{Emit, EmitData, transport::Pipes};
 use futures::{SinkExt, StreamExt};
-use rustls_platform_verifier::ConfigVerifierExt;
+use reqwest_websocket::Message;
 use serde_json::{Value, json};
 use std::{
     collections::HashMap,
@@ -15,7 +15,7 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     sync::{Notify, mpsc},
 };
-use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
+
 use tokio_util::sync::CancellationToken;
 type Result<T> = std::result::Result<T, String>;
 struct Source {
@@ -135,7 +135,7 @@ impl Network {
     }
     async fn packet(&self, source: &str, packet: Value) -> Result<()> {
         let s = self.source(source)?;
-        tokio::select! { _ = s.cancel.cancelled() => Err("服务器连接已断开".into()), result = s.send.send(Message::Text(packet.to_string().into())) => result.map_err(|e| e.to_string()) }
+        tokio::select! { _ = s.cancel.cancelled() => Err("服务器连接已断开".into()), result = s.send.send(Message::Text(packet.to_string())) => result.map_err(|e| e.to_string()) }
     }
     pub async fn open(
         &self,
@@ -143,6 +143,7 @@ impl Network {
         name: String,
         address: String,
         permitted: bool,
+        use_system_proxy: bool,
     ) -> Result<()> {
         if !address.starts_with("ws://") && !address.starts_with("wss://") {
             return Err("服务器地址无法使用".into());
@@ -165,29 +166,32 @@ impl Network {
         let network = self.clone();
         tokio::spawn(async move {
             let result = async {
-                let config = WebSocketConfig::default()
-                    .max_message_size(Some(512 * 1024))
-                    .max_frame_size(Some(512 * 1024));
-                // Match WebView trust: honor OS roots (including user-trusted development CAs),
-                // while retaining certificate, hostname and validity checks.
-                let tls =
-                    rustls::ClientConfig::with_platform_verifier().map_err(|e| e.to_string())?;
-                let (ws, _) = tokio::time::timeout(
+                let ws = tokio::time::timeout(
                     Duration::from_secs(15),
-                    tokio_tungstenite::connect_async_tls_with_config(
-                        &address,
-                        Some(config),
-                        true,
-                        Some(tokio_tungstenite::Connector::Rustls(Arc::new(tls))),
-                    ),
+                    super::signaling_socket::connect(&address, use_system_proxy),
                 )
                 .await
-                .map_err(|e| e.to_string())?
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())??;
                 (network.emit)(json!({"type":"socket","socketId":id,"state":"open"}));
                 let (mut write, mut read) = ws.split();
+                #[cfg(target_os = "android")]
+                let joined = AtomicBool::new(false);
                 let outgoing = async {
-                    while let Some(message) = rx.recv().await {
+                    loop {
+                        // An idle Android WebView can stop scheduling the discovery timer.
+                        // Keep the registered WSS session alive from its owning native task.
+                        #[cfg(target_os = "android")]
+                        let next =
+                            match tokio::time::timeout(Duration::from_secs(20), rx.recv()).await {
+                                Ok(next) => next,
+                                Err(_) if joined.load(Ordering::Relaxed) => {
+                                    Some(Message::Text(r#"{"type":"ping"}"#.into()))
+                                }
+                                Err(_) => continue,
+                            };
+                        #[cfg(not(target_os = "android"))]
+                        let next = rx.recv().await;
+                        let Some(message) = next else { break };
                         write.send(message).await.map_err(|e| e.to_string())?;
                     }
                     Ok::<_, String>(())
@@ -200,6 +204,10 @@ impl Network {
                             Message::Text(raw) => {
                                 let packet: Value =
                                     serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+                                #[cfg(target_os = "android")]
+                                if packet["type"] == "welcome" {
+                                    joined.store(true, Ordering::Relaxed);
+                                }
                                 network.observe(&id, &source, &packet);
                                 if packet["type"] == "tunnel" {
                                     network.tunnel_packet(&id, &source, &packet).await?;
@@ -225,7 +233,7 @@ impl Network {
                                     .try_send(Message::Pong(data))
                                     .map_err(|e| e.to_string())?;
                             }
-                            Message::Close(_) => break,
+                            Message::Close { .. } => break,
                             _ => continue,
                         }
                         // Relay frames stay in Rust. Coalesce liveness notifications to the WebView.
@@ -257,7 +265,7 @@ impl Network {
         }
         self.source(id)?
             .send
-            .try_send(Message::Text(packet.to_string().into()))
+            .try_send(Message::Text(packet.to_string()))
             .map_err(|_| "连接繁忙，请稍后重试".into())
     }
     fn observe(&self, id: &str, source: &Source, packet: &Value) {
@@ -558,7 +566,7 @@ impl Network {
             t.cancel.cancel();
             self.pipes.close(&t.pipe);
             if notify && let Ok(s) = self.source(&t.source) {
-                let _ = s.send.try_send(Message::Text(json!({"type":"tunnel","to":t.peer,"session":t.session,"data":{"kind":"close"}}).to_string().into()));
+                let _ = s.send.try_send(Message::Text(json!({"type":"tunnel","to":t.peer,"session":t.session,"data":{"kind":"close"}}).to_string()));
             }
         }
     }

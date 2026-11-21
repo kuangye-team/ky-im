@@ -13,6 +13,37 @@ interface HistoryHost {
 }
 
 export class ChatHistory {
+  private visiblePeer: string | null | undefined;
+  private readonly previews = new Map<string, Promise<Message | undefined>>();
+
+  getPreview(peerId: string) {
+    const cached = this.cache.get(peerId);
+    if (cached) return Promise.resolve(cached.at(-1));
+    let preview = this.previews.get(peerId);
+    if (!preview) {
+      preview = this.storage.getLatestMessage?.(peerId) ?? this.storage.getMessages(peerId).then(rows => rows.at(-1));
+      this.previews.set(peerId, preview);
+      preview.catch(() => this.previews.delete(peerId));
+    }
+    return preview;
+  }
+
+  private isReading(peerId: string) {
+    return (this.visiblePeer === undefined ? this.host.snapshot.activePeerId : this.visiblePeer) === peerId;
+  }
+
+  async setVisiblePeer(peerId: string | null) {
+    this.visiblePeer = peerId;
+    if (!peerId) return;
+    await this.write(async () => {
+      const existing = this.host.snapshot.conversations.find(c => c.peer.id === peerId);
+      if (!existing?.unread || !this.isReading(peerId)) return;
+      const next = { ...existing, unread: 0 };
+      await this.storage.saveConversation(next);
+      this.host.patch({ conversations: this.host.snapshot.conversations.map(c => c === existing ? next : c) });
+    });
+  }
+
   readonly cache = new Map<string, Message[]>();
   readonly knownMessages = new Map<string, Message>();
   // Keep local tombstones for this session so delayed RTC packets cannot restore deletions.
@@ -63,7 +94,7 @@ export class ChatHistory {
           ...previous,
           peer,
           updatedAt: previous?.updatedAt || Date.now(),
-          unread: 0,
+          unread: this.isReading(peer.id) ? 0 : previous?.unread || 0,
         };
         await this.storage.saveConversation(conversation);
         const messages = await this.storage.getMessages(peer.id);
@@ -171,7 +202,7 @@ export class ChatHistory {
         updatedAt: Math.max(previous?.updatedAt || 0, message.createdAt),
         unread:
           (previous?.unread || 0) +
-          (incoming && this.host.snapshot.activePeerId !== peer.id ? 1 : 0),
+          (incoming && !this.isReading(peer.id) ? 1 : 0),
       };
       await this.storage.saveConversation(conversation);
       const messages =
@@ -217,6 +248,7 @@ export class ChatHistory {
       await this.write(async () => {
         // Do not cancel transfers or change visible state until the atomic deletion succeeds.
         await this.storage.deleteMessages([...selected]);
+        this.previews.clear();
         const transfers = { ...this.host.snapshot.transfers };
         for (const id of selected) {
           this.deletedMessages.add(id);
@@ -250,6 +282,7 @@ export class ChatHistory {
     try {
       await this.write(async () => {
         await this.storage.deleteConversation(peerId);
+        this.previews.delete(peerId);
         this.cache.delete(peerId);
         for (const [id, message] of this.knownMessages)
           if (message.peerId === peerId) this.knownMessages.delete(id);
@@ -284,6 +317,7 @@ export class ChatHistory {
   }
 
   clearSnapshot() {
+    this.previews.clear();
     this.cache.clear();
     this.knownMessages.clear();
     this.host.patch({ conversations: [], messages: [], activePeerId: null, transfers: {} });

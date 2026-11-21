@@ -15,11 +15,13 @@ import { download } from "./fileDownloads";
 import "./StoragePage.css";
 
 export function HistoryPage({
+  phone = false,
   engine,
   snap,
   onClear,
   onNotice,
 }: {
+  phone?: boolean;
   engine: ChatEngine;
   snap: ChatSnapshot;
   onClear: () => void;
@@ -27,6 +29,8 @@ export function HistoryPage({
 }) {
   const { t } = useTranslation("components");
   const [exporting, setExporting] = useState(false);
+  const exportLabel = exporting ? t("正在导出…") : t("导出记录");
+  const clearLabel = t("清空记录");
   const exportHistory = async () => {
     setExporting(true);
     try {
@@ -62,7 +66,7 @@ export function HistoryPage({
   return (
     <section className="full-page storage-page history-manager">
       <div className="page-heading">
-        <h1>{t("聊天记录")}</h1>
+        {!phone && <h1>{t("聊天记录")}</h1>}
         <p>{t("保存值得留下的聊天，随时导出或整理。")}</p>
       </div>
       <div className="history-summary">
@@ -87,15 +91,16 @@ export function HistoryPage({
         </div>
         <button
           className="secondary-button history-export-button"
+          aria-label={exportLabel}
           disabled={exporting || !snap.conversations.length}
           onClick={() => void exportHistory()}
         >
           {exporting ? (
-            <LoaderCircle size={15} className="history-spinner" />
+            <LoaderCircle size={15} className="history-spinner" aria-hidden="true" />
           ) : (
-            <Download size={15} />
+            <Download size={15} aria-hidden="true" />
           )}
-          {exporting ? t("正在导出…") : t("导出记录")}
+          {!phone && exportLabel}
         </button>
       </div>
 
@@ -113,9 +118,9 @@ export function HistoryPage({
             </p>
           </span>
         </div>
-        <button className="danger-outline" onClick={onClear}>
+        <button className="danger-outline" aria-label={clearLabel} onClick={onClear}>
           <Trash2 size={15} aria-hidden="true" />
-          {t("清空记录")}
+          {!phone && clearLabel}
         </button>
       </div>
       <p className="storage-footnote">

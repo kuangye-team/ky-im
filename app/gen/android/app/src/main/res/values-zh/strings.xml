@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">蜂鸟</string>
+    <string name="peer_session">已连接到好友设备</string>
+    <string name="peer_session_detail">切换应用后可继续聊天和传输文件。</string>
+    <string name="peer_session_stop">停止后台连接</string>
+</resources>

@@ -22,70 +22,9 @@
 .history-summary small {
   font-size: 12px;
 }
-.storage-manager .storage-metrics > div > span {
-  display: flex;
-  align-items: center;
-  min-height: 26px;
-}
-.storage-metrics .storage-usage-label {
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.storage-sync {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 6px;
-  color: var(--muted);
-}
-.storage-sync:hover,
-.storage-sync:focus-visible {
-  color: var(--primary);
-  background: var(--surface-soft);
-}
-.storage-metrics .metric-detail {
-  display: block;
-  margin-top: 8px;
-  line-height: 1.6;
-  font-size: 11px;
-}
-.storage-file-filters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-.storage-file-filters button {
-  min-height: 40px;
-  padding: 9px 15px;
-  border-radius: 8px;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
-.storage-file-filters button:hover,
-.storage-file-filters button[aria-pressed="true"] {
-  background: var(--surface-soft);
-  color: var(--text-secondary);
-}
-.storage-file-filters > span {
-  margin-left: auto;
-  font-size: 11px;
-  color: var(--muted);
-}
 .storage-footnote > svg {
   flex-shrink: 0;
   margin-top: 3px;
-}
-.storage-manager .storage-metrics {
-  margin-top: 12px;
-}
-.storage-manager .storage-metrics-with-cache {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-}
-.storage-manager .storage-metrics > div:first-child {
-  padding-left: 0;
 }
 .history-manager .settings-block > div {
   min-width: 0;
@@ -94,51 +33,193 @@
   flex-shrink: 0;
 }
 .history-export-button,
-.large-files-toolbar > button,
-.large-files-empty > button {
+.large-files-toolbar > button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
 }
-.large-files-section {
-  padding: 25px 0;
-  border-bottom: 1px solid var(--line);
+.storage-summary {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
 }
-.large-files-heading {
+.page-heading + .storage-summary {
+  margin-top: 20px;
+}
+.storage-usage {
+  padding: 10px 18px 17px;
+  background: linear-gradient(110deg, var(--primary-subtle), var(--surface-soft));
+}
+.storage-usage-heading,
+.storage-usage-heading > span,
+.storage-usage-values {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+}
+.storage-usage-heading,
+.storage-usage-values {
+  justify-content: space-between;
+  gap: 12px;
+}
+.storage-usage-heading > span {
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+.storage-usage-heading svg {
+  color: var(--primary);
+}
+.storage-sync {
+  width: 36px;
+  height: 36px;
+  margin-right: -8px;
+  border-radius: 50%;
+}
+.storage-usage-values {
+  align-items: baseline;
   flex-wrap: wrap;
 }
-.storage-manager-actions {
-  display: flex;
-  flex-wrap: wrap;
+.storage-usage-values > strong {
+  color: var(--text);
+  font-size: 32px;
+  font-weight: 650;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.storage-usage-values small {
+  font-size: 16px;
+  font-weight: 500;
+}
+.storage-usage-values > span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.storage-usage-values b {
+  margin-left: 3px;
+  font-weight: 500;
+}
+.storage-directory {
+  padding: 5px 16px;
+  border-top: 1px solid var(--line);
+}
+.storage-directory-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
 }
-.storage-manager-actions > button {
+.storage-directory-heading > svg {
+  color: var(--text-secondary);
+}
+.storage-directory h2 {
+  font-size: 14px;
+  font-weight: 500;
+}
+.storage-directory p {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.storage-directory [role="alert"] {
+  color: var(--danger);
+}
+.storage-directory-path {
+  overflow-wrap: anywhere;
+}
+.storage-text-action {
+  min-height: 40px;
+  padding: 0 5px;
+  gap: 2px;
+  border-radius: 6px;
+  color: var(--primary);
+  font-size: 13px;
+  font-weight: 550;
   white-space: nowrap;
+}
+.storage-text-action:hover:not(:disabled),
+.storage-sync:hover:not(:disabled) {
+  background: var(--primary-subtle);
+}
+.large-files-section {
+  padding: 24px 0 0;
+}
+.large-files-heading,
+.storage-list-controls,
+.storage-manager-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.large-files-heading,
+.storage-manager-actions {
+  flex-wrap: wrap;
+}
+.large-files-heading {
+  justify-content: flex-start;
+}
+.large-files-heading > :last-child:not(h2) {
+  margin-inline-start: auto;
 }
 .large-files-heading h2 {
   display: flex;
-  align-items: center;
-  gap: 11px;
-  color: var(--text-secondary);
-  font-size: 15px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--text);
+  font-size: 17px;
   font-weight: 600;
 }
-.large-files-heading h2 > svg {
-  color: var(--muted);
+.large-files-heading small,
+.storage-filter-detail {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 400;
 }
-.large-files-heading p,
-.large-files-note {
+.storage-list-controls {
   margin-top: 8px;
-  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.storage-file-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.storage-file-filters button {
+  position: relative;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 1px;
+  gap: 5px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.storage-file-filters button[aria-pressed="true"] {
+  color: var(--primary);
+  font-weight: 600;
+}
+.storage-file-filters button[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 2px;
+}
+.storage-file-filters button > span {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface-muted);
   font-size: 11px;
-  line-height: 1.8;
+  font-variant-numeric: tabular-nums;
+}
+.storage-file-filters button[aria-pressed="true"] > span {
+  background: var(--primary-subtle);
 }
 .large-files-toolbar {
   display: flex;
@@ -188,9 +269,7 @@
   padding: 0;
   margin: 0;
   list-style: none;
-  border: 1px solid var(--line);
-  border-top: 0;
-  border-radius: 0 0 10px 10px;
+  border-bottom: 1px solid var(--line);
   overflow: hidden;
 }
 .large-files-list > li {
@@ -198,7 +277,7 @@
   align-items: center;
   gap: 13px;
   min-width: 0;
-  padding: 15px;
+  padding: 12px 3px;
 }
 .large-files-list > li + li {
   border-top: 1px solid var(--line);
@@ -213,8 +292,8 @@
   flex: 0 0 40px;
   height: 43px;
   border-radius: 9px;
-  color: var(--muted);
-  background: var(--surface-soft);
+  color: var(--primary);
+  background: var(--primary-subtle);
 }
 .large-file-description {
   min-width: 0;
@@ -266,7 +345,6 @@
 }
 .large-file-actions .large-file-download {
   color: var(--primary);
-  background: var(--surface-soft);
 }
 .large-file-actions .large-file-download:hover:not(:disabled) {
   color: var(--text-secondary);
@@ -282,11 +360,8 @@
   justify-content: center;
   gap: 12px;
   padding: 32px 15px;
-  min-height: 145px;
+  min-height: 130px;
   text-align: center;
-  background: var(--surface-soft);
-  border: 1px dashed var(--border);
-  border-radius: 11px;
   color: var(--muted);
 }
 .large-files-empty strong {
@@ -294,7 +369,6 @@
   font-weight: 500;
   color: var(--text-secondary);
 }
-.large-files-empty p,
 .large-files-confirm-size {
   font-size: 12px;
   color: var(--text-secondary);
@@ -313,95 +387,8 @@
     transform: rotate(360deg);
   }
 }
-@media (max-width: 600px) {
-  .storage-manager .storage-metrics-with-cache {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    row-gap: 24px;
-  }
-  .storage-manager .storage-metrics-with-cache > div:nth-child(odd) {
-    padding-left: 0;
-    border-left: 0;
-  }
-  .large-files-heading {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .large-files-toolbar {
-    flex-wrap: wrap;
-    gap: 12px;
-    padding: 12px;
-  }
-  .large-files-selection {
-    flex: 1;
-    min-width: 110px;
-  }
-  .large-files-toolbar > button {
-    padding: 9px 11px;
-  }
-  .large-files-list > li {
-    gap: 9px;
-    padding: 13px 12px;
-  }
-  .large-file-icon {
-    display: none;
-  }
-  .large-file-description strong {
-    font-size: 12px;
-  }
-  .large-file-size {
-    font-size: 10px;
-  }
-  .large-file-actions .icon-button {
-    width: 40px;
-    height: 40px;
-  }
-  .large-file-check {
-    width: 36px;
-    height: 40px;
-    margin-left: -8px;
-  }
-  .large-files-select-all {
-    min-height: 40px;
-  }
-  .storage-manager .storage-metrics strong {
-    font-size: clamp(15px, 4.5vw, 19px);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .history-spinner {
     animation: none;
   }
-}
-
-.storage-directory {
-  margin: 24px 0;
-  padding: 20px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-soft);
-}
-.storage-directory-heading,
-.storage-directory h2 {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.storage-directory-heading {
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-.storage-directory h2 {
-  font-size: 15px;
-  font-weight: 600;
-}
-.storage-directory p {
-  margin-top: 12px;
-  font-size: 12px;
-  line-height: 1.8;
-  color: var(--muted);
-}
-.storage-directory-path {
-  overflow-wrap: anywhere;
-  color: var(--text-secondary);
 }

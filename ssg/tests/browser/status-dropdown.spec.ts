@@ -51,9 +51,9 @@ test("状态菜单支持键盘切换、保存离线选择和从个人资料恢�
 
 test("手机宽度下状态菜单完整显示，关闭菜单保留选择", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
+  await page.goto("/me");
   const trigger = page
-    .locator(".topbar")
+    .locator(".phone-identity")
     .getByRole("button", { name: "我的状态", exact: true });
   await expect(trigger.locator(".availability-value")).toHaveText("在线");
   await trigger.click();

@@ -14,6 +14,21 @@ pub fn header(request: &Request<'_>, name: &str) -> Result<String, String> {
 pub fn raw(body: &InvokeBody, limit: usize) -> Result<Vec<u8>, String> {
     match body {
         InvokeBody::Raw(bytes) if bytes.len() <= limit => Ok(bytes.clone()),
+        #[cfg(target_os = "android")]
+        InvokeBody::Json(value) => {
+            use base64::{Engine, engine::general_purpose::STANDARD};
+            let encoded = value["base64"].as_str().ok_or("Invalid binary payload")?;
+            if encoded.len() > limit.div_ceil(3) * 4 {
+                return Err("Payload too large".into());
+            }
+            let bytes = STANDARD
+                .decode(encoded)
+                .map_err(|_| "Invalid binary payload")?;
+            if bytes.len() > limit {
+                return Err("Payload too large".into());
+            }
+            Ok(bytes)
+        }
         _ => Err("Invalid binary payload".into()),
     }
 }

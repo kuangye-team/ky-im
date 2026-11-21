@@ -1,12 +1,14 @@
 import { useTranslation } from "react-i18next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Download, MoreHorizontal, Trash2 } from "lucide-react";
+import { ChevronRight, Download, FolderOpen, MoreHorizontal, Trash2 } from "lucide-react";
 import { useRef } from "react";
 
 export function ContactActions({
+  onFiles,
   onExport,
   onDelete,
 }: {
+  onFiles: () => void;
   onExport: () => void;
   onDelete: () => void;
 }) {
@@ -39,9 +41,15 @@ export function ContactActions({
             if (openingConfirmation.current) event.preventDefault();
           }}
         >
+          <DropdownMenu.Item className="contact-menu-item" onSelect={onFiles}>
+            <FolderOpen size={16} />
+            {t("查看聊天文件", { ns: "translation" })}
+            <ChevronRight className="chat-action-chevron" size={16} aria-hidden="true" />
+          </DropdownMenu.Item>
           <DropdownMenu.Item className="contact-menu-item" onSelect={onExport}>
             <Download size={16} />
             {t("导出文字记录")}
+            <ChevronRight className="chat-action-chevron" size={16} aria-hidden="true" />
           </DropdownMenu.Item>
           <DropdownMenu.Separator className="contact-menu-separator" />
           <DropdownMenu.Item
@@ -53,6 +61,7 @@ export function ContactActions({
           >
             <Trash2 size={16} />
             {t("删除聊天记录")}
+            <ChevronRight className="chat-action-chevron" size={16} aria-hidden="true" />
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>

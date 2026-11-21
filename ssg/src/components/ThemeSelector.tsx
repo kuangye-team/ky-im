@@ -6,7 +6,7 @@ import { Modal } from "./Modal";
 import { syncDesktopTheme } from "../desktop-window";
 import { themeIcons } from "virtual:app-icons";
 
-export function ThemeSelector() {
+export function ThemeSelector({ row = false }: { row?: boolean } = {}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(readThemePreference);
@@ -49,7 +49,8 @@ export function ThemeSelector() {
         onClick={() => setOpen(true)}
       >
         <Palette size={16} aria-hidden="true" />
-        <span>{t(current.name)}</span>
+        {row && <strong>{t("主题")}</strong>}
+          <span>{t(current.name)}</span>
       </button>
       <Modal
         open={open}

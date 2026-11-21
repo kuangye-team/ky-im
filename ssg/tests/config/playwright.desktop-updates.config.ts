@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { ssgRoot, suiteConfig } from "./shared";
 
 export default suiteConfig("desktop", {
-  testMatch: "updates.spec.ts",
+  testMatch: ["updates.spec.ts", "close-window.spec.ts"],
   outputDir: resolve(ssgRoot, "../temp/artifacts/desktop-updates"),
   use: { baseURL: "http://127.0.0.1:4320" },
   webServer: {

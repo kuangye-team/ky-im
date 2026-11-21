@@ -27,6 +27,39 @@ fn text<'a>(value: &'a Value, key: &str) -> Result<&'a str, String> {
     value[key].as_str().ok_or_else(|| format!("Missing {key}"))
 }
 #[tauri::command]
+pub async fn probe_signaling_server(
+    address: String,
+    authorization: Option<String>,
+    use_system_proxy: bool,
+    timeout_ms: u64,
+) -> Result<String, String> {
+    use futures::{SinkExt, StreamExt};
+    use reqwest_websocket::Message;
+
+    tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms.min(15_000)),
+        async {
+            let mut socket = super::signaling_socket::connect(&address, use_system_proxy).await?;
+            let auth = json!({"type": "auth", "authorization": authorization});
+            socket
+                .send(Message::Text(auth.to_string()))
+                .await
+                .map_err(|e| e.to_string())?;
+            while let Some(frame) = socket.next().await {
+                match frame.map_err(|e| e.to_string())? {
+                    Message::Text(raw) => return Ok(raw),
+                    Message::Ping(_) | Message::Pong(_) => continue,
+                    _ => break,
+                }
+            }
+            Err("Server did not return capabilities".into())
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn p2p_request(
     app: tauri::AppHandle,
     storage: State<'_, crate::storage::StorageState>,
@@ -44,19 +77,35 @@ pub async fn p2p_request(
         let key = serde_json::from_value(request["key"].clone()).map_err(|e| e.to_string())?;
         let events = on_event;
         let data_events = events.clone();
+        #[cfg(target_os = "android")]
+        crate::android::network_session(
+            &app,
+            &session_id,
+            request["mdns"].as_bool().unwrap_or(false),
+        )
+        .await?;
+        #[cfg(target_os = "android")]
+        let peer_session = (app.clone(), session_id.clone());
         let node = Node::start(
             key,
             request["profile"].clone(),
             text(&request, "room")?.into(),
             ListenOptions::from_request(&request, true),
             Arc::new(move |event| {
+                #[cfg(target_os = "android")]
+                crate::android::peer_event(&peer_session.0, &peer_session.1, &event);
                 let _ = events.send(InvokeResponseBody::Json(event.to_string()));
             }),
             Arc::new(move |header, data| {
                 let _ = data_events.send(InvokeResponseBody::Raw(super::encode_data(header, data)));
             }),
         )
-        .await?;
+        .await;
+        #[cfg(target_os = "android")]
+        if node.is_err() {
+            let _ = crate::android::network_session(&app, "", false).await;
+        }
+        let node = node?;
         node.pipes.enable_native();
         node.files.enable(storage.inner().clone());
         #[cfg(any(target_os = "macos", windows))]
@@ -70,6 +119,8 @@ pub async fn p2p_request(
             && let Some((_, old)) = current.take()
         {
             old.stop();
+            #[cfg(target_os = "android")]
+            crate::android::network_session(&app, "", false).await?;
         }
         return Ok(Value::Null);
     }
@@ -95,6 +146,7 @@ pub async fn p2p_request(
                     text(&request, "source")?.into(),
                     text(&request, "address")?.into(),
                     request["permitted"].as_bool().unwrap_or(false),
+                    request["useSystemProxy"].as_bool().unwrap_or(true),
                 )
                 .await?
         }
@@ -115,6 +167,18 @@ pub async fn p2p_request(
         }
 
         "file_source" => {
+            #[cfg(target_os = "android")]
+            if let Some(document) = request.get("document") {
+                let uri = serde_json::from_value(document.clone()).map_err(|e| e.to_string())?;
+                let size = request["size"].as_u64().ok_or("文件大小无法读取")?;
+                let file = tokio::task::spawn_blocking(move || {
+                    crate::storage::android::seekable(&app, &uri, size)
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .map_err(|e| e.to_string())?;
+                return node.files.source(file, None);
+            }
             let file = if let Some(id) = request["attachmentId"].as_str() {
                 storage.source(id.into()).await?
             } else {
@@ -137,7 +201,16 @@ pub async fn p2p_request(
             return node.files.source(file, None);
         }
         "file_upload" => {
-            let temp = tempfile::NamedTempFile::new().map_err(|e| e.to_string())?;
+            #[cfg(target_os = "android")]
+            let temp = {
+                use tauri::Manager;
+                let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+                std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+                tempfile::NamedTempFile::new_in(dir)
+            };
+            #[cfg(not(target_os = "android"))]
+            let temp = tempfile::NamedTempFile::new();
+            let temp = temp.map_err(|e| e.to_string())?;
             let file = temp.reopen().map_err(|e| e.to_string())?;
             return node.files.source(file, Some(temp));
         }

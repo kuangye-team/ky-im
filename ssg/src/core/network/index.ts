@@ -1,4 +1,5 @@
-import { configuredRuntime } from "../capabilities";
+import { isAndroid, isNative } from "../../platform";
+import { CAP, configuredRuntime } from "../capabilities";
 import { CombinedDiscoveryAdapter } from "./combined";
 import { readSettings, type NetworkSettings } from "./settings";
 import { SignalingDiscoveryAdapter } from "./signaling";
@@ -14,11 +15,12 @@ export { SignalingDiscoveryAdapter };
 export function browserNetwork(
   settings: NetworkSettings = readSettings(false),
   identity?: Promise<DeviceIdentity>,
+  runtime = configuredRuntime(false, settings),
 ): NetworkAdapters {
   const bridge = new CentralBridge(
     identity ?? identityFor(new IndexedDBStorageAdapter()),
     activeIceServers(settings.iceServers),
-    settings.transport.webrtc,
+    runtime.capabilities.includes(CAP.webrtc),
   );
   const transport = new PeerNode(bridge);
   const sources = settings.servers
@@ -32,7 +34,7 @@ export function browserNetwork(
         ),
     );
   return {
-    runtime: configuredRuntime(false, settings),
+    runtime,
     discovery:
       sources.length === 1 ? sources[0] : new CombinedDiscoveryAdapter(sources),
     transport,
@@ -42,8 +44,15 @@ export async function defaultNetwork(
   settings = readSettings(),
   identity?: Promise<DeviceIdentity>,
 ): Promise<NetworkAdapters> {
-  if (import.meta.env.VITE_DESKTOP) {
+  if (isNative()) {
     const { desktopNetwork } = await import("./desktop");
+    if (isAndroid() && settings.discovery.mdns) {
+      const { nearbyPermission } = await import("../../android-nearby");
+      if (!await nearbyPermission("check")) {
+        const effective = { ...settings, discovery: { ...settings.discovery, mdns: false } };
+        return { ...desktopNetwork(undefined, effective, identity), needsNearbyPermission: true };
+      }
+    }
     return desktopNetwork(undefined, settings, identity);
   }
   return browserNetwork(settings, identity);

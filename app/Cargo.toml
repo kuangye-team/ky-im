@@ -6,6 +6,9 @@ license = "MIT"
 edition = "2024"
 rust-version = "1.91"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dev-dependencies]
 turn = "=0.17.3"
 webrtc-util = { version = "=0.17.3", default-features = false, features = ["vnet"] }
@@ -17,11 +20,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
-tauri-plugin-deep-link = "2"
-tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.38", features = ["bundled", "backup"] }
@@ -37,15 +36,32 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-uti
 tokio-util = { version = "0.7", features = ["rt", "compat"] }
 mime_guess = "2.0.5"
 tempfile = "3.27.0"
-tokio-tungstenite = { version = "0.28", features = ["rustls-tls-webpki-roots"] }
+proxyres = "1.5.7"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "socks"] }
+reqwest-websocket = "0.6"
+tungstenite = { version = "0.28", default-features = false }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-platform-verifier = "0.7.1"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.22"
+base64 = "0.22"
+ndk-context = "0.1"
+tauri-plugin-android-fs = { version = "30.2.0", default-features = false }
+fs2 = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
 
 [target.'cfg(windows)'.dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Threading"] }
 
 [profile.release]

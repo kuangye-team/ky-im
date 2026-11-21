@@ -1,13 +1,38 @@
 import { CAP, requireServer, CompatibilityError } from "../capabilities";
-import { openSignalingSession } from "./signaling";
+import type { ProxyMode } from "./settings";
+import { openSignalingSession, signalingTarget } from "./signaling";
 import type { DiscoverySession } from "./types";
 
+function probeResult(raw: string) {
+  let packet;
+  try { packet = JSON.parse(raw); }
+  catch { throw new CompatibilityError(["server-unsupported"]); }
+  if (packet?.type === "capabilities")
+    return { relay: requireServer(packet).capabilities.includes(CAP.relay) };
+  if (packet?.code === "unauthorized") throw new Error("访问密钥不正确或无权访问，请检查后重试");
+  throw new CompatibilityError(["server-unsupported"]);
+}
+
 /** Probe the actual WebSocket path/origin without registering a device. */
-export function testServer(
+export async function testServer(
   url: string,
   timeoutMs = 5000,
   authorization?: string,
+  proxyMode?: ProxyMode,
 ): Promise<{ relay: boolean }> {
+  if (proxyMode !== undefined) {
+    const address = signalingTarget(url, authorization);
+    const { invoke } = await import("@tauri-apps/api/core");
+    let raw: string;
+    try {
+      raw = await invoke<string>("probe_signaling_server", {
+        address, authorization, timeoutMs, useSystemProxy: proxyMode === "system",
+      });
+    } catch {
+      throw new Error("连接失败，请检查服务器地址或稍后重试");
+    }
+    return probeResult(raw);
+  }
   return new Promise((resolve, reject) => {
     let socket: DiscoverySession;
     let finished = false;
@@ -40,15 +65,9 @@ export function testServer(
       };
       socket.onmessage = ({ data }) => {
         try {
-          const packet = JSON.parse(String(data));
-          if (
-            packet.type === "capabilities"
-          )
-            finish(requireServer(packet).capabilities.includes(CAP.relay));
-          else if (packet.code === "unauthorized") finish(undefined, "访问密钥不正确或无权访问，请检查后重试");
-          else finish(undefined, undefined, new CompatibilityError(["server-unsupported"]));
+          finish(probeResult(String(data)).relay);
         } catch (error) {
-          finish(undefined, undefined, error);
+          finish(undefined, error instanceof Error ? error.message : undefined, error);
         }
       };
       socket.onerror = (event) =>

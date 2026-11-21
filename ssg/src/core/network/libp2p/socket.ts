@@ -18,7 +18,10 @@ export class NativeSocket {
     void (async () => {
       await node.socketReady(() => this.readyState === 3);
       if (this.readyState === 3) return;
-      await node.call({ op: "socket_open", socketId: this.id, source, address, permitted });
+      await node.call({
+        op: "socket_open", socketId: this.id, source, address, permitted,
+        useSystemProxy: node.settings.proxyMode !== "direct",
+      });
       if (this.readyState === 3) await node.call({ op: "socket_close", socketId: this.id });
     })().catch(() => { this.event("error"); this.event("close"); });
   }

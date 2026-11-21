@@ -12,11 +12,14 @@ describe("native central socket lifecycle", () => {
     expect(node.call.mock.calls.map(([request]) => request.op)).toEqual(["socket_close"]);
     expect(node.sockets.size).toBe(0);
   });
-  it("keeps control messages ordered and releases a failed socket", async () => {
+  it.each(["system", "direct"])("opens with the %s proxy setting and keeps control messages ordered", async (proxyMode) => {
     const call = vi.fn().mockResolvedValue(null);
-    const node = { sockets: new Map(), socketReady: async () => {}, call };
+    const node = { sockets: new Map(), settings: { proxyMode }, socketReady: async () => {}, call };
     const socket = new NativeSocket(node as unknown as NativePeerNode, "s0", "ws://localhost", false);
-    await Promise.resolve(); socket.event("open");
+    await vi.waitFor(() => expect(call).toHaveBeenCalledWith(expect.objectContaining({
+      op: "socket_open", useSystemProxy: proxyMode === "system",
+    })));
+    socket.event("open");
     socket.send("one"); socket.send("two");
     await vi.waitFor(() => expect(call.mock.calls.filter(([r]) => r.op === "socket_send").map(([r]) => r.message)).toEqual(["one", "two"]));
     call.mockRejectedValueOnce(new Error("closed"));

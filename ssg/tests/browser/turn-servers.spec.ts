@@ -63,10 +63,12 @@ test("中转服务器支持添加、编辑、启停、删除，并保留独立�
   await card.screenshot({ path: "../temp/screenshot/turn-servers-desktop.png", animations: "disabled" });
   await page.setViewportSize({ width: 390, height: 844 });
   await expectNoHorizontalOverflow(page);
+  await card.getByRole("button", { name: /^中转服务器（TURN）/ }).click();
   await card.screenshot({ path: "../temp/screenshot/turn-servers-mobile.png", animations: "disabled" });
   await page.getByRole("button", { name: "删除中转服务器 1", exact: true }).click();
   await expect(turnRows(page)).toHaveCount(1);
   await page.reload();
+  await card.getByRole("button", { name: /^中转服务器（TURN）/ }).click();
   await expect(turnRows(page).first()).toContainText("备用中转");
   expect((await storedServers(page)).filter((s: any) => s.urls.startsWith("stun:"))).toHaveLength(4);
   expect(credentialRequests).toEqual([]);

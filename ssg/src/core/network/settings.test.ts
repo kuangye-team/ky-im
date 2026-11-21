@@ -8,6 +8,25 @@ import {
 
 afterEach(() => vi.unstubAllGlobals());
 describe("network settings", () => {
+  it("upgrades saved desktop settings to system proxy and remembers direct mode", () => {
+    const { proxyMode, ...legacy } = defaultSettings(true);
+    legacy.discovery.mdns = false;
+    expect(proxyMode).toBe("system");
+    let saved = JSON.stringify(legacy);
+    vi.stubGlobal("localStorage", {
+      getItem: () => saved,
+      setItem: (_key: string, value: string) => { saved = value; },
+    });
+    vi.stubEnv("VITE_DESKTOP", "true");
+    try {
+      expect(readSettings()).toEqual({ ...legacy, proxyMode: "system" });
+      saveSettings({ ...legacy, proxyMode: "direct" });
+      expect(readSettings()).toEqual({ ...legacy, proxyMode: "direct" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("persists per-server authorization including the default and rejects invalid headers", () => {
     const settings = defaultSettings(false);
     settings.servers[0].authorization = "Bearer secret";
@@ -60,39 +79,24 @@ describe("network settings", () => {
       relaySupported: true,
     });
   });
-  it("accepts all nine desktop discovery/transport combinations", () => {
-    for (const [signaling, mdns] of [
-      [true, false],
-      [false, true],
-      [true, true],
-    ])
-      for (const [tcp, webrtc] of [
-        [true, false],
-        [false, true],
-        [true, true],
-      ])
-        expect(
-          validateSettings(
-            {
-              ...defaultSettings(true),
-              discovery: { signaling, mdns },
-              transport: { tcp, webrtc },
-            },
-            true,
-          ),
-        ).toBeTruthy();
+  it("ignores old transport switches while retaining saved network preferences", () => {
+    for (const native of [true, false]) {
+      const settings = defaultSettings(native);
+      settings.discovery.mdns = false;
+      settings.servers.push({ id: "custom", name: "Private", url: "wss://private.test", enabled: true,
+        relay: true, relaySupported: true, authorization: "Bearer key" });
+      const expected = validateSettings(settings, native);
+      for (const transport of [{ tcp: true, webrtc: false }, { tcp: false, webrtc: true }]) {
+        vi.stubGlobal("localStorage", { getItem: () => JSON.stringify({ ...settings, transport }) });
+        expect(readSettings(native)).toEqual(expected);
+      }
+    }
   });
-  it("requires a discovery method, a transport, and an enabled server when using signaling", () => {
+  it("requires a discovery method and an enabled server when using signaling", () => {
     const settings = defaultSettings(true);
     expect(() =>
       validateSettings(
         { ...settings, discovery: { signaling: false, mdns: false } },
-        true,
-      ),
-    ).toThrow("至少选择");
-    expect(() =>
-      validateSettings(
-        { ...settings, transport: { tcp: false, webrtc: false } },
         true,
       ),
     ).toThrow("至少选择");

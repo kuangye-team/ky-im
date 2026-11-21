@@ -68,6 +68,11 @@ export const errorEnglish: Record<string, string> = {
   "没有读取到文件，请尝试拖入文件夹":
     "No files were found. Try dragging the folder into the chat.",
   请一次选择一个文件夹: "Choose one folder at a time.",
+  "无法使用这个文件夹，请重新选择保存位置": "This folder is unavailable. Choose a save location again.",
+  "请允许蜂鸟查找附近设备": "Allow Hummingbird to find nearby devices.",
+  "手机存储空间不足，请清理后重试": "Free up space on your phone and try again.",
+  "保存位置不能保留原文件名，请选择其他文件夹": "This location cannot preserve the file names. Choose another folder.",
+  "文件内容已变化，请重新选择": "The file changed. Select it again.",
   "同名文件夹过多，请选择其他保存位置":
     "Too many folders share this name. Choose another location.",
   "文件夹中存在重名内容，已停止接收以避免覆盖":

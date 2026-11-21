@@ -121,7 +121,8 @@ test("默认确认接收，联系人开关持久保存且可关闭", async ({
     ).toHaveCount(0);
 
     await bob.setViewportSize({ width: 390, height: 844 });
-    const mobileContact = await openContact(bob);
+    await bob.getByRole("button", { name: "聊天操作", exact: true }).click();
+    const mobileContact = bob.getByRole("dialog", { name: "聊天操作" });
     const mobileToggle = mobileContact.getByRole("switch", {
       name: "自动接收文件",
     });
@@ -134,7 +135,7 @@ test("默认确认接收，联系人开关持久保存且可关闭", async ({
       fullPage: true,
       animations: "disabled",
     });
-    await closeContact(bob);
+    await mobileContact.getByRole("button", { name: "关闭" }).click();
     await send("关闭后确认.txt");
     await expect(
       row("关闭后确认.txt").getByRole("button", {
@@ -146,9 +147,10 @@ test("默认确认接收，联系人开关持久保存且可关闭", async ({
       .getByRole("button", { name: "拒收", exact: true })
       .click();
     await bob.reload();
-    await openPeer(bob, "文件分享者");
+    await expect(bob.locator(".chat-heading h2")).toHaveText("文件分享者");
+    await bob.getByRole("button", { name: "聊天操作", exact: true }).click();
     await expect(
-      (await openContact(bob)).getByRole("switch", { name: "自动接收文件" }),
+      mobileContact.getByRole("switch", { name: "自动接收文件" }),
     ).not.toBeChecked();
   } finally {
     await a.close();

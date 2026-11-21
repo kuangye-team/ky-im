@@ -2,17 +2,20 @@
 
 [English](README.md) | 简体中文 · [GitHub](https://github.com/kuangye-team/ky-im)
 
-蜂鸟是一款局域网聊天与文件分享应用，支持网页、PWA 和 macOS、Windows 桌面客户端（Ky IM）。无需注册账号，设备之间优先直传文字、图片、文件和文件夹，聊天记录保存在各自设备上。
+蜂鸟是一款局域网聊天与文件分享应用，支持网页、PWA、Android，以及 macOS 和 Windows 桌面客户端（Ky IM）。无需注册账号，设备之间优先直传文字、图片、文件和文件夹，聊天记录保存在各自设备上。
 
 ## 能力特性
 
 | 能力 | 网页 / PWA | 桌面客户端 |
 | --- | --- | --- |
 | 查找设备 | 通过信令服务发现附近设备，也可按六位蜂鸟号查找 | 还支持通过 mDNS 在局域网内发现设备，无需服务器或互联网连接 |
+| 断网后恢复 | 网络恢复时自动重新查找设备 | 也会在本机网卡地址变化时重新查找 |
 | 聊天与分享 | 网页之间通过 WebRTC 互传，也可直连桌面客户端 | 通过 WebTransport 或 WebRTC 与网页互通，桌面之间还支持 TCP 和 QUIC |
 | 通过服务器中转 | 双方可在同一服务器上启用端到端加密中转 | 与网页相同 |
 | 离线查看记录 | 记录和附件保存在浏览器中，容量受站点配额限制 | 记录保存在本机，附件可放在其他磁盘 |
 | 传输大文件和文件夹 | 边接收边写入，保持页面打开即可在短暂断线后续传 | 边接收边写入磁盘，保持应用运行即可在短暂断线后续传 |
+
+Android 客户端沿用同一套聊天引擎。一个 APK 同时包含 ARM64 和 ARMv7，收到的附件可保存到手机上选定的文件夹。[Android 构建与验收](docs/android.zh.md)
 
 ## 架构原理
 
@@ -21,7 +24,7 @@
 ```mermaid
 flowchart LR
     Browser["网页 / PWA<br/>js-libp2p"] <-->|发现与信令| API["信令服务<br/>Rust 服务或 Cloudflare Worker"]
-    App["桌面客户端<br/>rust-libp2p"] <-->|发现与信令| API
+    App["桌面 / Android<br/>rust-libp2p"] <-->|发现与信令| API
     Browser <-->|聊天与文件传输| App
     Browser --- WebDB["IndexedDB + OPFS"]
     App --- AppDB["SQLite + 本地文件"]
@@ -33,6 +36,7 @@ flowchart LR
 
 | 场景 | 入口 |
 | --- | --- |
+| 安装或更新 Android 客户端 | 首次安装可从发布页下载 `ky-im-<version>-android-arm.apk`。安装后可在「我的 → 关于蜂鸟」检查更新。 |
 | 安装桌面客户端 | 在 [GitHub Releases](https://github.com/kuangye-team/ky-im/releases) 下载 macOS 通用安装包或 Windows x64 安装包。 |
 | 自行托管网页与 API | 从同一发布页下载并解压 `ky-im-<version>-bin.tar.gz`，在解压后的 `release/` 目录运行对应平台的 `start_linux.sh`、`start_mac.sh` 或 `start_win.bat`。 |
 | 用 Docker 部署 | 按下方命令启动[预构建镜像](docker/compose.yml)。如需定制镜像，完成源码环境准备后，在仓库根目录运行 `npm run compose`。 |

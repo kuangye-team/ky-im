@@ -45,13 +45,18 @@ export function openSignalingSession(
   relay?: SignalingHook,
   credential?: string,
 ): DiscoverySession {
+  const address = signalingTarget(url, credential);
+  const socket = relay?.socket?.(address) ?? new WebSocket(address);
+  return relay?.session(socket) ?? socket;
+}
+
+export function signalingTarget(url?: string, credential?: string) {
   const target = new URL(signalingAddress(url));
   target.search = "";
   target.searchParams.set("room", SIGNALING_CONFIG.room);
   if (target.protocol !== "wss:" && (target.protocol !== "ws:" || (credential && !["localhost", "127.0.0.1", "[::1]"].includes(target.hostname))))
     throw new Error("请使用 wss:// 安全地址连接此服务器");
-  const socket = relay?.socket?.(target.href) ?? new WebSocket(target.href);
-  return relay?.session(socket) ?? socket;
+  return target.href;
 }
 
 /** Protocol boundary: no application join is sent before minimum server requirements pass. */

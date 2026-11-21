@@ -69,24 +69,19 @@ test.describe("语言与首屏", () => {
     await expect(page.locator("html")).toHaveAttribute("lang", "en");
   });
 
-  test("移动端英文弹窗和导航不溢出", async ({ page }) => {
+  test("移动端英文资料页和导航不溢出", async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto("/");
+    await page.getByRole("link", { name: "Me", exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Language", exact: true }),
     ).toBeVisible();
     await expectNoHorizontalOverflow(page);
-    await expect
-      .poll(() =>
-        page
-          .locator(".my-profile > strong")
-          .evaluate((element) => getComputedStyle(element, "::before").content),
-      )
-      .toBe('"Me"');
     await page
-      .getByRole("button", { name: "Your profile", exact: true })
+      .getByRole("link", { name: "Your profile", exact: true })
       .click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(page.locator(".phone-backbar h1")).toHaveText("Your profile");
+    await expect(page.getByRole("button", { name: "Save", exact: true })).toBeVisible();
     await expect(
       page.getByLabel("Display name", { exact: false }),
     ).toBeVisible();
@@ -115,6 +110,7 @@ test.describe("语言与首屏", () => {
     await page.keyboard.press("Enter");
     await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
     await page.setViewportSize({ width: 375, height: 812 });
+    await page.getByRole("link", { name: "我的", exact: true }).click();
     await page.getByRole("button", { name: "语言", exact: true }).click();
     await expect(
       page.getByRole("menuitemradio", { name: "中文", exact: true }),
@@ -161,16 +157,17 @@ test.describe("语言与首屏", () => {
     await page.setViewportSize({ width: 375, height: 812 });
     await expectNoHorizontalOverflow(page);
     await capture(page, "profile-generator-mobile.png");
-    await page.getByRole("button", { name: "保存资料", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeHidden();
     await page.reload();
-    await page.getByRole("button", { name: "个人资料", exact: true }).click();
+    await page.getByRole("link", { name: "我的", exact: true }).click();
+    await page.getByRole("link", { name: "个人资料", exact: true }).click();
     await expect(name).toHaveValue(savedName);
     await expect(bio).toHaveValue(savedBio);
     await page.getByRole("button", { name: "取消", exact: true }).click();
     await chooseLanguage(page, "English");
     await page
-      .getByRole("button", { name: "Your profile", exact: true })
+      .getByRole("link", { name: "Your profile", exact: true })
       .click();
     await page
       .getByRole("button", { name: "Generate a nickname", exact: true })
@@ -183,11 +180,11 @@ test.describe("语言与首屏", () => {
     await name.fill("My own name");
     await bio.fill("My own introduction");
     await page
-      .getByRole("button", { name: "Save profile", exact: true })
+      .getByRole("button", { name: "Save", exact: true })
       .click();
-    await expect(page.getByRole("dialog")).toBeHidden();
+    await expect(page).toHaveURL(/\/me$/);
     await chooseLanguage(page, "中文");
-    await page.getByRole("button", { name: "个人资料", exact: true }).click();
+    await page.getByRole("link", { name: "个人资料", exact: true }).click();
     await expect(name).toHaveValue("My own name");
     await expect(bio).toHaveValue("My own introduction");
   });
@@ -233,7 +230,7 @@ test.describe("语言与首屏", () => {
     }
     await expect(page.locator("#boot-loading")).toHaveCount(0);
     await expect(
-      page.getByRole("button", { name: "Your profile", exact: true }),
+      page.getByRole("link", { name: "Me", exact: true }),
     ).toBeVisible();
     await expect(page.locator("#root")).not.toHaveAttribute(
       "aria-busy",

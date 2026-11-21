@@ -1,0 +1,9 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run android:frontend:dev",
+    "beforeBuildCommand": "npm run android:frontend:build",
+    "frontendDist": "../ssg/android-dist"
+  },
+  "app": { "windows": [{ "label": "main", "title": "蜂鸟", "backgroundColor": "#4565ed" }] },
+  "bundle": { "android": { "minSdkVersion": 24 } }
+}

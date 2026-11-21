@@ -1,6 +1,7 @@
-import { canDialWebTransport, CompatibilityError, type CompatibilityReason } from "../core/capabilities";
+import { isNative } from "../platform";
+import { CompatibilityError, type CompatibilityReason } from "../core/capabilities";
 import { CompatibilityHelp } from "./CompatibilityHelp";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Activity,
@@ -16,7 +17,6 @@ import {
   Settings,
   Trash2,
   X,
-  Zap,
 } from "lucide-react";
 import type { ChatEngine } from "../core";
 import { SIGNALING_CONFIG } from "../config";
@@ -24,11 +24,12 @@ import { newId } from "../core/protocol";
 import { testServer } from "../core/network/serverTest";
 import {
   DEFAULT_SERVER_ID,
-  isDesktop,
+  saveSettings,
   type NetworkSettings,
   type SignalServer,
 } from "../core/network/settings";
 import { translateError } from "../localizeError";
+import { AndroidBackground } from "./AndroidBackground";
 import { RuntimeLogs } from "./RuntimeLogs";
 import { IceServerSettings } from "./IceServerSettings";
 import { Modal } from "./Modal";
@@ -40,14 +41,17 @@ type SettingsSection = keyof NetworkSettings | "turnServers";
 
 export function SystemSettings({
   engine,
+  phone = false,
   onNotice,
 }: {
   engine: ChatEngine;
+  phone?: boolean;
   onNotice: (message: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { t } = useTranslation(["translation", "components"], { nsMode: "fallback" });
   const [showLogs, setShowLogs] = useState(false);
   const serverHeadingId = useId();
+  const serverHeading = t("信令服务器");
   const serverKeyId = useId();
   const [settings, setSettings] = useState<NetworkSettings>(
     () => engine.networkSettings,
@@ -64,6 +68,9 @@ export function SystemSettings({
   const [testing, setTesting] = useState<string | null>(null);
   const [testReasons, setTestReasons] = useState<Record<string, CompatibilityReason[]>>({});
   const [testErrors, setTestErrors] = useState<Record<string, string>>({});
+  const [networkRevision, setNetworkRevision] = useState(0);
+  const testedRevision = useRef(new Map<string, number>());
+  useEffect(() => engine.subscribeNetworkChange(() => setNetworkRevision(n => n + 1)), [engine]);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -72,7 +79,7 @@ export function SystemSettings({
     };
   }, []);
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
-  const desktop = isDesktop();
+  const desktop = isNative();
   const pending = engine.hasPendingTransfers();
   const busy = applying || pending || testing !== null;
   const defaultAddress =
@@ -91,6 +98,10 @@ export function SystemSettings({
     setEditorError("");
     setApplied(false);
     try {
+      if (import.meta.env.VITE_ANDROID && section === "discovery" && next.discovery.mdns && (!settings.discovery.mdns || engine.needsNearbyPermission)) {
+        const { nearbyPermission } = await import("../android-nearby");
+        if (!await nearbyPermission("manual")) throw new Error("请在系统权限设置中允许蜂鸟查找附近设备");
+      }
       await engine.configureNetwork(next);
       setSettings(engine.networkSettings);
       setApplied(true);
@@ -125,12 +136,27 @@ export function SystemSettings({
   };
   const runTest = async (server: SignalServer) => {
     if (busy) return;
+    testedRevision.current.set(server.id, networkRevision);
     setTesting(server.id);
     setTestReasons(reasons => ({ ...reasons, [server.id]: [] }));
     setTestErrors((errors) => ({ ...errors, [server.id]: "" }));
-    let relay: boolean | undefined;
     try {
-      relay = (await testServer(server.url, 5000, server.authorization)).relay;
+      const { relay } = await testServer(
+        server.url, 5000, server.authorization, desktop ? settings.proxyMode : undefined,
+      );
+      if (!mounted.current) return;
+      const latest = engine.networkSettings;
+      const tested = latest.servers.find(s => s.id === server.id && s.url === server.url &&
+        s.authorization === server.authorization);
+      if (!tested || latest.proxyMode !== settings.proxyMode || tested.relaySupported === relay) return;
+      tested.relaySupported = relay;
+      if (tested.relay && !relay) {
+        tested.relay = false;
+        await apply(latest);
+      } else {
+        // Recording a capability alone does not change any active route.
+        setSettings(saveSettings(latest));
+      }
     } catch (error) {
       if (mounted.current && error instanceof CompatibilityError) setTestReasons(reasons => ({ ...reasons, [server.id]: error.reasons }));
       if (mounted.current)
@@ -141,22 +167,17 @@ export function SystemSettings({
               ? error.message
               : "连接失败，请检查服务器地址或稍后重试",
         }));
+    } finally {
+      if (mounted.current) setTesting(null);
     }
-    if (!mounted.current) return;
-    await apply({
-      ...settings,
-      servers: settings.servers.map((s) =>
-        s.id === server.id
-          ? {
-              ...s,
-              relaySupported: relay,
-              relay: relay === true && s.relay === true,
-            }
-          : s,
-      ),
-    });
-    setTesting(null);
   };
+  const retryTest = useEffectEvent(runTest);
+  useEffect(() => {
+    if (busy || editor || !settings.discovery.signaling || engine.getSnapshot().availability === "offline") return;
+    const failed = settings.servers.find(server => server.enabled && testErrors[server.id] &&
+      (testedRevision.current.get(server.id) ?? networkRevision) < networkRevision);
+    if (failed) void retryTest(failed);
+  }, [busy, editor, settings, testErrors, networkRevision, engine]);
   const saveServer = async () => {
     if (!editor || pending) return;
     const success = await apply(
@@ -182,17 +203,13 @@ export function SystemSettings({
   );
   return (
     <section className="full-page system-settings">
-      <div className="settings-page-header">
+      {!phone && <div className="settings-page-header">
         <div className="page-heading">
           <div>
             <Settings size={24} aria-hidden="true" />
             <h1>{t("系统配置")}</h1>
           </div>
-          <p>
-            {t(
-              "选择怎么找到其他设备，以及怎么传送消息和文件。设置只保存在这台设备上。",
-            )}
-          </p>
+          <p>{t("设置只保存在这台设备上。")}</p>
         </div>
         <button
           className="secondary-button settings-log-button"
@@ -201,10 +218,10 @@ export function SystemSettings({
           <ScrollText size={18} aria-hidden="true" />
           {t("运行日志")}
         </button>
-      </div>
+      </div>}
       {showLogs && <RuntimeLogs onClose={() => setShowLogs(false)} />}
       <div className="settings-feedback">
-        <p>{t("设置生效时会重新连接。正在传输内容时，请完成后再修改。")}</p>
+        {!phone && <p>{t("设置生效时会重新连接。正在传输内容时，请完成后再修改。")}</p>}
         <p role="status">
           {pending
             ? t("还有内容正在传输，请完成后再修改设置")
@@ -216,12 +233,33 @@ export function SystemSettings({
         </p>
       </div>
       <div className="settings-sections">
-        <fieldset className="settings-card" disabled={busy}>
+        {import.meta.env.VITE_ANDROID && <AndroidBackground phone={phone} />}
+        {desktop && !import.meta.env.VITE_ANDROID && (
+          <fieldset className="settings-card" disabled={busy}>
+            <legend><Globe size={19} aria-hidden="true" />{t("代理设置")}</legend>
+            {!phone && <p>{t("选择蜂鸟连接服务器时使用的方式。")}</p>}
+            <div className="settings-proxy-options">
+              {(["system", "direct"] as const).map((mode) => (
+                <label key={mode} className="settings-choice">
+                  <input
+                    type="radio"
+                    name="proxy-mode"
+                    checked={settings.proxyMode === mode}
+                    onChange={() => void apply({ ...settings, proxyMode: mode }, "proxyMode")}
+                  />
+                  <strong>{mode === "system" ? t("跟随系统") : t("不使用代理")}</strong>
+                </label>
+              ))}
+            </div>
+            {errorSection === "proxyMode" && errorNotice}
+          </fieldset>
+        )}
+        {(!phone || desktop) && <fieldset className="settings-card" disabled={busy}>
           <legend>
             <Radio size={19} aria-hidden="true" />
-            {t("怎么找到其他设备")}
+            {t(phone ? "查找设备" : "怎么找到其他设备")}
           </legend>
-          <p>{t("可以同时选择，每组至少保留一种。同一台设备只会显示一次。")}</p>
+          {!phone && <p>{t("至少选择一种查找方式。同一台设备只会显示一次。")}</p>}
           <label className="settings-choice">
             <input
               type="checkbox"
@@ -241,10 +279,8 @@ export function SystemSettings({
               }
             />
             <span>
-              <strong>{t("在线查找（中心信令）")}</strong>
-              <small>
-                {t("通过连接服务器找到设备，也可以用蜂鸟号联系朋友。")}
-              </small>
+              <strong>{t(phone ? "通过网络查找" : "在线查找（中心信令）")}</strong>
+              {!phone && <small>{t("通过连接服务器找到设备，也可以用蜂鸟号联系朋友。")}</small>}
             </span>
           </label>
           <label className="settings-choice">
@@ -266,78 +302,17 @@ export function SystemSettings({
               }
             />
             <span>
-              <strong>{t("附近查找（mDNS）")}</strong>
-              <small>
-                {t(
-                  "自动寻找同一 Wi-Fi 或有线网络里的客户端，没有互联网也能用。",
-                )}
-              </small>
+              <strong>{t(phone ? "查找附近设备" : "附近查找（mDNS）")}</strong>
+              {!phone && <small>{t("自动寻找同一 Wi-Fi 或有线网络里的客户端，没有互联网也能用。")}</small>}
             </span>
           </label>
-          {errorSection === "discovery" && errorNotice}
-        </fieldset>
-        <fieldset className="settings-card" disabled={busy}>
-          <legend>
-            <Zap size={19} aria-hidden="true" />
-            {t("怎么传送消息和文件")}
-          </legend>
-          <p>{t("同时开启时，先尝试快速直连；连接不成功，再尝试兼容传输。")}</p>
-          <label className="settings-choice">
-            <input
-              type="checkbox"
-              checked={desktop ? settings.transport.tcp : canDialWebTransport()}
-              disabled={!desktop}
-              onChange={(e) =>
-                void apply(
-                  {
-                    ...settings,
-                    transport: { ...settings.transport, tcp: e.target.checked },
-                  },
-                  "transport",
-                )
-              }
-            />
-            <span>
-              <strong>{t("快速直连")}</strong>
-              <small>
-                {t("同一网络内的客户端和支持的浏览器可以直接收发。")}
-              </small>
-            </span>
-          </label>
-          <label className="settings-choice">
-            <input
-              type="checkbox"
-              checked={settings.transport.webrtc}
-              disabled={!desktop}
-              onChange={(e) =>
-                void apply(
-                  {
-                    ...settings,
-                    transport: {
-                      ...settings.transport,
-                      webrtc: e.target.checked,
-                    },
-                  },
-                  "transport",
-                )
-              }
-            />
-            <span>
-              <strong>{t("兼容传输（WebRTC）")}</strong>
-              <small>
-                {t("支持网页与客户端互传，能否连通取决于双方网络。")}
-              </small>
-            </span>
-          </label>
-          {errorSection === "transport" && errorNotice}
-          {!desktop && (
-            <p className="settings-hint">
-              {t(
-                "网页版通过服务器查找设备，并自动选择可用的传输方式。",
-              )}
-            </p>
+          {settings.discovery.mdns && engine.needsNearbyPermission && (
+            <button type="button" className="secondary-button" onClick={() => void apply(settings, "discovery")}>
+              {t("允许查找附近设备")}
+            </button>
           )}
-        </fieldset>
+          {errorSection === "discovery" && errorNotice}
+        </fieldset>}
         <section
           className="settings-card settings-server-card"
           aria-labelledby={serverHeadingId}
@@ -345,11 +320,12 @@ export function SystemSettings({
           <div className="settings-server-heading">
             <h2 id={serverHeadingId}>
               <Globe size={19} aria-hidden="true" />
-              {t("信令服务器")}
+              {serverHeading}
             </h2>
             <button
               className="secondary-button"
               type="button"
+              aria-label={t("添加服务器")}
               disabled={busy || settings.servers.length >= 16}
               onClick={(event) =>
                 openEditor(
@@ -359,20 +335,16 @@ export function SystemSettings({
               }
             >
               <Plus size={16} aria-hidden="true" />
-              {t("添加服务器")}
+              {t(phone ? "添加" : "添加服务器")}
             </button>
           </div>
-          <p>
-            {t(
-              "连接服务器帮助设备找到彼此。双方都开启同一服务器的中转后，直连失败时可由该服务器转送消息和文件。",
-            )}
-          </p>
+          {!phone && <p>{t("连接服务器帮助设备找到彼此。双方都开启同一服务器的中转后，直连失败时可由该服务器转送消息和文件。")}</p>}
           <div className="settings-server-columns" aria-hidden="true">
             <span>{t("服务器名称")}</span>
             <span>{t("服务器地址")}</span>
             <span>{t("操作")}</span>
           </div>
-          <ul className="settings-server-list" aria-label={t("信令服务器")}>
+          <ul className="settings-server-list" aria-label={serverHeading}>
             {settings.servers.map((server, index) => (
               <li className="settings-server" key={server.id}>
                 <div className="settings-server-name">
@@ -395,7 +367,7 @@ export function SystemSettings({
                           ? t("连接成功 · 支持中转")
                           : server.relaySupported === false
                             ? t("连接成功 · 不支持中转")
-                            : t("测试后可查看中转支持情况")}
+                            : !phone && t("测试后可查看中转支持情况")}
                   </small>
                   <CompatibilityHelp reasons={testReasons[server.id]} />
                 </div>
@@ -460,7 +432,7 @@ export function SystemSettings({
                   </label>
                   <button
                     type="button"
-                    className="icon-button"
+                    className="icon-button settings-probe"
                     disabled={busy}
                     aria-label={t("测试服务器 {{index}}", { index: index + 1 })}
                     title={t("测试")}
@@ -475,6 +447,7 @@ export function SystemSettings({
                     ) : (
                       <Activity size={17} aria-hidden="true" />
                     )}
+                    {phone && t("测试")}
                   </button>
                   <button
                     type="button"
@@ -486,33 +459,36 @@ export function SystemSettings({
                   >
                     <Pencil size={17} aria-hidden="true" />
                   </button>
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={t("删除服务器 {{index}}", { index: index + 1 })}
-                    title={t("删除服务器")}
-                    disabled={busy || server.id === DEFAULT_SERVER_ID}
-                    onClick={() =>
-                      void apply({
-                        ...settings,
-                        servers: settings.servers.filter(
-                          (s) => s.id !== server.id,
-                        ),
-                      })
-                    }
-                  >
-                    <Trash2 size={17} aria-hidden="true" />
-                  </button>
+                  {(!phone || server.id !== DEFAULT_SERVER_ID) && (
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={t("删除服务器 {{index}}", { index: index + 1 })}
+                      title={t("删除服务器")}
+                      disabled={busy || server.id === DEFAULT_SERVER_ID}
+                      onClick={() =>
+                        void apply({
+                          ...settings,
+                          servers: settings.servers.filter(
+                            (s) => s.id !== server.id,
+                          ),
+                        })
+                      }
+                    >
+                      <Trash2 size={17} aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
               </li>
             ))}
           </ul>
           {errorSection === "servers" && errorNotice}
-          <p className="settings-hint">
+          {!phone && <p className="settings-hint">
             {t("默认服务器由应用提供，可设置访问密钥、启用或停用。")}
-          </p>
+          </p>}
         </section>
         <IceServerSettings
+          phone={phone}
           servers={settings.iceServers}
           busy={busy}
           error={errorSection === "iceServers" ? error : ""}
@@ -521,6 +497,7 @@ export function SystemSettings({
           onApply={(iceServers) => apply({ ...settings, iceServers }, "iceServers")}
         />
         <TurnServerSettings
+          phone={phone}
           servers={settings.iceServers}
           busy={busy}
           error={errorSection === "turnServers" ? error : ""}
@@ -620,9 +597,9 @@ export function SystemSettings({
                   </button>
                 </div>
               </div>
-              <p className="settings-hint">
+              {!phone && <p className="settings-hint">
                 {t("填写服务器管理员提供的完整密钥，仅保存在这台设备上。")}
-              </p>
+              </p>}
             </fieldset>
             {editorError && (
               <p className="settings-error" role="alert">

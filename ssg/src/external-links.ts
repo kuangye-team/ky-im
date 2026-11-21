@@ -1,5 +1,5 @@
+import { isNative } from "./platform";
 import type { MouseEvent } from "react";
-import { isDesktop } from "./core/network/settings";
 
 export async function openExternalUrl(url: string): Promise<void> {
   if (!["https:", "http:", "mailto:"].includes(new URL(url).protocol))
@@ -10,7 +10,7 @@ export async function openExternalUrl(url: string): Promise<void> {
 
 /** Route public links, including portal content, through the desktop system opener. */
 export function handleExternalLinkClick(event: MouseEvent<HTMLElement>, onError: () => void) {
-  if (!isDesktop() || event.defaultPrevented || event.button > 1) return;
+  if (!isNative() || event.defaultPrevented || event.button > 1) return;
   const anchor = (event.target as Element).closest<HTMLAnchorElement>("a[href]");
   if (!anchor || anchor.hasAttribute("download") || !/^(https?:|mailto:)/i.test(anchor.href)) return;
   // Internal routes retain normal router behavior.

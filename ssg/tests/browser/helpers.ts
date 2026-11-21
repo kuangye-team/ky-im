@@ -1,4 +1,18 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
+import jsQR from "jsqr";
+import sharp from "sharp";
+
+export async function expectInviteQrMatchesAddress(dialog: Locator) {
+  const qr = dialog.getByRole("img", { name: "访问地址二维码", exact: true });
+  const screenshot = await qr.screenshot({ animations: "disabled" });
+  const { data, info } = await sharp(screenshot)
+    .ensureAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  const decoded = jsQR(new Uint8ClampedArray(data), info.width, info.height);
+  const address = await dialog.getByLabel("访问地址", { exact: true }).inputValue();
+  expect(decoded?.data).toBe(address);
+}
 
 export async function capture(page: Page, filename: string) {
   if (!process.env.SEND_CAPTURE) return;
@@ -35,7 +49,7 @@ export async function editProfile(page: Page, name: string, bio = "局域网自�
   await page.getByRole("button", { name: "个人资料", exact: true }).click();
   await page.getByLabel("显示名称", { exact: false }).fill(name);
   await page.getByLabel("个性签名", { exact: false }).fill(bio);
-  await page.getByRole("button", { name: "保存资料", exact: true }).click();
+  await page.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("dialog")).toBeHidden();
 }
 
@@ -51,12 +65,13 @@ export async function openPeer(page: Page, name: string) {
 export function contactDetails(page: Page) {
   return page
     .getByRole("complementary", { name: "联系人资料", exact: true })
-    .or(page.getByRole("dialog", { name: "联系人资料", exact: true }));
+    .or(page.getByRole("dialog", { name: "联系人资料", exact: true }))
+    .or(page.locator(".contact-page"));
 }
 
 export async function openContact(page: Page) {
   const contact = contactDetails(page);
-  if (!(await contact.isVisible())) {
+  if (!(await page.locator(".detail-panel").isVisible()) && !(await contact.isVisible())) {
     await page
       .getByRole("button", { name: "查看联系人资料", exact: true })
       .click();
@@ -66,6 +81,10 @@ export async function openContact(page: Page) {
 }
 
 export async function closeContact(page: Page) {
+  if (await page.locator(".contact-page").isVisible()) {
+    await page.getByRole("button", { name: "返回聊天", exact: true }).click();
+    return;
+  }
   const contact = page.getByRole("dialog", {
     name: "联系人资料",
     exact: true,
@@ -123,6 +142,21 @@ export async function expectNoHorizontalOverflow(page: Page) {
   }));
   expect(dimensions.documentWidth).toBeLessThanOrEqual(dimensions.width + 1);
   expect(dimensions.bodyWidth).toBeLessThanOrEqual(dimensions.width + 1);
+}
+
+export async function expectPeerNumberCopy(page: Page, scope: Locator) {
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: async (value: string) => { document.documentElement.dataset.copiedNumber = value; } },
+    });
+  });
+  const number = scope.locator(".contact-number b");
+  await expect(number).toHaveText(/^[1-9]\d{5}$/);
+  const copy = scope.getByRole("button", { name: "复制蜂鸟号", exact: true });
+  await copy.click();
+  await expect(page.locator("html")).toHaveAttribute("data-copied-number", (await number.textContent())!);
+  await expect(copy).toHaveAttribute("title", "已复制");
 }
 
 export async function enableAutoAcceptFiles(page: Page) {

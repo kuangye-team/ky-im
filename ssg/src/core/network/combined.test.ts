@@ -466,6 +466,23 @@ it("defers pings per upstream for presence and relay traffic, but sends when idl
   expect(b.sent.filter(p => p.type === "ping")).toHaveLength(1);
 });
 
+it("brings failed servers forward and probes each joined server on a network change", async () => {
+  vi.useFakeTimers();
+  const { session, central, lan, a, b } = await setup(["one", "two"]);
+  for (const s of [a, b]) s.receive({ type: "welcome", peers: [] });
+  a.close();
+  session.recheckNetwork!();
+  expect(central.sessions).toHaveLength(2);
+  expect(b.sent.at(-1)).toEqual({ type: "ping" });
+  await vi.advanceTimersByTimeAsync(5000);
+  session.recheckNetwork!();
+  expect(central.sessions).toHaveLength(2);
+  expect(b.sent.filter(p => p.type === "ping")).toHaveLength(1);
+  await vi.advanceTimersByTimeAsync(6000);
+  expect(b.readyState).toBe(3);
+  expect(lan.sessions).toHaveLength(2);
+});
+
 it("gives each resumed source a reply grace", async () => {
   vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   const { a, b, central, lan } = await setup();

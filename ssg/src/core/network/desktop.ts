@@ -1,4 +1,4 @@
-import { configuredRuntime } from "../capabilities";
+import { CAP, configuredRuntime } from "../capabilities";
 import { CombinedDiscoveryAdapter } from "./combined";
 import { SignalingDiscoveryAdapter } from "./signaling";
 import { readSettings } from "./settings";
@@ -14,11 +14,12 @@ export function desktopNetwork(
   bridge: P2pBridge = nativeBridge,
   settings = readSettings(true),
   identity?: Promise<DeviceIdentity>,
+  runtime = configuredRuntime(true, settings),
 ): NetworkAdapters {
   const central = new CentralBridge(
     identity ?? identityFor(new DesktopStorageAdapter()),
     activeIceServers(settings.iceServers),
-    settings.transport.webrtc,
+    runtime.capabilities.includes(CAP.webrtc),
   );
   const transport = new NativePeerNode(central, settings, bridge);
   const sources: DiscoveryAdapter[] = settings.discovery.signaling
@@ -43,7 +44,7 @@ export function desktopNetwork(
     open: () => transport.discovery(),
   });
   return {
-    runtime: configuredRuntime(true, settings),
+    runtime,
     discovery: new CombinedDiscoveryAdapter(sources),
     transport,
   };

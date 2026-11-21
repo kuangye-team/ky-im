@@ -7,33 +7,38 @@ export function Modal({
   onClose,
   onOpenAutoFocus,
   onCloseAutoFocus,
+  dismissOnOutsideClick = true,
   title,
   description,
   headerActions,
   children,
   wide = false,
   className = "",
+  overlayClassName = "",
 }: {
   open: boolean;
   onClose: () => void;
   onOpenAutoFocus?: () => void;
   onCloseAutoFocus?: () => void;
+  dismissOnOutsideClick?: boolean;
   title: string;
   description?: string;
   headerActions?: ReactNode;
   children: ReactNode;
   wide?: boolean;
   className?: string;
+  overlayClassName?: string;
 }) {
   const { t } = useTranslation("components");
   const descriptionId = useId();
   return (
     <Dialog.Root open={open} onOpenChange={(value) => !value && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="modal-overlay" />
+        <Dialog.Overlay className={`modal-overlay ${overlayClassName}`} />
         <Dialog.Content
           className={`modal ${wide ? "modal-wide" : ""} ${className}`}
           aria-describedby={description ? descriptionId : undefined}
+          onPointerDownOutside={dismissOnOutsideClick ? undefined : (event) => event.preventDefault()}
           onOpenAutoFocus={
             onOpenAutoFocus
               ? (event) => {

@@ -1,3 +1,4 @@
+import { isNative } from "./platform";
 import { initializeRuntimeLogs, runtimeLog } from "./runtime-logs";
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -7,8 +8,10 @@ import { RefreshCw } from "lucide-react";
 import "./i18n";
 import { createChatEngine, type ChatEngine } from "./core";
 import { App } from "./App";
+import { DesktopCloseDialog } from "./components/DesktopCloseDialog";
 import "./styles.css";
 import "./themes.css";
+import "./styles/mobile.css";
 import { startAppUpdates } from "./app-updates";
 import { preparePeerReset, RESET_COMPLETE, RESET_LOCK } from "./reset-app-data";
 import { initializeAppIcons } from "./app-icons";
@@ -16,10 +19,10 @@ import { initializeAppIcons } from "./app-icons";
 initializeRuntimeLogs();
 initializeAppIcons();
 startAppUpdates();
-const Router = import.meta.env.VITE_DESKTOP ? HashRouter : BrowserRouter;
+const Router = isNative() ? HashRouter : BrowserRouter;
 
 async function openChatEngine(): Promise<ChatEngine> {
-  if (!import.meta.env.VITE_DESKTOP && navigator.locks)
+  if (!isNative() && navigator.locks)
     return navigator.locks.request(RESET_LOCK, () => createChatEngine());
   return createChatEngine();
 }
@@ -54,7 +57,7 @@ function Bootstrap() {
         runtimeLog("error", "app", "应用启动失败", { detail: error instanceof Error ? error.message : String(error), raw: error });
         if (alive)
           setError(
-            import.meta.env.VITE_DESKTOP && error instanceof Error
+            isNative() && error instanceof Error
               ? error.message
               : "浏览器暂时无法保存或读取聊天记录。",
           );
@@ -77,7 +80,7 @@ function Bootstrap() {
         <p>{t(error)}</p>
         {resettingElsewhere ? null : <p>
           {t(
-            import.meta.env.VITE_DESKTOP
+            isNative()
               ? "请检查数据存储目录的访问权限、磁盘空间和磁盘连接，然后重试。"
               : "请检查浏览器是否允许此网站保存数据，或换一个浏览器重试。",
           )}
@@ -94,6 +97,7 @@ createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <Router>
       <Bootstrap />
+      {import.meta.env.VITE_DESKTOP && <DesktopCloseDialog />}
     </Router>
   </React.StrictMode>,
 );

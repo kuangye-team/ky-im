@@ -37,9 +37,16 @@ test("重置可取消，确认后清除身份、附件、草稿及设置，并�
   await page.getByRole("menuitemradio", { name: "English", exact: true }).click();
   await page.setViewportSize({ width: 390, height: 844 });
   await expectNoHorizontalOverflow(page);
-  await page.getByRole("button", { name: "Reset app data", exact: true }).click();
-  const englishModal = page.getByRole("dialog", { name: "Reset app data?", exact: true });
+  await expect(page.getByRole("button", { name: /Reset.*data/i })).toHaveCount(0);
+  await page.getByRole("button", { name: "Back to Me" }).click();
+  const phoneReset = page.getByRole("button", { name: "Reset data", exact: true });
+  await phoneReset.click();
+  const englishModal = page.getByRole("dialog", { name: "Reset data?", exact: true });
   await expect(englishModal).toContainText("permanently delete");
+  await englishModal.getByRole("button", { name: "Cancel" }).click();
+  await expect(englishModal).toBeHidden();
+  await expect(phoneReset).toBeFocused();
+  await phoneReset.click();
   await expectNoHorizontalOverflow(page);
   await page.screenshot({ path: "../temp/screenshot/storage-reset-mobile-english.png", fullPage: true, animations: "disabled" });
   const prompts: string[] = [];
@@ -48,7 +55,7 @@ test("重置可取消，确认后清除身份、附件、草稿及设置，并�
     page.waitForEvent("load"),
     englishModal.getByRole("button", { name: "Reset", exact: true }).click(),
   ]);
-  await expect(page.getByRole("heading", { name: "存储管理", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "我的", exact: true })).toBeVisible();
   const saved = await page.evaluate(async () => {
     const { IndexedDBStorageAdapter } = await import("/src/core/storage.ts");
     const store = new IndexedDBStorageAdapter();

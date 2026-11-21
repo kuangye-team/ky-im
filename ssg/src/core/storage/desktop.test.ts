@@ -28,6 +28,29 @@ describe("desktop adapter", () => {
       "resetTransfers",
     ]);
   });
+  it("uses the Android save folder only for received attachments and encodes binary IPC", async () => {
+    const originalInvoke = nativeInvoke.getMockImplementation();
+    vi.stubEnv("VITE_ANDROID", "true");
+    try {
+      const store = new DesktopStorageAdapter();
+      nativeInvoke.mockClear();
+      nativeInvoke.mockImplementation(async (command, args) =>
+        command === "storage_request" && "request" in args && (args.request as {op: string}).op.startsWith("begin")
+          ? "token" : null);
+      const base = { id: newId(), fileName: "file", size: 2, kind: "file" as const,
+        createdAt: 1, senderId: "peer", peerId: "peer", status: "sending" as const };
+      const incoming = await store.createFileDestination({ ...base, attachmentStorage: "managed" });
+      await incoming.write(new Blob([new Uint8Array([0, 255])]));
+      await store.createFileDestination(base);
+      expect(nativeInvoke.mock.calls.map(([command, args]) =>
+        command === "storage_write" ? args : (args as { request: { op: string } }).request.op,
+      )).toEqual(["beginReceived", { base64: "AP8=" }, "begin"]);
+    } finally {
+      if (originalInvoke) nativeInvoke.mockImplementation(originalInvoke);
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("bounds IPC writes and commits only after the last block", async () => {
     const requests: { op: string; [key: string]: unknown }[] = [];
     const invoke = (async (request) => {

@@ -1,7 +1,7 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronDown, Download, Search, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Download, MoreHorizontal, Search, Trash2 } from "lucide-react";
 import {
   clearRuntimeLogs,
   getRuntimeLogs,
@@ -39,12 +39,11 @@ function Filter({
   options: [string, string][];
   onChange: (value: string) => void;
 }) {
+  const selected = options.find(([key]) => key === value)?.[1];
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger className="log-filter" aria-label={label}>
-        <span>
-          {label} · {options.find(([key]) => key === value)?.[1]}
-        </span>
+      <DropdownMenu.Trigger className="log-filter" aria-label={label} aria-description={selected} data-active={value !== "all"}>
+        <span>{value === "all" ? label : selected}</span>
         <ChevronDown size={14} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -72,14 +71,26 @@ function Filter({
     </DropdownMenu.Root>
   );
 }
-export function RuntimeLogs({
-  peer,
-  onClose,
-}: {
-  peer?: Profile;
-  onClose: () => void;
-}) {
+const logDescription = "仅保存在本机，保留最近 7 天、最多 2000 条。不记录聊天正文和文件内容。";
+
+export function RuntimeLogs({ peer, onClose }: { peer?: Profile; onClose: () => void }) {
   const { t } = useTranslation();
+  return <Modal open wide title={t("运行日志")} onClose={onClose} className="runtime-logs" description={t(logDescription)}>
+    <LogContents peer={peer} />
+  </Modal>;
+}
+
+export function RuntimeLogsPage({ peer }: { peer?: Profile }) {
+  return <section className="full-page logs-page">
+    <LogContents peer={peer} standalone />
+  </section>;
+}
+
+function LogContents({ peer, standalone = false }: { peer?: Profile; standalone?: boolean }) {
+  const { t, i18n } = useTranslation();
+  const timeFormat = useMemo(() => new Intl.DateTimeFormat(i18n.language, {
+    month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }), [i18n.language]);
   const entries = useSyncExternalStore(subscribeRuntimeLogs, getRuntimeLogs);
   const [level, setLevel] = useState("all");
   const [category, setCategory] = useState("all");
@@ -113,18 +124,16 @@ export function RuntimeLogs({
     set(value);
     setPage(0);
   };
+  const changeDiagnostics = (enabled: boolean) => {
+    try {
+      setFileDiagnostics(enabled);
+      setDiagnostics(enabled);
+      setError("");
+    } catch { setError(t("无法保存设置")); }
+  };
   const all: [string, string] = ["all", t("全部")];
   return (
-    <Modal
-      open
-      wide
-      title={t("运行日志")}
-      onClose={onClose}
-      className="runtime-logs"
-      description={t(
-        "仅保存在本机，保留最近 7 天、最多 2000 条。不记录聊天正文和文件内容。",
-      )}
-    >
+    <>
       {peer && (
         <div className="log-scope" aria-label={t("查看范围")}>
           <button
@@ -141,6 +150,64 @@ export function RuntimeLogs({
           </button>
         </div>
       )}
+      <div className="log-toolbar">
+        <label className="search-field">
+          <Search size={17} />
+          <input
+            aria-label={t("搜索运行日志")}
+            placeholder={t("搜索运行日志")}
+            value={query}
+            onChange={(event) => filter(setQuery)(event.target.value)}
+          />
+        </label>
+        <button
+          className={standalone ? "icon-button" : "secondary-button"}
+          aria-label={t("导出筛选结果")}
+          title={t("导出筛选结果")}
+          onClick={async () => {
+            setError("");
+            try {
+              await download(
+                new Blob([JSON.stringify(filtered, null, 2)], {
+                  type: "application/json",
+                }),
+                `hummingbird-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+              );
+            } catch {
+              setError(t("日志未能导出，请重试"));
+            }
+          }}
+        >
+          <Download size={16} />
+          {!standalone && t("导出筛选结果")}
+        </button>
+        {standalone ? (
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger className="icon-button" aria-label={t("日志选项")} title={t("日志选项")}>
+              <MoreHorizontal size={18} />
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content className="log-filter-menu log-options-menu" align="end" sideOffset={6} collisionPadding={12}>
+                <DropdownMenu.CheckboxItem className="log-filter-option" checked={fileDiagnostics} onCheckedChange={changeDiagnostics}>
+                  {t("记录后续文件传输的性能")}
+                  <DropdownMenu.ItemIndicator><Check size={15} /></DropdownMenu.ItemIndicator>
+                </DropdownMenu.CheckboxItem>
+                <DropdownMenu.Item className="log-filter-option" onSelect={() => setConfirmClear(true)}>
+                  {t("清空运行日志")}<Trash2 size={15} />
+                </DropdownMenu.Item>
+                <DropdownMenu.Label className="log-retention">{t(logDescription)}</DropdownMenu.Label>
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        ) : <button
+          className="icon-button"
+          aria-label={t("清空运行日志")}
+          title={t("清空运行日志")}
+          onClick={() => setConfirmClear(true)}
+        >
+          <Trash2 size={17} />
+        </button>}
+      </div>
       <div className="log-filters">
         <Filter
           label={t("级别")}
@@ -177,52 +244,10 @@ export function RuntimeLogs({
           ]}
         />
       </div>
-      <label>
-        <input type="checkbox" checked={fileDiagnostics} onChange={event => {
-          try {
-            setFileDiagnostics(event.target.checked);
-            setDiagnostics(event.target.checked);
-          } catch { setError(t("无法保存设置")); }
-        }} /> {t("记录后续文件传输的性能")}
-      </label>
-      <div className="log-toolbar">
-        <label className="search-field">
-          <Search size={17} />
-          <input
-            aria-label={t("搜索运行日志")}
-            placeholder={t("搜索运行日志")}
-            value={query}
-            onChange={(event) => filter(setQuery)(event.target.value)}
-          />
-        </label>
-        <button
-          className="secondary-button"
-          onClick={async () => {
-            setError("");
-            try {
-              await download(
-                new Blob([JSON.stringify(filtered, null, 2)], {
-                  type: "application/json",
-                }),
-                `hummingbird-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
-              );
-            } catch {
-              setError(t("日志未能导出，请重试"));
-            }
-          }}
-        >
-          <Download size={16} />
-          {t("导出筛选结果")}
-        </button>
-        <button
-          className="icon-button"
-          aria-label={t("清空运行日志")}
-          title={t("清空运行日志")}
-          onClick={() => setConfirmClear(true)}
-        >
-          <Trash2 size={17} />
-        </button>
-      </div>
+      {!standalone && <label>
+        <input type="checkbox" checked={fileDiagnostics} onChange={event => changeDiagnostics(event.target.checked)} />
+        {" "}{t("记录后续文件传输的性能")}
+      </label>}
       {confirmClear && (
         <div className="log-clear" role="alert">
           <span>{t("清空本机保留的全部运行日志？")}</span>
@@ -257,7 +282,7 @@ export function RuntimeLogs({
             <article className={`log-entry log-${entry.level}`} key={entry.id}>
               <div className="log-entry-meta">
                 <time dateTime={new Date(entry.time).toISOString()}>
-                  {new Date(entry.time).toLocaleString()}
+                  {timeFormat.format(entry.time)}
                 </time>
                 <span className="log-level">{t(levels[entry.level])}</span>
                 <span>{t(categories[entry.category])}</span>
@@ -266,20 +291,15 @@ export function RuntimeLogs({
               <details className="log-source">
                 <summary>{t("源日志")}</summary>
                 <pre>{entry.raw || JSON.stringify(entry, null, 2)}</pre>
+                {entry.peerId && <small>{peer && entry.peerId === peer.id ? peer.name : t("设备")} · {entry.peerId}</small>}
               </details>
-              {entry.peerId && (
-                <small>
-                  {peer && entry.peerId === peer.id ? peer.name : t("设备")} ·{" "}
-                  {entry.peerId}
-                </small>
-              )}
             </article>
           ))
         )}
       </div>
       <footer className="log-footer">
         <span>{t("{{count}} 条日志", { count: filtered.length })}</span>
-        <div>
+        {(!standalone || pages > 1) && <div>
           <button
             className="secondary-button"
             disabled={current === 0}
@@ -297,8 +317,8 @@ export function RuntimeLogs({
           >
             {t("下一页")}
           </button>
-        </div>
+        </div>}
       </footer>
-    </Modal>
+    </>
   );
 }

@@ -1,8 +1,9 @@
+import { PhoneActions } from "./PhoneActions";
 import { TRANSFER_CONFIG } from "../config";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../i18n";
 import { translateError } from "../localizeError";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   Check,
@@ -11,6 +12,7 @@ import {
   FolderOpen,
   Forward,
   LoaderCircle,
+  MoreHorizontal,
   Save,
   Trash2,
   X,
@@ -31,6 +33,7 @@ import { Avatar } from "./Avatar";
 import { messageTime } from "./messageTime";
 
 export function MessageBubble({
+  phone = false,
   message,
   mine,
   peer,
@@ -42,6 +45,7 @@ export function MessageBubble({
   onDelete,
   onForward,
 }: {
+  phone?: boolean;
   message: Message;
   mine: boolean;
   peer: Profile;
@@ -54,6 +58,13 @@ export function MessageBubble({
   onForward: () => void;
 }) {
   const { t } = useTranslation();
+  const hold = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const cancelHold = () => {
+    if (hold.current) window.clearTimeout(hold.current.timer);
+    hold.current = null;
+  };
+  useEffect(() => cancelHold, []);
+  const [actions, setActions] = useState(false);
   const [url, setUrl] = useState("");
   const [choosing, setChoosing] = useState(false);
   const [savePhase, setSavePhase] = useState<"choosing" | "saving" | null>(null);
@@ -136,6 +147,19 @@ export function MessageBubble({
   return (
     <div
       className={`message-row ${mine ? "mine" : ""}`}
+      onPointerDown={phone ? event => {
+        if (event.pointerType !== "touch" || (event.target as HTMLElement).closest("button")) return;
+        cancelHold();
+        hold.current = { x: event.clientX, y: event.clientY, timer: window.setTimeout(() => {
+          setActions(true);
+        }, 550) };
+      } : undefined}
+      onPointerMove={phone ? event => {
+        if (hold.current && Math.hypot(event.clientX - hold.current.x, event.clientY - hold.current.y) > 10) cancelHold();
+      } : undefined}
+      onPointerUp={phone ? cancelHold : undefined}
+      onPointerCancel={phone ? cancelHold : undefined}
+      onContextMenu={phone ? event => { event.preventDefault(); setActions(true); } : undefined}
       data-message-id={message.id}
     >
       <Avatar peer={peer} size="avatar-small" />
@@ -305,6 +329,7 @@ export function MessageBubble({
               </button>
             </>
           )}
+          {phone ? <button className="phone-message-more" aria-label={t("消息操作")} onClick={() => setActions(true)}><MoreHorizontal size={18} /></button> : <>
           <button
             className="message-forward-button"
             aria-label={t("转发消息")}
@@ -337,7 +362,11 @@ export function MessageBubble({
           >
             <Trash2 size={12} />
             {t("删除")}
-          </button>
+          </button></>}
+          {phone && actions && <PhoneActions title={t("消息操作")} close={() => setActions(false)} actions={[
+            { label: t("转发消息"), Icon: Forward, run: onForward, disabled: message.status === "sending" || awaiting || external || !!message.folder || missingAttachment },
+            { label: t("删除消息"), Icon: Trash2, run: onDelete, danger: true },
+          ]} />}
         </div>
       </div>
     </div>

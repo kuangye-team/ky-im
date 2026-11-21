@@ -1,4 +1,6 @@
 //! Desktop persistence. Only this module resolves managed paths; peers never supply absolute paths.
+#[cfg(target_os = "android")]
+pub mod android;
 mod paths;
 use paths::{
     CACHE, DATA_DIR, FILES, FIXED, HISTORY, LOCATOR, OFFLINE, STORAGE_LOCK, check_sqlite,
@@ -16,6 +18,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::{Manager, State};
+#[cfg(target_os = "android")]
+use tauri_plugin_android_fs::{AndroidFsExt, FsUri};
 use uuid::Uuid;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -25,6 +29,8 @@ const MAX_BLOCK: usize = 16 * 1024 * 1024;
 
 #[derive(Default, Clone)]
 pub struct StorageState {
+    #[cfg(target_os = "android")]
+    app: Arc<std::sync::OnceLock<tauri::AppHandle>>,
     store: Arc<Mutex<Option<Store>>>,
     resetting: Arc<std::sync::atomic::AtomicBool>,
     epoch: Arc<std::sync::atomic::AtomicU64>,
@@ -45,17 +51,21 @@ impl StorageState {
     }
 
     fn locate(&self, app: &tauri::AppHandle) -> std::result::Result<(), String> {
+        #[cfg(target_os = "android")]
+        self.app.get_or_init(|| app.clone());
         if self.paths.get().is_none() {
-            let default = app
-                .path()
-                .app_data_dir()
-                .map_err(|e| e.to_string())?
-                .join(DATA_DIR);
-            let legacy = app
-                .path()
-                .app_config_dir()
-                .map_err(|e| e.to_string())?
-                .join(LOCATOR);
+            let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+            let config = app.path().app_config_dir().map_err(|e| e.to_string())?;
+            #[cfg(target_os = "android")]
+            let (data, config) = {
+                // Android owns the mount layout above the application sandbox.
+                let data = data.canonicalize().map_err(|e| e.to_string())?;
+                let config = config.canonicalize().map_err(|e| e.to_string())?;
+                paths::PRIVATE_ROOTS.get_or_init(|| [data.clone(), config.clone()]);
+                (data, config)
+            };
+            let default = data.join(DATA_DIR);
+            let legacy = config.join(LOCATOR);
             let _ = self.paths.set((default, legacy));
         }
         Ok(())
@@ -101,7 +111,12 @@ impl StorageState {
                 let (default, _) = state.paths.get().ok_or("存储尚未准备好")?;
                 *guard = Some(Store::open(default).map_err(|e| e.to_string())?);
             }
-            operation(guard.as_mut().unwrap()).map_err(|e| e.to_string())
+            let store = guard.as_mut().unwrap();
+            #[cfg(target_os = "android")]
+            if store.app.is_none() {
+                store.app = state.app.get().cloned();
+            }
+            operation(store).map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())?
@@ -146,14 +161,14 @@ impl StorageState {
                 if target.external.is_none() || target.written != 0 {
                     return Err("请重新选择保存位置".into());
                 }
-                let (path, length) = if saved {
+                if saved {
                     let record = store
                         .attachment(&from)?
                         .ok_or("附件尚未接收完成或已被清除")?;
                     if record.folder || from != target.id || record.size != target.size {
                         return Err("文件进度无法确认，请重新发送".into());
                     }
-                    (store.root.join(relative(&record.path)?), record.size)
+                    (store.open_attachment(&record)?, record.size)
                 } else {
                     let source = store.pending.get(&from).ok_or("文件传输已取消")?;
                     if source.folder
@@ -163,13 +178,10 @@ impl StorageState {
                     {
                         return Err("文件进度无法确认，请重新发送".into());
                     }
-                    (
-                        store.root.join(CACHE).join(&from).join(&source.name),
-                        source.written,
-                    )
-                };
-                no_links(&path)?;
-                (File::open(path)?, length)
+                    let path = store.root.join(CACHE).join(&from).join(&source.name);
+                    no_links(&path)?;
+                    (File::open(path)?, source.written)
+                }
             };
             let mut remaining = length;
             while remaining > 0 {
@@ -205,11 +217,7 @@ impl StorageState {
             if a.folder {
                 return Err("请选择文件发送".into());
             }
-            let path = store
-                .root
-                .join(relative(&a.path).map_err(|e| e.to_string())?);
-            no_links(&path).map_err(|e| e.to_string())?;
-            File::open(path).map_err(|e| e.to_string())
+            store.open_attachment(&a).map_err(|e| e.to_string())
         })
         .await
         .map_err(|e| e.to_string())?
@@ -242,6 +250,9 @@ pub enum Request {
     SaveConversation {
         value: Value,
     },
+    GetLatestMessage {
+        id: String,
+    },
     GetMessages {
         id: String,
     },
@@ -269,6 +280,14 @@ pub enum Request {
     },
     ResetTransfers,
     Begin {
+        id: String,
+        name: String,
+        mime: String,
+        size: u64,
+        folder: bool,
+    },
+    #[cfg(target_os = "android")]
+    BeginReceived {
         id: String,
         name: String,
         mime: String,
@@ -320,13 +339,23 @@ pub enum Request {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Attachment {
+    #[cfg(target_os = "android")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    document: Option<FsUri>,
     path: String,
     size: u64,
     mime: String,
     name: String,
     folder: bool,
 }
+enum ExternalTarget {
+    Path(PathBuf),
+    #[cfg(target_os = "android")]
+    Document(FsUri, String),
+}
 struct Pending {
+    #[cfg(target_os = "android")]
+    tree: Option<FsUri>,
     id: String,
     name: String,
     mime: String,
@@ -335,9 +364,11 @@ struct Pending {
     folder: bool,
     file: Option<File>,
     remaining: u64,
-    external: Option<(tempfile::NamedTempFile, PathBuf)>,
+    external: Option<(tempfile::NamedTempFile, ExternalTarget)>,
 }
 struct Store {
+    #[cfg(target_os = "android")]
+    app: Option<tauri::AppHandle>,
     root: PathBuf,
     default: PathBuf,
     locator: PathBuf,
@@ -358,6 +389,15 @@ fn id(value: &str) -> Result<()> {
     Ok(())
 }
 impl Store {
+    fn open_attachment(&self, a: &Attachment) -> Result<File> {
+        #[cfg(target_os = "android")]
+        if let Some(uri) = &a.document {
+            return android::seekable(self.app()?, uri, a.size);
+        }
+        let path = self.root.join(relative(&a.path)?);
+        no_links(&path)?;
+        Ok(File::open(path)?)
+    }
     fn read(&self, id: &str, offset: u64, length: usize) -> Result<Vec<u8>> {
         if length > MAX_BLOCK {
             return Err("Payload too large".into());
@@ -366,11 +406,14 @@ impl Store {
         if a.folder || offset > a.size {
             return Err("Invalid file range".into());
         }
-        let path = self.root.join(relative(&a.path)?);
-        no_links(&path)?;
-        let mut file = File::open(path)?;
+        let count = (a.size - offset).min(length as u64) as usize;
+        #[cfg(target_os = "android")]
+        if let Some(uri) = &a.document {
+            return android::read_range(self.app()?, uri, offset, count);
+        }
+        let mut file = self.open_attachment(&a)?;
         file.seek(SeekFrom::Start(offset))?;
-        let mut bytes = vec![0; length.min((a.size - offset) as usize)];
+        let mut bytes = vec![0; count];
         file.read_exact(&mut bytes)?;
         Ok(bytes)
     }
@@ -387,6 +430,8 @@ impl Store {
         no_links(&root)?;
         check_sqlite(&fixed.join(HISTORY))?;
         let mut store = Self {
+            #[cfg(target_os = "android")]
+            app: None,
             root,
             default,
             locator,
@@ -530,9 +575,24 @@ impl Store {
         }
         let cache = tree_size(&self.root.join(CACHE))?;
         usage += tree_size(&self.root.join(FILES))? + cache;
-        Ok(
-            json!({"directory":self.root, "usage":usage, "cacheUsage":cache, "cleanupPending":cleanup_pending}),
-        )
+        let info = json!({"directory":self.root, "usage":usage, "cacheUsage":cache, "cleanupPending":cleanup_pending});
+        #[cfg(target_os = "android")]
+        let info = {
+            let mut info = info;
+            let selected = self.save_tree()?;
+            info["directory"] = json!(selected.as_ref().map_or("应用内", |(name, _)| name));
+            if let Some((_, tree)) = selected {
+                info["directoryUnavailable"] =
+                    json!(android::require_tree(self.app()?.android_fs(), &tree).is_err());
+            }
+            let saved: i64 = self.db.query_row(
+                "SELECT COALESCE(SUM(json_extract(value, '$.size')),0) FROM attachments WHERE json_type(value, '$.document')='object'",
+                [], |row| row.get(0),
+            )?;
+            info["usage"] = json!(usage + u64::try_from(saved)?);
+            info
+        };
+        Ok(info)
     }
 
     fn move_to(&mut self, target: &Path) -> Result<Value> {
@@ -593,6 +653,33 @@ impl Store {
             }
         }
         Ok(json!({"directory":self.root, "cleanupWarning":cleanup_warning}))
+    }
+    fn begin_external(
+        &mut self,
+        key: String,
+        size: u64,
+        temp: tempfile::NamedTempFile,
+        destination: ExternalTarget,
+    ) -> Result<String> {
+        let file = temp.reopen()?;
+        let token = Uuid::new_v4().to_string();
+        self.pending.insert(
+            token.clone(),
+            Pending {
+                #[cfg(target_os = "android")]
+                tree: None,
+                id: key,
+                name: String::new(),
+                mime: String::new(),
+                size,
+                written: 0,
+                folder: false,
+                file: Some(file),
+                remaining: size,
+                external: Some((temp, destination)),
+            },
+        );
+        Ok(token)
     }
     fn abort(&mut self, token: &str) -> Result<()> {
         id(token)?;
@@ -718,6 +805,10 @@ impl Store {
                 )?;
                 Ok(Value::Null)
             }
+            Request::GetLatestMessage { id } => Ok(self.values(
+                "SELECT value FROM messages WHERE peer=? ORDER BY created DESC, id DESC LIMIT 1",
+                [id],
+            )?.pop().unwrap_or(Value::Null)),
             Request::GetMessages { id } => Ok(json!(self.values(
                 "SELECT value FROM messages WHERE peer=? ORDER BY created, id",
                 [id]
@@ -827,6 +918,29 @@ impl Store {
                 }
                 Ok(Value::Null)
             }
+            #[cfg(target_os = "android")]
+            Request::BeginReceived {
+                id,
+                name,
+                mime,
+                size,
+                folder,
+            } => {
+                let tree = self.save_tree()?.map(|(_, uri)| uri);
+                if let Some(uri) = &tree {
+                    android::require_tree(self.app()?.android_fs(), uri)?;
+                }
+                android::check_capacity(&self.root, size)?;
+                let token = self.request(Request::Begin {
+                    id,
+                    name,
+                    mime,
+                    size,
+                    folder,
+                })?;
+                self.pending.get_mut(token.as_str().unwrap()).unwrap().tree = tree;
+                Ok(token)
+            }
             Request::Begin {
                 id: key,
                 name,
@@ -862,6 +976,8 @@ impl Store {
                 self.pending.insert(
                     token.clone(),
                     Pending {
+                        #[cfg(target_os = "android")]
+                        tree: None,
                         id: key,
                         name,
                         mime,
@@ -896,22 +1012,8 @@ impl Store {
                 let temp = tempfile::Builder::new()
                     .prefix(".hummingbird-")
                     .tempfile_in(parent)?;
-                let file = temp.reopen()?;
-                let token = Uuid::new_v4().to_string();
-                self.pending.insert(
-                    token.clone(),
-                    Pending {
-                        id: key,
-                        name: String::new(),
-                        mime: String::new(),
-                        size,
-                        written: 0,
-                        folder: false,
-                        file: Some(file),
-                        remaining: size,
-                        external: Some((temp, destination)),
-                    },
-                );
+                let token =
+                    self.begin_external(key, size, temp, ExternalTarget::Path(destination))?;
                 Ok(json!(token))
             }
             Request::CopyToExternal { .. } => Err("文件传输已取消".into()),
@@ -987,16 +1089,43 @@ impl Store {
                 if let Some(file) = &pending.file {
                     file.sync_all()?;
                 }
+                let source = self.root.join(CACHE).join(&token);
+                #[cfg(target_os = "android")]
+                let document = pending
+                    .tree
+                    .as_ref()
+                    .map(|tree| {
+                        android::copy_from_path(
+                            self.app()?,
+                            &source.join(&pending.name),
+                            tree,
+                            &pending.name,
+                        )
+                    })
+                    .transpose()?;
                 let pending = self.pending.remove(&token).ok_or("文件传输已取消")?;
                 drop(pending.file);
                 if let Some((temp, destination)) = pending.external {
-                    temp.persist(destination)?;
+                    match destination {
+                        ExternalTarget::Path(path) => {
+                            temp.persist(path)?;
+                        }
+                        #[cfg(target_os = "android")]
+                        ExternalTarget::Document(parent, name) => {
+                            android::copy_from_path(self.app()?, temp.path(), &parent, &name)?;
+                        }
+                    }
                     return Ok(Value::Null);
                 }
-                let source = self.root.join(CACHE).join(&token);
                 let dest = self.root.join(FILES).join(&token);
                 let previous = self.attachment(&pending.id)?;
+                #[cfg(target_os = "android")]
+                let private = document.is_none();
+                #[cfg(not(target_os = "android"))]
+                let private = true;
                 let attachment = Attachment {
+                    #[cfg(target_os = "android")]
+                    document,
                     path: format!("{FILES}/{token}/{}", pending.name),
                     name: pending.name,
                     mime: pending.mime,
@@ -1009,12 +1138,20 @@ impl Store {
                         "INSERT OR REPLACE INTO attachments VALUES(?, ?)",
                         params![pending.id, serde_json::to_string(&attachment)?],
                     )?;
-                    fs::rename(&source, &dest)?;
+                    if private {
+                        fs::rename(&source, &dest)?;
+                    }
                     tx.commit()?;
                     Ok(())
                 })();
-                if result.is_err() {
+                if !private || result.is_err() {
                     let _ = fs::remove_dir_all(&source);
+                }
+                if result.is_err() {
+                    #[cfg(target_os = "android")]
+                    if let Some(uri) = &attachment.document {
+                        android::remove_created(self.app()?.android_fs(), uri, attachment.folder);
+                    }
                     let _ = fs::remove_dir_all(&dest);
                 }
                 result?;
@@ -1032,6 +1169,8 @@ impl Store {
             Request::Attachment { id } => {
                 self.ensure_files()?;
                 Ok(match self.attachment(&id)? {
+                    #[cfg(target_os = "android")]
+                    Some(a) if a.document.is_some() => json!(a),
                     Some(a) if self.root.join(relative(&a.path)?).exists() => json!(a),
                     _ => Value::Null,
                 })
@@ -1075,6 +1214,14 @@ pub async fn storage_request(
     state: State<'_, StorageState>,
     request: Request,
 ) -> std::result::Result<Value, String> {
+    #[cfg(target_os = "android")]
+    if matches!(
+        &request,
+        Request::Move { .. } | Request::BeginExternal { .. } | Request::Export { .. }
+    ) {
+        return Err("请在手机上选择保存位置".into());
+    }
+    #[cfg(not(target_os = "android"))]
     if let Request::BeginExternal { destination, .. } = &request {
         use tauri_plugin_fs::FsExt;
         if !app.fs_scope().is_allowed(destination) {
@@ -1086,6 +1233,17 @@ pub async fn storage_request(
         return Ok(Value::Null);
     }
     state.locate(&app)?;
+    #[cfg(target_os = "android")]
+    if matches!(&request, Request::ResetData) {
+        let result = state.native_request(request).await?;
+        crate::android::android_background(app.clone(), Some(false)).await?;
+        app.android_fs_async()
+            .picker()
+            .release_all_persisted_uri_permissions()
+            .await
+            .map_err(|e| e.to_string())?;
+        return Ok(result);
+    }
     state.native_request(request).await
 }
 

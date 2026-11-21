@@ -79,6 +79,11 @@
   outline: none;
   user-select: none;
 }
+.chat-action-chevron {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--muted);
+}
 .contact-menu-item[data-highlighted] {
   background: var(--surface-soft);
   color: var(--primary);

@@ -1,9 +1,15 @@
+import { Modal } from "./Modal";
+import { PhoneActions } from "./PhoneActions";
+import { ContactFields } from "./ContactDetails";
 import { COMPOSER_MAX_LENGTH } from "../config";
 import { useTranslation } from "react-i18next";
 import { messageDay } from "./messageTime";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowLeft,
+  Download,
+  MoreHorizontal,
+  Plus,
   FolderOpen,
   Image as ImageIcon,
   Info,
@@ -14,6 +20,8 @@ import {
   Send,
   ShieldCheck,
   Smile,
+  Trash2,
+  WifiOff,
   X,
 } from "lucide-react";
 import type { ChatEngine } from "../core";
@@ -36,8 +44,13 @@ export function ChatPanel({
   engine,
   snap,
   peer,
+  phone = false,
   onBack,
   onDetails,
+  onPeerLogs,
+  onFiles,
+  onExport,
+  onDeleteHistory,
   onNotice,
   onImage,
   onDelete,
@@ -46,8 +59,13 @@ export function ChatPanel({
   engine: ChatEngine;
   snap: ChatSnapshot;
   peer: Profile;
+  phone?: boolean;
   onBack: () => void;
   onDetails: () => void;
+  onPeerLogs: () => void;
+  onFiles: () => void;
+  onExport: () => void;
+  onDeleteHistory: () => void;
   onNotice: (value: string) => void;
   onImage: (image: { url: string; name: string }) => void;
   onDelete: (message: Message) => void;
@@ -57,6 +75,9 @@ export function ChatPanel({
   const drafts = useSyncExternalStore(subscribeChatDrafts, getChatDrafts);
   const draft = drafts[peer.id] || "";
   const setDraft = (text: string) => setChatDraft(peer.id, text);
+  const [sheet, setSheet] = useState<"chat" | "attach" | null>(null);
+  const nearBottom = useRef(true);
+  const [newMessages, setNewMessages] = useState(false);
   const [emoji, setEmoji] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [search, setSearch] = useState<string | null>(null);
@@ -69,6 +90,13 @@ export function ChatPanel({
   const imageRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const previousMessages = useRef({ peerId: peer.id, count: 0 });
+  useLayoutEffect(() => {
+    const box = textRef.current;
+    if (!box || !phone) return;
+    box.style.height = "auto";
+    box.style.height = Math.min(box.scrollHeight + 2, 120) + "px";
+    return () => { box.style.height = ""; };
+  }, [draft, phone]);
   const online = isPeerOnline(snap, peer.id);
   const canSend = snap.availability === "online";
   useEffect(() => {
@@ -91,16 +119,22 @@ export function ChatPanel({
       previousMessages.current.peerId !== peer.id ||
       snap.messages.length > previousMessages.current.count
     ) {
-      endRef.current?.scrollIntoView({ block: "end", behavior: "smooth" });
+      if (!phone || nearBottom.current || previousMessages.current.peerId !== peer.id)
+        endRef.current?.scrollIntoView({ block: "end", behavior: phone ? "instant" : "smooth" });
+      else setNewMessages(true);
     }
     previousMessages.current = { peerId: peer.id, count: snap.messages.length };
-  }, [snap.messages.length, peer.id]);
+  }, [snap.messages.length, peer.id, phone]);
   useEffect(() => {
+    setSheet(null);
+    setNewMessages(false);
+    nearBottom.current = true;
     setSearch(null);
     setEmoji(false);
   }, [peer.id]);
   const send = async () => {
     if (!draft.trim() || !canSend) return;
+    nearBottom.current = true;
     const content = draft;
     setDraft("");
     try {
@@ -162,11 +196,20 @@ export function ChatPanel({
     }
   };
   const chooseFiles = (images = false) => {
+    if (import.meta.env.VITE_ANDROID) {
+      void import("./androidFiles").then(m => m.chooseFiles(images)).then(sendFiles)
+        .catch(() => onNotice("文件无法读取，请重新选择"));
+      return;
+    }
     if (!import.meta.env.VITE_DESKTOP) { (images ? imageRef : fileRef).current?.click(); return; }
     void import("./desktopSources").then(m => m.chooseDesktopSources(images)).then(sendFiles)
       .catch(() => onNotice("文件无法读取，请重新选择"));
   };
   const chooseFolder = () => {
+    if (import.meta.env.VITE_ANDROID) {
+      void sendFolder(async (signal, report) => (await import("./androidFiles")).chooseFolder(signal, report));
+      return;
+    }
     if (import.meta.env.VITE_DESKTOP) {
       void sendFolder(async (signal, report) =>
         (await import("./desktopFolderSelection")).readDesktopFolder(
@@ -214,6 +257,33 @@ export function ChatPanel({
     }).catch(() => {});
     return () => { disposed = true; unlisten?.(); };
   }, [peer.id, canSend]);
+  const emojiPicker = <div className={phone ? "phone-emojis" : "emoji-picker"}>
+            {[
+              "👋",
+              "😊",
+              "👍",
+              "❤️",
+              "🎉",
+              "✨",
+              "☕",
+              "🤝",
+              "😂",
+              "🙏",
+              "🌈",
+              "✅",
+            ].map((e) => (
+              <button
+                key={e}
+                onClick={() => {
+                  setDraft(draft + e);
+                  setEmoji(false);
+                  textRef.current?.focus();
+                }}
+              >
+                {e}
+              </button>
+            ))}
+          </div>;
   return (
     <section
       className={`chat-panel ${dragging ? "dragging" : ""}`}
@@ -265,8 +335,9 @@ export function ChatPanel({
           <ArrowLeft size={20} />
         </button>
         <Avatar peer={peer} size="avatar-small" />
-        <div>
+        <div className="chat-identity">
           <h2 title={peer.name}>{peerName(peer, snap)}</h2>
+          {phone && <button className="phone-open-contact" onClick={onDetails} aria-label={t("查看联系人资料")} />}
           <span>
             <span className={`status-dot ${online && snap.peerStates[peer.id] === "connected" ? "" : "offline"}`} />
             {online
@@ -278,7 +349,7 @@ export function ChatPanel({
                 : t("离线 · 仍可尝试发送")}
           </span>
         </div>
-        <div className="chat-heading-actions">
+        {phone ? <button className="phone-chat-more" aria-label={t("聊天操作")} onClick={() => setSheet("chat")}><MoreHorizontal /></button> : <div className="chat-heading-actions">
           <button className="icon-button" aria-label={t("查看连接日志")} title={t("查看连接日志")} onClick={() => setShowLogs(true)}><ScrollText size={19} /></button>
           <button
             className={`icon-button ${search !== null ? "tinted" : ""}`}
@@ -294,8 +365,17 @@ export function ChatPanel({
           >
             <Info size={19} />
           </button>
-        </div>
+        </div>}
       </div>
+      {phone && sheet === "chat" && <PhoneActions showChevrons title={t("聊天操作")} close={() => setSheet(null)} actions={[
+        { label: t("搜索聊天记录"), Icon: Search, run: () => setSearch("") },
+        { label: t("查看聊天文件"), Icon: FolderOpen, run: onFiles },
+        { label: t("查看连接日志"), Icon: ScrollText, run: onPeerLogs },
+        { label: t("导出文字记录", { ns: "components" }), Icon: Download, run: onExport },
+        { label: t("删除聊天记录", { ns: "components" }), Icon: Trash2, run: onDeleteHistory, danger: true },
+      ]}>
+        <ContactFields key={peer.id} peer={peer} snap={snap} engine={engine} onNotice={onNotice} />
+      </PhoneActions>}
       {showLogs && <RuntimeLogs key={peer.id} peer={peer} onClose={() => setShowLogs(false)} />}
       {search !== null && (
         <div className="message-search search-field">
@@ -317,7 +397,11 @@ export function ChatPanel({
           </button>
         </div>
       )}
-      <div className="messages" role="log" aria-label={t("聊天消息记录")}>
+      <div className="messages" onScroll={e => {
+        const list = e.currentTarget;
+        nearBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 64;
+        if (nearBottom.current) setNewMessages(false);
+      }} role="log" aria-label={t("聊天消息记录")}>
         <div className="conversation-start">
           <ShieldCheck size={13} />
           {t(
@@ -350,6 +434,7 @@ export function ChatPanel({
               </div>
             )}
             <MessageBubble
+              phone={phone}
               message={message}
               mine={message.senderId === snap.profile.id}
               peer={message.senderId === snap.profile.id ? snap.profile : peer}
@@ -365,13 +450,19 @@ export function ChatPanel({
         ))}
         <div ref={endRef} />
       </div>
+      {phone && newMessages && <button className="phone-new-messages" onClick={() => endRef.current?.scrollIntoView({ block: "end" })}>{t("有新消息")}</button>}
+      {!online && <p className="composer-presence-hint" role="status">
+        <WifiOff size={15} aria-hidden="true" />
+        <span>{t("对方不在线，可能接收不到消息")}</span>
+      </p>}
       <div className="composer">
-        {!online && (
-          <p className="composer-presence-hint" role="status">
-            {t("对方不在线，可能接收不到消息")}
-          </p>
-        )}
-        <div className="composer-tools">
+        {phone && sheet === "attach" && <PhoneActions title={t("添加内容")} close={() => setSheet(null)} actions={[
+          { label: t("发送图片"), Icon: ImageIcon, run: () => chooseFiles(true) },
+          { label: t("发送文件"), Icon: Paperclip, run: () => chooseFiles() },
+          { label: t("发送文件夹"), Icon: FolderOpen, run: chooseFolder, disabled: !!preparing },
+          { label: t("选择表情"), Icon: Smile, run: () => setEmoji(!emoji) },
+        ]} />}
+        {!phone && <div className="composer-tools">
           <div>
             <button
               className={`icon-button ${emoji ? "tinted" : ""}`}
@@ -411,7 +502,7 @@ export function ChatPanel({
             <ShieldCheck size={12} />
             {t("私密高速传输")}
           </span>
-        </div>
+        </div>}
         {preparing && (
           <div className="folder-preparation" role="status">
             <LoaderCircle size={16} className="spinning" />
@@ -437,35 +528,9 @@ export function ChatPanel({
             </button>
           </div>
         )}
-        {emoji && (
-          <div className="emoji-picker">
-            {[
-              "👋",
-              "😊",
-              "👍",
-              "❤️",
-              "🎉",
-              "✨",
-              "☕",
-              "🤝",
-              "😂",
-              "🙏",
-              "🌈",
-              "✅",
-            ].map((e) => (
-              <button
-                key={e}
-                onClick={() => {
-                  setDraft(draft + e);
-                  setEmoji(false);
-                  textRef.current?.focus();
-                }}
-              >
-                {e}
-              </button>
-            ))}
-          </div>
-        )}
+        {emoji && (phone ? <Modal open onClose={() => setEmoji(false)} title={t("选择表情")}>
+          {emojiPicker}
+        </Modal> : emojiPicker)}
         <input
           ref={imageRef}
           className="hidden-input"
@@ -507,17 +572,19 @@ export function ChatPanel({
               );
           }}
         />
+        {phone && <button className="phone-add" disabled={!canSend} aria-label={t("添加内容")} onClick={() => { setEmoji(false); setSheet("attach"); }}><Plus size={22} /></button>}
         <textarea
+          rows={phone ? 1 : undefined}
           ref={textRef}
           aria-label={t("消息内容")}
-          placeholder={t("分享点什么，让对话发生…")}
+          placeholder={t(phone ? "写消息…" : "分享点什么，让对话发生…")}
           value={draft}
           disabled={!canSend}
           maxLength={COMPOSER_MAX_LENGTH}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (
-              e.key === "Enter" &&
+              !phone && e.key === "Enter" &&
               !e.shiftKey &&
               !e.nativeEvent.isComposing
             ) {
