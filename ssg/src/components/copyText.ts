@@ -16,8 +16,8 @@ export async function copyText(
   }
 
   const container =
-    fallbackContainer ||
-    (focused instanceof HTMLElement
+    (fallbackContainer?.isConnected ? fallbackContainer : null) ||
+    (focused instanceof HTMLElement && focused.isConnected
       ? focused.closest<HTMLElement>('[role="dialog"]')
       : null) ||
     document.body;

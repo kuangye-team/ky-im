@@ -7,6 +7,7 @@
 | 手机上的操作 | 数据与连接 |
 | --- | --- |
 | 发起聊天或邀请朋友 | 「消息」显示联系人的在线状态。点联系人即可聊天，点「消息」或「设备」右上角的「＋」即可邀请朋友。弹窗里的复制按钮在蜂鸟号旁。「设备」也可以输入蜂鸟号查找朋友。 |
+| 更新应用 | 在「我的 → 关于蜂鸟」检查更新。选择「在应用内下载」会将安装包存到应用缓存，核对版本、包名和签名后显示「选择安装器」。由你选择安装器，再确认或取消安装。也可以选「用浏览器下载」。 |
 | 发送文件夹 | 通过系统选择器授权，分批枚举子项，保留相对路径和空目录。支持定位的文件直接读取，管道类型的文件可暂存在应用缓存中供原生传输续读。 |
 | 设置附件保存位置 | 在手机的「我的 → 存储空间」选择文件夹。应用保留系统授权。新的接收任务使用这个位置，旧附件的记录仍指向原文档。未选择时使用应用私有空间。 |
 | 重置应用数据 | 点「我的 → 重置数据」并确认。蜂鸟会清除本机的聊天记录和设置，重新生成蜂鸟号。存到自选文件夹的附件会保留。 |
@@ -28,7 +29,7 @@ export NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370"
 npm run android:build -- --debug
 ```
 
-调试包输出到 `app/android-dist/ky-im-<version>-android-arm-debug.apk`。使用 `npm run android:dev` 可连接开发服务器。USB 调试可用 `adb reverse tcp:1420 tcp:1420` 访问前端，用 `adb reverse tcp:8080 tcp:8080` 访问本地信令，并将 `VITE_SIGNAL_URL` 指向 `ws://127.0.0.1:8080/api/ws`。
+调试包输出到 `app/android-dist/ky-im-<version>-android-universal-debug.apk`。使用 `npm run android:dev` 可连接开发服务器。USB 调试可用 `adb reverse tcp:1420 tcp:1420` 访问前端，用 `adb reverse tcp:8080 tcp:8080` 访问本地信令，并将 `VITE_SIGNAL_URL` 指向 `ws://127.0.0.1:8080/api/ws`。
 
 ## 签名与发布
 
@@ -56,7 +57,7 @@ keytool -genkeypair -keystore "$HOME/.android/ky-im-release.p12" -storetype PKCS
 openssl base64 -A -in "$HOME/.android/ky-im-release.p12" | pbcopy
 ```
 
-正式包输出到 `app/android-dist/ky-im-<version>-android-arm.apk`。发布工作流校验包名、SDK、版本、签名、两套原生库以及 16 KB 对齐后，将 `ky-im-<version>-android-arm.apk` 和 `.sha256` 附到同版本 GitHub Release。[Tauri Android 签名](https://v2.tauri.app/distribute/sign/android/)
+正式包输出到 `app/android-dist/ky-im-<version>-android-universal.apk`。发布工作流校验包名、SDK、版本、签名、两套原生库以及 16 KB 对齐后，将 `ky-im-<version>-android-universal.apk` 和 `.sha256` 附到同版本 GitHub Release。[Tauri Android 签名](https://v2.tauri.app/distribute/sign/android/)
 
 ## 设备验收
 

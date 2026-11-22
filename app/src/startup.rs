@@ -59,7 +59,9 @@ pub fn run() {
     #[cfg(target_os = "android")]
     let builder = builder
         .plugin(tauri_plugin_android_fs::init())
-        .plugin(crate::android::plugin());
+        .plugin(crate::android::plugin())
+        .plugin(crate::android::attachment_plugin())
+        .plugin(crate::android::update_plugin());
     #[cfg(desktop)]
     let builder = builder
         // Register first so opening a deep link reuses the running app.
@@ -70,6 +72,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
     builder
+        .register_asynchronous_uri_scheme_protocol("ky-media", crate::storage::media::serve)
         .plugin(crate::reload::init())
         .setup(|_app| {
             #[cfg(desktop)]
@@ -146,6 +149,8 @@ pub fn run() {
             crate::updates::download_update,
             #[cfg(desktop)]
             crate::updates::install_update,
+            #[cfg(any(desktop, target_os = "android"))]
+            crate::storage::open::open_attachment,
             crate::storage::storage_request,
             crate::storage::storage_write,
             #[cfg(desktop)]

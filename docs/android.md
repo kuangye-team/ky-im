@@ -7,6 +7,7 @@ Hummingbird ships one APK for 32-bit and 64-bit ARM phones. Android uses the sam
 | On the phone | What happens |
 | --- | --- |
 | Start a chat or invite a friend | Messages shows each contact’s online status. Tap a contact to chat, or tap **+** in Messages or Devices to invite a friend. Use the copy button beside your number in the invitation. Devices also lets you look someone up by number. |
+| Update the app | In Me → About Hummingbird, check for updates. Download in app saves the APK in the app cache and verifies its version, package name and signer. Tap Choose an installer, then confirm or cancel installation. You can also download in your browser. |
 | Send a folder | The system picker grants access. The app reads entries in batches and preserves relative paths and empty folders. Native transfers read seekable files directly and can cache files supplied through pipes so they can resume reading. |
 | Choose where to save attachments | Select a folder in Me → Storage space. The app retains the permission and uses the folder for new incoming transfers. Existing attachments still point to their original documents. By default, attachments go into private app storage. |
 | Reset app data | Tap Me → Reset data and confirm. Hummingbird clears local chat history and settings and generates a new number. Attachments saved to a folder you chose are kept. |
@@ -28,7 +29,7 @@ export NDK_HOME="$ANDROID_HOME/ndk/30.0.16248370"
 npm run android:build -- --debug
 ```
 
-The debug APK is written to `app/android-dist/ky-im-<version>-android-arm-debug.apk`. Use `npm run android:dev` to connect to the development server. For USB debugging, use `adb reverse tcp:1420 tcp:1420` for the frontend and `adb reverse tcp:8080 tcp:8080` for local signaling. Set `VITE_SIGNAL_URL` to `ws://127.0.0.1:8080/api/ws`.
+The debug APK is written to `app/android-dist/ky-im-<version>-android-universal-debug.apk`. Use `npm run android:dev` to connect to the development server. For USB debugging, use `adb reverse tcp:1420 tcp:1420` for the frontend and `adb reverse tcp:8080 tcp:8080` for local signaling. Set `VITE_SIGNAL_URL` to `ws://127.0.0.1:8080/api/ws`.
 
 ## Signing and release
 
@@ -56,7 +57,7 @@ On macOS, copy the Base64-encoded keystore to the clipboard with this command, t
 openssl base64 -A -in "$HOME/.android/ky-im-release.p12" | pbcopy
 ```
 
-The signed APK is written to `app/android-dist/ky-im-<version>-android-arm.apk`. The release workflow checks the package name, SDK, version, signature, both native library sets and 16 KB alignment. It attaches the APK and its `.sha256` file to the matching GitHub Release. [Tauri Android signing](https://v2.tauri.app/distribute/sign/android/)
+The signed APK is written to `app/android-dist/ky-im-<version>-android-universal.apk`. The release workflow checks the package name, SDK, version, signature, both native library sets and 16 KB alignment. It attaches the APK and its `.sha256` file to the matching GitHub Release. [Tauri Android signing](https://v2.tauri.app/distribute/sign/android/)
 
 ## Device verification
 

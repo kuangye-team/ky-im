@@ -52,7 +52,6 @@ export function ChatPanel({
   onExport,
   onDeleteHistory,
   onNotice,
-  onImage,
   onDelete,
   onForward,
 }: {
@@ -67,7 +66,6 @@ export function ChatPanel({
   onExport: () => void;
   onDeleteHistory: () => void;
   onNotice: (value: string) => void;
-  onImage: (image: { url: string; name: string }) => void;
   onDelete: (message: Message) => void;
   onForward: (message: Message) => void;
 }) {
@@ -442,7 +440,6 @@ export function ChatPanel({
               progress={snap.transfers[message.id]}
               recovering={engine.transfers.isTransferRecovering(message.id)}
               onNotice={onNotice}
-              onImage={onImage}
               onForward={() => onForward(message)}
               onDelete={() => onDelete(message)}
             />

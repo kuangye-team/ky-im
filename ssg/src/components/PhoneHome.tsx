@@ -45,27 +45,27 @@ function ConnectionNotice({ engine, snap }: PageProps) {
   </div>;
 }
 
-function RecentRow({ conversation, engine, snap, draft, open }: PageProps & {
-  conversation: Conversation; draft?: string; open: (p: Profile) => void;
+function RecentRow({ peer, conversation, engine, snap, draft, open }: PageProps & {
+  peer: Profile; conversation?: Conversation; draft?: string; open: (p: Profile) => void;
 }) {
   const { t } = useTranslation();
-  const peer = snap.peers.find(p => p.id === conversation.peer.id) ?? conversation.peer;
   const online = isPeerOnline(snap, peer.id);
   const presenceId = useId();
   const [preview, setPreview] = useState("");
   useEffect(() => {
+    if (!conversation) return;
     let current = true;
     void engine.getConversationPreview(peer.id).then(message => {
       if (!current) return;
       setPreview(message?.text || message?.fileName || (message ? t(message.kind === "image" ? "图片" : "文件") : ""));
     }).catch(() => { if (current) setPreview(""); });
     return () => { current = false; };
-  }, [engine, peer.id, conversation.updatedAt, snap.messages, t]);
+  }, [engine, peer.id, conversation?.updatedAt, snap.messages, t]);
   return <button className="phone-peer" onClick={() => open(peer)} aria-label={t("与 {{value}} 聊天", { value: peerName(peer, snap) })} aria-describedby={presenceId}>
     <Avatar peer={peer} online={online} /><span className="phone-peer-copy">
       <span className="phone-peer-name"><strong>{peerName(peer, snap)}</strong><small id={presenceId}>{t(online ? "在线" : "离线", { ns: "components" })}</small></span>
-      <small>{draft ? <><em>{t("草稿")}</em> {draft}</> : preview || deviceLabel(peer)}</small></span>
-    <span className="phone-peer-end"><time>{messageTime(conversation.updatedAt)}</time>{conversation.unread > 0 && <b>{conversation.unread}</b>}</span>
+      <small>{draft ? <><em>{t("草稿")}</em> {draft}</> : (conversation && preview) || deviceLabel(peer)}</small></span>
+    {conversation && <span className="phone-peer-end"><time>{messageTime(conversation.updatedAt)}</time>{conversation.unread > 0 && <b>{conversation.unread}</b>}</span>}
   </button>;
 }
 
@@ -82,20 +82,19 @@ function InviteHeader({ title, onInvite, onNotice }: { title: string; onInvite: 
   </header>;
 }
 
-export function PhoneMessages({ engine, snap, open, filter, setFilter, onInvite, onNotice }: PageProps & {
-  open: (p: Profile) => void; filter: string; setFilter: (s: string) => void; onInvite: () => void; onNotice: (s: string) => void;
+export function PhoneMessages({ peers, hasPeers, engine, snap, open, filter, setFilter, onInvite, onNotice }: PageProps & {
+  peers: Profile[]; hasPeers: boolean; open: (p: Profile) => void; filter: string; setFilter: (s: string) => void; onInvite: () => void; onNotice: (s: string) => void;
 }) {
   const { t } = useTranslation();
   const drafts = useSyncExternalStore(subscribeChatDrafts, getChatDrafts);
   const query = filter.trim().toLowerCase();
-  const conversations = snap.conversations.filter(({ peer, remark }) =>
-    [peer.name, remark, peer.numericId, deviceLabel(peer)].some(s => s?.toLowerCase().includes(query)));
   return <section className="phone-page">
     <InviteHeader title={t("消息")} onInvite={onInvite} onNotice={onNotice} />
     <ConnectionNotice engine={engine} snap={snap} />
-    {snap.conversations.length > 0 && <label className="phone-search"><Search size={18} /><input type="search" value={filter} placeholder={t("搜索联系人")} aria-label={t("搜索联系人")} onChange={e => setFilter(e.target.value)} /></label>}
-    {conversations.map(c => <RecentRow key={c.peer.id} conversation={c} engine={engine} snap={snap} draft={drafts[c.peer.id]} open={open} />)}
-    {!conversations.length && <div className="phone-empty">
+    {hasPeers && <label className="phone-search"><Search size={18} /><input type="search" value={filter} placeholder={t("搜索联系人")} aria-label={t("搜索联系人")} onChange={e => setFilter(e.target.value)} /></label>}
+    {peers.map(peer => <RecentRow key={peer.id} peer={peer} conversation={snap.conversations.find(c => c.peer.id === peer.id)}
+      engine={engine} snap={snap} draft={drafts[peer.id]} open={open} />)}
+    {!peers.length && <div className="phone-empty">
       <span className="phone-empty-mark">{query ? <Search /> : <i className="hummingbird-logo" />}</span>
       <h2>{t(query ? "没有找到联系人" : "还没有聊天")}</h2>
       <p>{t(query ? "试试备注、名字或设备名称" : "找到另一台设备，就能聊天和传文件。")}</p>

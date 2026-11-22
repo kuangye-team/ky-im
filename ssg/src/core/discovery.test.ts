@@ -211,15 +211,50 @@ describe("hummingbird group discovery", () => {
     expect(engine.getSnapshot().profile.numericId).toBe("123456");
     expect((await storage.getProfile())?.numericId).toBe("123456");
     expect(engine.getSnapshot().activePeerId).toBeNull();
-    expect(engine.getSnapshot().conversations).toEqual([]);
+    expect((await storage.getConversations()).map(c => c.peer.id).sort()).toEqual(devices.map(p => p.id));
     expect(PeerConnection.instances).toHaveLength(1);
     for (const device of devices)
       expect(engine.getSnapshot().peerStates[device.id]).toBeUndefined();
+    const later = { ...devices[0]!, id: newId() };
+    socket.receive({ type: "peer_joined", peer: later });
+    await vi.waitFor(async () => expect((await storage.getConversations()).map(c => c.peer.id)).toContain(later.id));
     await engine.selectPeer(devices[0]!);
     expect(PeerConnection.instances).toHaveLength(2);
     PeerConnection.instances[1]!.channel.open();
     expect(engine.getSnapshot().peerStates[devices[0]!.id]).toBe("connected");
     expect(engine.getSnapshot().peerStates[devices[1]!.id]).toBeUndefined();
+  });
+
+  it("reports a failed contact save and lets the user retry the lookup", async () => {
+    const { engine, socket, storage } = await setup();
+    const device = { ...peer, id: newId(), numericId: "345678" };
+    const lookup = () => {
+      const result = engine.connectByNumericId(device.numericId);
+      socket.receive({ type: "group_resolved", requestId: requests(socket).at(-1)!.requestId,
+        numericId: device.numericId, peers: [device] });
+      return result;
+    };
+    await engine["history"].writing;
+    vi.spyOn(storage, "saveConversation").mockRejectedValueOnce(new Error("storage full"));
+    await expect(lookup()).rejects.toThrow("联系人未能保存");
+    await lookup();
+    expect((await storage.getConversations()).filter(c => c.peer.id === device.id)).toHaveLength(1);
+  });
+
+  it("remembers the resolved number when the device has a cached profile under its old number", async () => {
+    const { engine, socket, storage } = await setup();
+    const cached = { ...peer, numericId: "234567", revision: 4, bio: "Previously verified" };
+    engine["network"].transport.onProfile?.(cached);
+    const found = engine.connectByNumericId("345678");
+    socket.receive({ type: "group_resolved", requestId: requests(socket).at(-1)!.requestId,
+      numericId: "345678", peers: [{ ...peer, numericId: "345678" }] });
+    await found;
+    const updated = { ...cached, numericId: "345678" };
+    expect((await storage.getConversations())[0].peer).toEqual(updated);
+    const restored = new ChatEngine(storage, me, await storage.getConversations(),
+      testNetwork(), await storage.getPeerProfiles());
+    engines.push(restored);
+    expect(restored["network"].transport.cachedProfile?.(peer.id)).toEqual(updated);
   });
 
   it("defers RTC allocation until selection and keeps other devices usable after allocation fails", async () => {

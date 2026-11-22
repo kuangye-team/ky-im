@@ -1,0 +1,48 @@
+.inline-media {
+  flex: 0 0 100%;
+  min-width: 0;
+}
+.inline-media .video-skin,
+.inline-media .audio-skin {
+  width: min(100%, 30rem);
+}
+.inline-media .video-skin {
+  aspect-ratio: 16 / 9;
+  --media-controls-before-start: visible;
+}
+@container media-root (max-width: 22rem) {
+  .inline-media .audio-seek-button {
+    display: none;
+  }
+}
+@container media-root (max-width: 16rem) {
+  .inline-media .audio-controls-content {
+    flex-wrap: wrap;
+    border-radius: 12px;
+  }
+  .inline-media .audio-controls-end {
+    margin-inline-start: auto;
+  }
+  .inline-media .audio-time-slider-group {
+    flex-basis: 100%;
+    order: 1;
+  }
+}
+.inline-media > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.message-content:has(.inline-media) {
+  width: 28rem;
+}
+.attachment-bubble:has(> .inline-media) {
+  flex-wrap: wrap;
+  overflow: visible;
+  width: 100%;
+  max-width: 100%;
+}
+.shared-file:has(> .inline-media),
+.large-files-list > li:has(> .inline-media) {
+  flex-wrap: wrap;
+}

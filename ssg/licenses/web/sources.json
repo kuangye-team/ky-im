@@ -1,4 +1,9 @@
 {
+  "react-compiler-runtime@1.0.0": {
+    "file": "react-compiler-runtime-1.0.0.txt",
+    "sources": ["https://raw.githubusercontent.com/facebook/react/5c15c1cd3442f28044217703b5625f98c40042ee/LICENSE"],
+    "note": "Installed package omits license files. Snapshot from the npm version gitHead."
+  },
   "react-remove-scroll-bar@2.3.8": {
     "source": "https://github.com/theKashey/react-remove-scroll-bar/blob/8ca9ba5ea52de03308fe8ced94f7b159a44d28ff/LICENSE",
     "note": "Installed package declares MIT but omits LICENSE. Full text copied from upstream commit; not a corresponding-source claim.",

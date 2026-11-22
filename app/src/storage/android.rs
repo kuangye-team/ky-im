@@ -1,7 +1,7 @@
 //! Android documents are provider handles, including on removable and cloud storage.
 use super::*;
 use tauri_plugin_android_fs::api::api_sync::AndroidFs;
-use tauri_plugin_android_fs::{AndroidFsExt, FsUri, UriPermission};
+use tauri_plugin_android_fs::{AndroidFsExt, FsUri, PublicGeneralPurposeDir, UriPermission};
 
 type Documents = AndroidFs<tauri::Wry>;
 const RESELECT: &str = "无法使用这个文件夹，请重新选择保存位置";
@@ -139,15 +139,70 @@ pub async fn android_read(
     .await
 }
 
+fn pick_save_folder(api: &Documents, initial: Option<FsUri>) -> Result<Option<FsUri>> {
+    let initial = match initial {
+        Some(uri) => uri,
+        None => {
+            // On Android 7–9 the user may decline shared storage and still use the picker.
+            let can_create = api.public_storage().request_permission()?;
+            api.picker().resolve_public_storage_initial_location(
+                None,
+                PublicGeneralPurposeDir::Download,
+                "KyIM",
+                can_create,
+            )?
+        }
+    };
+    Ok(api.picker().pick_dir(Some(&initial), false)?)
+}
+
+async fn pick_export_folder(
+    app: &tauri::AppHandle,
+    state: &StorageState,
+) -> std::result::Result<Option<FsUri>, String> {
+    state.locate(app)?;
+    let initial = state
+        .with_store(|s| {
+            let last = s
+                .values(
+                    "SELECT value FROM settings WHERE key='androidExportFolder'",
+                    [],
+                )?
+                .pop();
+            match last {
+                Some(value) => Ok(Some(serde_json::from_value(value)?)),
+                None => Ok(s.save_tree()?.map(|(_, uri)| uri)),
+            }
+        })
+        .await?;
+    let app = app.clone();
+    let Some(folder) = blocking(move || pick_save_folder(app.android_fs(), initial)).await? else {
+        return Ok(None);
+    };
+    // A picker starting location needs no persistent access to the folder's contents.
+    state
+        .with_store(move |s| {
+            s.db.execute(
+                "INSERT OR REPLACE INTO settings VALUES('androidExportFolder', ?)",
+                [serde_json::to_string(&folder)?],
+            )?;
+            Ok(Some(folder))
+        })
+        .await
+}
+
 #[tauri::command]
 pub async fn android_save_location(
     app: tauri::AppHandle,
     state: State<'_, StorageState>,
 ) -> std::result::Result<Option<String>, String> {
     state.locate(&app)?;
+    let initial = state
+        .with_store(|s| Ok(s.save_tree()?.map(|(_, uri)| uri)))
+        .await?;
     let selection = blocking(move || {
         let api = app.android_fs();
-        let Some(uri) = api.picker().pick_dir(None, false)? else {
+        let Some(uri) = pick_save_folder(api, initial)? else {
             return Ok(None);
         };
         api.picker().persist_uri_permission(&uri)?;
@@ -161,8 +216,8 @@ pub async fn android_save_location(
     state
         .with_store(move |s| {
             s.db.execute(
-                "INSERT OR REPLACE INTO settings VALUES('androidSaveTree', ?)",
-                [serde_json::to_string(&json!({"name":name,"uri":uri}))?],
+                "INSERT OR REPLACE INTO settings VALUES('androidSaveTree', ?), ('androidExportFolder', ?)",
+                params![serde_json::to_string(&json!({"name":name,"uri":uri}))?, serde_json::to_string(&uri)?],
             )?;
             s.cached_usage = None;
             Ok(Some(name))
@@ -285,11 +340,7 @@ pub async fn android_export(
     state: State<'_, StorageState>,
     id: String,
 ) -> std::result::Result<(), String> {
-    state.locate(&app)?;
-    let picker = app.clone();
-    let Some(parent) =
-        blocking(move || Ok(picker.android_fs().picker().pick_dir(None, false)?)).await?
-    else {
+    let Some(parent) = pick_export_folder(&app, &state).await? else {
         return Ok(());
     };
     state
@@ -316,10 +367,7 @@ pub async fn android_export_writer(
     size: u64,
     name: String,
 ) -> std::result::Result<Option<String>, String> {
-    state.locate(&app)?;
-    let Some(parent) =
-        blocking(move || Ok(app.android_fs().picker().pick_dir(None, false)?)).await?
-    else {
+    let Some(parent) = pick_export_folder(&app, &state).await? else {
         return Ok(None);
     };
     state

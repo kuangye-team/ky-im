@@ -15,7 +15,7 @@ interface DiscoveryHost {
   peerJoined(peerId: string): void;
   peerProfile(peerId: string): Profile | undefined;
   updatePeers(peers: Profile[], removed?: string[], replaceAll?: boolean): void;
-  refreshPeer(peer: Profile): Promise<void>;
+  refreshPeer(peer: Profile, remember?: boolean): Promise<void>;
   ensureLink(peerId: string): void;
   networkChanged(): void;
   patch(values: Partial<ChatSnapshot>): void;
@@ -50,6 +50,8 @@ export class DeviceDiscovery {
   private lastReceivedAt = Date.now();
   private lookups = new Map<string, PendingLookup>();
   private groupLookups = new Map<string, PendingGroupLookup>();
+  // Later group members (including replies from another server) arrive as ordinary joins.
+  private readonly lookedUpGroups = new Set<string>();
   private lastRecentNumericIds = "";
   private discoveryQueued = false;
   private restoringPeers = new Map<string, Promise<Profile>>();
@@ -162,6 +164,7 @@ export class DeviceDiscovery {
       this.scheduleReconnect();
       return;
     }
+    this.lookedUpGroups.clear();
     this.session = socket;
     this.openedAfterNetworkChange = afterNetworkChange;
     this.welcomedAt = undefined;
@@ -173,6 +176,7 @@ export class DeviceDiscovery {
       this.lastHeartbeatAt = this.lastReceivedAt;
       this.welcomedAt = undefined;
       const numbers = this.recentNumbers();
+      for (const number of numbers) this.lookedUpGroups.add(number);
       socket.send(
         JSON.stringify({
           type: "join",
@@ -434,7 +438,7 @@ export class DeviceDiscovery {
       for (const peer of discovered) this.host.peerJoined(peer.id);
       if (discovered.some((peer) => peer.id === this.host.snapshot.activePeerId))
         this.host.ensureLink(this.host.snapshot.activePeerId!);
-      await Promise.all(discovered.map((peer) => this.host.refreshPeer(peer)));
+      await Promise.all(discovered.map(peer => this.refreshJoinedPeer(peer)));
       return;
     }
     if (
@@ -459,9 +463,14 @@ export class DeviceDiscovery {
         const peers = (data.peers as Profile[]).filter(
           (peer) => peer.id !== this.host.snapshot.profile.id,
         );
+        this.lookedUpGroups.add(lookup.numericId);
         this.host.updatePeers(peers);
-        lookup.resolve();
-        for (const peer of peers) await this.host.refreshPeer(peer);
+        try {
+          await Promise.all(peers.map(peer => this.host.refreshPeer(peer, true)));
+          lookup.resolve();
+        } catch {
+          lookup.reject(new Error("联系人未能保存，请重试"));
+        }
       }
       return;
     }
@@ -545,7 +554,7 @@ export class DeviceDiscovery {
       this.host.patch({ status: "connected", error: null });
       if (peers.some((peer) => peer.id === this.host.snapshot.activePeerId))
         this.host.ensureLink(this.host.snapshot.activePeerId!);
-      for (const peer of peers) await this.host.refreshPeer(peer);
+      for (const peer of peers) await this.refreshJoinedPeer(peer);
       const activePeer = this.host.snapshot.activePeerId
         ? this.host.peerProfile(this.host.snapshot.activePeerId)
         : undefined;
@@ -567,7 +576,8 @@ export class DeviceDiscovery {
       this.host.updatePeers([peer]);
       if (data.type === "peer_joined") this.host.peerJoined(peer.id);
       if (this.host.snapshot.activePeerId === peer.id) this.host.ensureLink(peer.id);
-      await this.host.refreshPeer(peer);
+      if (data.type === "peer_joined") await this.refreshJoinedPeer(peer);
+      else await this.host.refreshPeer(peer);
       return;
     }
     if (data.type === "peer_left" && typeof data.id === "string") {
@@ -591,6 +601,10 @@ export class DeviceDiscovery {
         return;
       }
     }
+  }
+
+  private refreshJoinedPeer(peer: Profile) {
+    return this.host.refreshPeer(peer, !!peer.numericId && this.lookedUpGroups.has(peer.numericId));
   }
 
   private lookupError(code: unknown): string {

@@ -112,6 +112,7 @@ html[data-layout="phone"] .number-modal {
 .number-modal .copy-field button { min-height: 44px; font-size: 14px; }
 html[data-layout="phone"] .about-modal { top: calc(var(--phone-top, 0px) + env(safe-area-inset-top)); transform: translateX(-50%); height: calc(var(--phone-height, 100dvh) - env(safe-area-inset-top)); max-height: 100%; border-radius: 0; padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 html[data-layout="phone"] .modal-heading .icon-button { min-width: 44px; min-height: 44px; }
+html[data-layout="phone"] .message-dialog .modal-actions button { min-height: 44px; font-size: 14px; }
 html[data-layout="phone"] .invite-share .own-number-value { display: inline-flex; align-items: center; gap: 4px; }
 html[data-layout="phone"] .invite-share .copy-number-button { width: 44px; height: 44px; }
 html[data-layout="phone"] .form-input, html[data-layout="phone"] .copy-field input { font-size: 16px; }

@@ -1,6 +1,9 @@
 //! Desktop persistence. Only this module resolves managed paths; peers never supply absolute paths.
 #[cfg(target_os = "android")]
 pub mod android;
+pub mod media;
+#[cfg(any(desktop, target_os = "android"))]
+pub mod open;
 mod paths;
 use paths::{
     CACHE, DATA_DIR, FILES, FIXED, HISTORY, LOCATOR, OFFLINE, STORAGE_LOCK, check_sqlite,

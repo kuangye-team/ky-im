@@ -173,7 +173,8 @@ function LogContents({ peer, standalone = false }: { peer?: Profile; standalone?
                 }),
                 `hummingbird-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
               );
-            } catch {
+            } catch (error) {
+              if (error instanceof DOMException && error.name === "AbortError") return;
               setError(t("日志未能导出，请重试"));
             }
           }}

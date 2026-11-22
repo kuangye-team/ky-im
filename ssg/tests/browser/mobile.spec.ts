@@ -102,6 +102,11 @@ test("手机资料页、聊天操作、设备列表和聊天输入均可使用�
       page.getByRole("button", { name: `与 ${name} 聊天`, exact: true }),
     ).toBeVisible();
     await capture(page, "mobile-list.png");
+    await page.getByRole("link", { name: "消息", exact: true }).click();
+    const discovered = page.getByRole("button", { name: `与 ${name} 聊天`, exact: true });
+    await expect(discovered).toBeVisible();
+    await expect(discovered.locator("time")).toHaveCount(0);
+    await capture(page, "mobile-messages-discovery.png");
     await openPeer(page, name);
     await expectNoHorizontalOverflow(page);
     await openPeer(peer, "手机测试设备");

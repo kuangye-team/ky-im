@@ -33,7 +33,6 @@ export const SIGNALING_CONFIG = {
 export const CLIENT_CONFIG = {
   webUrl: import.meta.env?.VITE_WEB_URL?.trim() || "https://im.kuangye.team/",
   downloadUrl: import.meta.env?.VITE_CLIENT_DOWNLOAD_URL?.trim() || "https://github.com/kuangye-team/ky-im/releases/latest",
-  androidApkUrl: "https://github.com/kuangye-team/ky-im/releases/latest/download/ky-im-android-arm.apk",
   // Keep the scheme in sync with app/tauri.conf.json.
   launchUrl: "ky-im://open",
 } as const;

@@ -26,7 +26,7 @@ async function availability(page: Page, status: "在线" | "离线") {
   await expect(page.locator(".topbar .availability-value")).toHaveText(status);
 }
 
-test("刷新后自动发现最近聊过的设备，只查询过的设备不自动恢复", async ({ browser, baseURL }) => {
+test("蜂鸟号查到的设备即使没有聊天也会保存，刷新后自动恢复", async ({ browser, baseURL }) => {
   const contexts = await Promise.all([0, 1, 2].map(() => browser.newContext({ locale: "zh-CN" })));
   const pages = await Promise.all(contexts.map((context) => context.newPage()));
   const [alice, bob] = pages;
@@ -58,8 +58,8 @@ test("刷新后自动发现最近聊过的设备，只查询过的设备不自�
     await alice.reload();
     await alice.getByRole("button", { name: "在线设备", exact: true }).click();
     await expect(alice.locator(".device-card").filter({ hasText: names[1] })).toBeVisible();
-    await expect(alice.locator(".device-card").filter({ hasText: names[2] })).toHaveCount(0);
-    expect(recentNumericIds).toEqual([number]);
+    await expect(alice.locator(".device-card").filter({ hasText: names[2] })).toBeVisible();
+    expect(recentNumericIds).toEqual([queriedNumber, number]);
     expect(await ownNumber(alice)).toBe(mine);
     await alice.screenshot({ path: "../temp/screenshot/recent-discovery-reload.png", animations: "disabled" });
     await alice.locator(".device-card").filter({ hasText: names[1] }).click();

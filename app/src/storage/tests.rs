@@ -686,3 +686,57 @@ fn sparse_attachment_reads_across_the_four_gib_boundary() {
     assert_eq!(f.store.read(&id, boundary, 1).unwrap(), b"z");
     assert!(f.store.read(&id, size, 1).unwrap().is_empty());
 }
+
+#[test]
+fn media_preview_serves_seekable_ranges_only_for_saved_media() {
+    use tauri::http::{Request as HttpRequest, StatusCode, header};
+    let mut f = Fixture::new();
+    let key = Uuid::new_v4().to_string();
+    let size = 3 * 1024 * 1024;
+    let token = f
+        .run(Request::Begin {
+            id: key.clone(),
+            name: "recording.MP4".into(),
+            mime: "application/octet-stream".into(),
+            size,
+            folder: false,
+        })
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let mut data = vec![0u8; size as usize];
+    data[size as usize - 3..].copy_from_slice(b"end");
+    f.write(&token, &data);
+    let request = |method, range: Option<&str>| {
+        let mut req = HttpRequest::builder()
+            .method(method)
+            .uri(format!("ky-media://localhost/{key}"));
+        if let Some(value) = range {
+            req = req.header(header::RANGE, value);
+        }
+        req.body(Vec::new()).unwrap()
+    };
+    assert!(media::response(&f.store, &request("GET", None)).is_err());
+    f.run(Request::Finish { token });
+    let metadata = media::response(&f.store, &request("HEAD", None)).unwrap();
+    assert_eq!(metadata.headers()[header::CONTENT_TYPE], "video/mp4");
+    assert_eq!(metadata.headers()[header::CONTENT_LENGTH], size.to_string());
+    assert!(metadata.body().is_empty());
+    let start = media::response(&f.store, &request("GET", Some("bytes=0-"))).unwrap();
+    assert_eq!(start.status(), StatusCode::PARTIAL_CONTENT);
+    assert_eq!(start.body().len(), 2 * 1024 * 1024);
+    let tail = media::response(&f.store, &request("GET", Some("bytes=-3"))).unwrap();
+    assert_eq!(
+        tail.headers()[header::CONTENT_RANGE],
+        format!("bytes {}-{}/{size}", size - 3, size - 1)
+    );
+    assert_eq!(tail.body(), b"end");
+    assert_eq!(
+        media::response(&f.store, &request("GET", Some("bytes=9999999-")))
+            .unwrap()
+            .status(),
+        StatusCode::RANGE_NOT_SATISFIABLE
+    );
+    f.save_file(&key);
+    assert!(media::response(&f.store, &request("GET", None)).is_err());
+}

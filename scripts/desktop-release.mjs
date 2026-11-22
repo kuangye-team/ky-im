@@ -114,7 +114,7 @@ export function writeManifest(directory, version, env, complete = true, target) 
     const keys = mac ? (arch === "universal" ? ["darwin-aarch64", "darwin-x86_64"] : [arch === "aarch64" ? "darwin-aarch64" : "darwin-x86_64"]) : ["windows-x86_64"];
     for (const key of keys) platforms[key] = entry;
   }
-  const apk = `ky-im-${version}-android-arm.apk`;
+  const apk = `ky-im-${version}-android-universal.apk`;
   if (complete && statSync(resolve(directory, "../android-dist", apk), { throwIfNoEntry: false })?.isFile())
     downloads.android = `${base.replace(/\/$/, "")}/${apk}`;
   const manifest = { version, notes: env.RELEASE_NOTES || `${productName} ${version}`, pub_date: new Date().toISOString(), platforms, downloads };

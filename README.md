@@ -15,7 +15,7 @@ Hummingbird is a local-network chat and file-sharing app for browsers, PWAs, And
 | Keep history offline | History and attachments stay in browser storage, subject to the site's quota | History stays on the device. Attachments can live on a separate drive |
 | Transfer large files and folders | Stream to storage and resume interruptions while the page stays open | Stream to disk and resume interruptions while the app stays open |
 
-Android uses the same chat engine. Its universal APK includes ARM64 and ARMv7, and received attachments can be saved to a folder selected on the phone. [Android build and verification](docs/android.md)
+All clients show discovered devices in the chat list. Contacts found by number are saved locally, so you can reopen their chats after a refresh. Android uses the same chat engine. Its universal APK includes ARM64 and ARMv7, and received attachments can be saved to a folder selected on the phone. [Android build and verification](docs/android.md)
 
 ## Architecture
 
@@ -36,7 +36,7 @@ The clients share the React interface and the engine for contacts, messages, and
 
 | Goal | Start here |
 | --- | --- |
-| Install or update on Android | Download `ky-im-<version>-android-arm.apk` from a release that includes Android. Once installed, check for updates in Me → About Hummingbird. |
+| Install or update on Android | Download `ky-im-<version>-android-universal.apk` from a release that includes Android. In Me → About Hummingbird, check for updates and download them in the app or in your browser. |
 | Install the desktop app | Download the universal macOS installer or Windows x64 installer from [GitHub Releases](https://github.com/kuangye-team/ky-im/releases). |
 | Host the website and API | Extract `ky-im-<version>-bin.tar.gz` from the same release. Run `start_linux.sh`, `start_mac.sh`, or `start_win.bat` in the extracted `release/` directory. |
 | Run with Docker | Use the [prebuilt image](docker/compose.yml) as shown below. To build a custom image, complete source setup and run `npm run compose` from the repository root. |

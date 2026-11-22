@@ -236,6 +236,60 @@ textarea.form-input {
   color: var(--primary);
   white-space: nowrap;
 }
+.attachment-preview-dialog .modal-heading h2 {
+  overflow-wrap: anywhere;
+}
+.text-preview-dialog .modal-heading {
+  margin-bottom: 16px;
+}
+.text-preview-toolbar,
+.text-preview-toolbar h3,
+.text-preview-pagination {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.text-preview-toolbar .secondary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.text-preview-toolbar {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.text-preview-toolbar h3,
+.text-preview-pagination {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.text-preview-source {
+  margin: 0;
+  min-height: 8rem;
+  max-height: 55dvh;
+  overflow: auto;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font: 14px/1.65 ui-monospace, monospace;
+  tab-size: 4;
+  user-select: text;
+}
+.text-preview-source code {
+  font: inherit;
+}
+html[data-layout="phone"] .text-preview-source {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.text-preview-pagination {
+  justify-content: center;
+  margin-top: 10px;
+}
 .lightbox-image {
   display: block;
   max-width: 100%;

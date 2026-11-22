@@ -100,6 +100,8 @@ export interface StorageAdapter {
   createFileDestination?(message: Message): Promise<FileDestination>;
   createFolderDestination?(message: Message): Promise<FolderDestination>;
   getAttachmentSource?(id: string): Promise<AttachmentSource | undefined>;
+  mediaPreviewUrl?(id: string): string;
+  openAttachment?(id: string, choose: boolean): Promise<void>;
   exportAttachment?(message: Message, target?: FileDestination): Promise<void>;
   getStorageInfo?(): Promise<StorageInfo>;
   moveStorage?(directory: string): Promise<StorageMove>;

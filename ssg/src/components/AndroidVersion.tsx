@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { Download, LoaderCircle, RefreshCw } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { Download, ExternalLink, LoaderCircle, PackageOpen, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { checkAndroidUpdate, type AndroidUpdate } from "../android-updates";
 import { openExternalUrl } from "../external-links";
@@ -12,13 +13,15 @@ export function AndroidVersion() {
   const { t } = useTranslation();
   const [installed, setInstalled] = useState<string | null>();
   const [update, setUpdate] = useState<CheckState>({ status: "idle" });
-  const [linkFailed, setLinkFailed] = useState(false);
+  const [download, setDownload] = useState<"idle" | "downloading" | "ready">("idle");
+  const [notice, setNotice] = useState("");
   useEffect(() => {
     void getVersion().then(setInstalled, () => setInstalled(null));
   }, []);
 
   async function check() {
-    setLinkFailed(false);
+    setDownload("idle");
+    setNotice("");
     setUpdate({ status: "checking" });
     try {
       const version = installed ?? await getVersion();
@@ -26,6 +29,36 @@ export function AndroidVersion() {
       setUpdate(await checkAndroidUpdate(version));
     } catch {
       setUpdate({ status: "error" });
+    }
+  }
+
+  async function downloadApk() {
+    if (update.status !== "available") return;
+    setDownload("downloading");
+    setNotice("");
+    try {
+      await invoke("plugin:apk-update|download", { version: update.version, url: update.url });
+      setDownload("ready");
+    } catch (error) {
+      setDownload("idle");
+      setNotice((error as { code?: string } | null)?.code === "INVALID_APK"
+        ? "这个安装包与当前应用或更新版本不匹配，请重新检查更新。"
+        : "更新包未能下载，请重试或用浏览器下载。");
+    }
+  }
+
+  async function chooseInstaller() {
+    if (update.status !== "available") return;
+    setNotice("");
+    try {
+      await invoke("plugin:apk-update|choose_installer", { version: update.version });
+    } catch (error) {
+      if ((error as { code?: string } | null)?.code === "CACHE_MISS") {
+        setDownload("idle");
+        setNotice("更新包已清理，请重新下载。");
+      } else {
+        setNotice("暂时无法打开安装器，请重试或用浏览器下载。");
+      }
     }
   }
 
@@ -43,17 +76,23 @@ export function AndroidVersion() {
       {update.status === "error" && <span>{t("暂时无法检查更新，请稍后重试。")}</span>}
     </div>
     <div className="about-version-actions">
-      <button className="secondary-button" disabled={installed === undefined || checking} onClick={check}>
+      <button className="secondary-button" disabled={installed === undefined || checking || download === "downloading"} onClick={check}>
         {checking ? <LoaderCircle size={16} className="update-banner-spinner" /> : <RefreshCw size={16} />}
         {t(checking ? "正在检查更新…" : "检查更新")}
       </button>
-      {update.status === "available" && <button className="primary-button" onClick={() => {
-        setLinkFailed(false);
-        void openExternalUrl(update.url).catch(() => setLinkFailed(true));
-      }}>
-        <Download size={16} />{t("下载新版本")}
-      </button>}
+      {update.status === "available" && <>
+        <button className="primary-button" disabled={download === "downloading"}
+          onClick={download === "ready" ? chooseInstaller : downloadApk}>
+          {download === "downloading" ? <LoaderCircle size={16} className="update-banner-spinner" /> : download === "ready" ? <PackageOpen size={16} /> : <Download size={16} />}
+          {t(download === "ready" ? "选择安装器" : download === "downloading" ? "正在下载更新…" : "在应用内下载")}
+        </button>
+        <button className="secondary-button" onClick={() => {
+          setNotice("");
+          void openExternalUrl(update.url).catch(() => setNotice("链接暂时无法打开，请稍后重试。"));
+        }}><ExternalLink size={16} />{t("用浏览器下载")}</button>
+      </>}
     </div>
-    {linkFailed && <p className="about-version-error" role="alert">{t("链接暂时无法打开，请稍后重试。")}</p>}
+    {download === "ready" && <p className="about-version-error" role="status">{t("更新包已下载。你可以选择安装器继续，也可以稍后安装。")}</p>}
+    {notice && <p className="about-version-error" role="alert">{t(notice)}</p>}
   </section>;
 }

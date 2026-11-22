@@ -14,6 +14,28 @@ pub fn plugin() -> TauriPlugin<tauri::Wry> {
         .build()
 }
 
+pub struct AttachmentPlugin(pub PluginHandle<tauri::Wry>);
+
+pub fn attachment_plugin() -> TauriPlugin<tauri::Wry> {
+    Builder::new("attachment")
+        .setup(|app, api| {
+            app.manage(AttachmentPlugin(
+                api.register_android_plugin("team.kuangye.im", "AttachmentPlugin")?,
+            ));
+            Ok(())
+        })
+        .build()
+}
+
+pub fn update_plugin() -> TauriPlugin<tauri::Wry> {
+    Builder::new("apk-update")
+        .setup(|_, api| {
+            api.register_android_plugin("team.kuangye.im", "ApkUpdatePlugin")?;
+            Ok(())
+        })
+        .build()
+}
+
 pub fn initialize() -> Result<(), jni::errors::Error> {
     let context = ndk_context::android_context();
     // Tao installs the VM and a global Activity reference before entering Rust.

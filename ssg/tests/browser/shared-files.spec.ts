@@ -119,8 +119,10 @@ test("共享文件仅下载按钮触发下载，更多菜单支持键盘和实�
   });
   await expect(menu).toBeVisible();
   await expect(
-    menu.getByRole("menuitem", { name: "转发", exact: true }),
+    menu.getByRole("menuitem", { name: "查看", exact: true }),
   ).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: "转发", exact: true })).toBeFocused();
   await expect(
     menu.getByRole("menuitem", { name: "删除", exact: true }),
   ).toBeVisible();

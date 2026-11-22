@@ -63,14 +63,6 @@ async function useNumber(page: Page, numericId: string) {
   await page.goto("/");
 }
 
-async function connectTo(page: Page, numericId: string) {
-  const dialog = await invite(page);
-  await dialog.getByLabel("朋友的蜂鸟号", { exact: true }).fill(numericId);
-  await dialog.getByRole("button", { name: "连接", exact: true }).click();
-  await expect(dialog).toBeHidden();
-  await expect(page.getByRole("heading", { name: /在线的朋友/ })).toBeVisible();
-}
-
 function deviceCard(page: Page, name: string) {
   return page.locator(".device-card").filter({
     has: page.getByRole("heading", { name, exact: true }),
@@ -265,9 +257,7 @@ test("蜂鸟号连接整组及后续设备，保留自己的分组并分别保�
     await expect(status(alice).locator(".availability-value")).toHaveText(
       "在线",
     );
-    // Returning online can restore a selected contact by UUID. Re-entering the
-    // group number explicitly restores discovery of the complete device list.
-    await connectTo(alice, bobNumber!);
+    await alice.getByRole("button", { name: "在线设备", exact: true }).click();
     for (const name of names.slice(1)) {
       await expect(deviceCard(alice, name)).toBeVisible();
     }

@@ -53,6 +53,7 @@ export function HistoryPage({
       );
       onNotice(t("聊天记录已导出，附件请单独下载保存"));
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       onNotice(
         error instanceof Error
           ? translateError(error.message)

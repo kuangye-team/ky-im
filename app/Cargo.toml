@@ -34,6 +34,7 @@ async-stream = "0.3"
 uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt", "compat"] }
+http-range-header = "0.4.2"
 mime_guess = "2.0.5"
 tempfile = "3.27.0"
 proxyres = "1.5.7"
@@ -53,16 +54,20 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 jni = "0.22"
 base64 = "0.22"
 ndk-context = "0.1"
-tauri-plugin-android-fs = { version = "30.2.0", default-features = false }
+tauri-plugin-android-fs = { version = "30.2.0", default-features = false, features = ["legacy_storage_permission"] }
 fs2 = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSProcessInfo", "NSString"] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"
+
 [target.'cfg(windows)'.dependencies]
+dunce = "1"
 tauri = { version = "2", features = ["tray-icon"] }
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Threading"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_Threading", "Win32_UI_Shell"] }
 
 [profile.release]
 lto = "thin"

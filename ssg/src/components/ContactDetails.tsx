@@ -7,6 +7,7 @@ import { isPeerOnline } from "../core/types";
 import type { Profile, Message, ChatSnapshot } from "../core/types";
 import { RemarkEditor } from "./RemarkEditor";
 import { CopyNumberButton } from "./OwnNumber";
+import { FileMenuActions } from "./attachmentActions";
 import { SharedFileActions } from "./SharedFileActions";
 import { readableSize, downloadAttachment } from "./fileDownloads";
 import { Avatar, DeviceIcon, peerName } from "./Avatar";
@@ -164,28 +165,31 @@ export function SharedFiles({
                     : ""}
                 </small>
               </span>
-              <SharedFileActions
-                fileName={file.fileName || t("附件")}
-                transferring={
-                  file.status === "sending" ||
-                  file.status === "awaiting-acceptance"
-                }
-                recordOnly={
-                  file.attachmentStorage === "external" ||
-                  (file.senderId !== engine.getSnapshot().profile.id &&
-                    file.status === "failed")
-                }
-                canForward={!file.folder}
-                onDownload={() => {
-                  void downloadAttachment(engine.storage, file).catch((error) =>
-                    onNotice(
-                      error instanceof Error ? error.message : "无法读取附件",
-                    ),
-                  );
-                }}
-                onForward={() => onForward(file)}
-                onDelete={() => onDelete(file)}
-              />
+              <FileMenuActions message={file} storage={engine.storage} onNotice={onNotice}>{actions => (
+                <SharedFileActions
+                  actions={actions}
+                  fileName={file.fileName || t("附件")}
+                  transferring={
+                    file.status === "sending" ||
+                    file.status === "awaiting-acceptance"
+                  }
+                  recordOnly={
+                    file.attachmentStorage === "external" ||
+                    (file.senderId !== engine.getSnapshot().profile.id &&
+                      file.status === "failed")
+                  }
+                  canForward={!file.folder}
+                  onDownload={() => {
+                    void downloadAttachment(engine.storage, file).catch((error) =>
+                      onNotice(
+                        error instanceof Error ? error.message : "无法读取附件",
+                      ),
+                    );
+                  }}
+                  onForward={() => onForward(file)}
+                  onDelete={() => onDelete(file)}
+                />
+              )}</FileMenuActions>
             </div>
           ))
       ) : (

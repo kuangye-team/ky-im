@@ -124,8 +124,11 @@ export class ChatEngine {
     private network: NetworkAdapters = browserNetwork(),
     cachedProfiles: Profile[] = [],
   ) {
+    // A saved chat can carry a newly resolved number for the same profile revision.
     for (const peer of [...cachedProfiles, ...conversations.map(c => c.peer)]) {
-      if (isProfile(peer) && (peer.revision ?? 0) > (this.cachedProfiles.get(peer.id)?.revision ?? 0)) this.cachedProfiles.set(peer.id, peer);
+      if (isProfile(peer) && peer.revision && peer.revision >= (this.cachedProfiles.get(peer.id)?.revision ?? 0)) {
+        this.cachedProfiles.set(peer.id, peer);
+      }
     }
     this.storage = storage;
     this.snapshot = {
@@ -163,7 +166,14 @@ export class ChatEngine {
       isDiscovered: id => this.connections.isDiscovered(id),
       peerJoined: id => this.connections.peerJoined(id),
       updatePeers: (peers, removed, replaceAll) => this.connections.updatePeers(peers, removed, replaceAll),
-      refreshPeer: peer => this.history.refreshPeer(this.cachedProfiles.get(peer.id) ?? peer),
+      refreshPeer: (peer, remember) => {
+        let profile = this.cachedProfiles.get(peer.id) ?? peer;
+        if (remember && profile.numericId !== peer.numericId) {
+          profile = { ...profile, numericId: peer.numericId };
+          this.cachedProfiles.set(peer.id, profile);
+        }
+        return this.history.refreshPeer(profile, remember);
+      },
       ensureLink: id => this.connections.ensureLink(id),
       networkChanged: this.onNetworkChange,
       stop: () => this.stop(),

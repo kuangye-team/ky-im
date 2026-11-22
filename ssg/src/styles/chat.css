@@ -112,6 +112,38 @@
   border-radius: 12px 0 12px 12px;
   box-shadow: 0 4px 9px var(--primary-shadow);
 }
+.read-message-button {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-top: 5px;
+  min-height: 30px;
+  padding: 0;
+  color: inherit;
+  font-weight: 600;
+}
+.read-message-button:hover { text-decoration: underline; }
+@media (pointer: coarse) {
+  .read-message-button { min-height: 44px; }
+}
+.full-message-dialog .modal-heading-actions .icon-button {
+  border: 1px solid var(--border);
+}
+.full-message-text {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  max-height: 56dvh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.75;
+}
 .message-meta {
   font-size: 8px;
   display: flex;
@@ -140,7 +172,8 @@
   color: var(--danger);
   background: var(--danger-soft);
 }
-.message-delete-preview {
+.message-delete-preview,
+.attachment-open-name {
   max-height: 140px;
   overflow: auto;
   overflow-wrap: anywhere;
@@ -196,6 +229,11 @@
   border-radius: 8px;
   background: var(--primary-subtle);
   color: var(--primary);
+}
+button.media-preview-button:hover,
+button.media-preview-button:focus-visible {
+  background: var(--primary);
+  color: var(--on-primary);
 }
 .attachment-meta {
   min-width: 0;

@@ -82,7 +82,6 @@ androidComponents.onVariants { variant ->
     val name = variant.name.replaceFirstChar { it.uppercase() }
     val version = variant.outputs.single().versionName.get()
     val arch = when (variant.flavorName) {
-        "universal" -> "arm"
         "arm" -> "armeabi-v7a"
         else -> variant.flavorName
     }

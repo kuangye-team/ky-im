@@ -9,7 +9,7 @@ const manifest = {
     "darwin-aarch64": { url: "https://example.com/ky-im-macos-universal.app.tar.gz" },
     "windows-x86_64": { url: "https://example.com/ky-im-windows-x64-setup.exe" },
   },
-  downloads: { android: "https://example.com/ky-im-1.2.3-android-arm.apk" },
+  downloads: { android: "https://example.com/ky-im-1.2.3-android-universal.apk" },
 };
 
 test("客户端入口按系统推荐下载，悬浮区可进入，键盘与关闭行为正常", async ({ page }) => {
@@ -69,7 +69,8 @@ test("下载失败可重试，手机可点击查看下载且不会横向溢出",
   const panel = page.getByRole("dialog", { name: "下载蜂鸟客户端" });
   await expect(panel.getByRole("alert")).toContainText("下载地址暂时无法获取");
   const apk = panel.getByRole("link", { name: /Android.*APK/ });
-  await expect(apk).toHaveAttribute("href", /\/releases\/latest\/download\/ky-im-android-arm\.apk$/);
+  await expect(apk).toHaveCount(0);
+  await expect(panel.getByRole("link", { name: "查看所有下载" })).toBeVisible();
   await expect(panel.getByText("若未打开，请先下载并安装客户端。")).toBeVisible();
   await panel.getByRole("button", { name: "重试", exact: true }).click();
   await expect(panel.getByText("v1.2.3")).toBeVisible();

@@ -18,6 +18,8 @@ import { LARGE_FILE_BYTES } from "../core/storage";
 import type { ChatSnapshot, Message } from "../core/types";
 import { storageUsage } from "../core/storage/usage";
 import { Modal } from "./Modal";
+import { FileMenuActions } from "./attachmentActions";
+import { FileActionsMenu } from "./SharedFileActions";
 import { ResetDataButton } from "./ResetDataButton";
 import { downloadAttachment, readableSize } from "./fileDownloads";
 import "./StoragePage.css";
@@ -405,35 +407,38 @@ export function StoragePage({
                     <span className="large-file-size">
                       {readableSize(file.size)}
                     </span>
-                    {(!phone || !selecting) && <div className="large-file-actions">
-                      <button
-                        className="icon-button large-file-download"
-                        aria-label={t("下载 {{name}}", { name })}
-                        title={
-                          downloading === file.id
-                            ? t("正在准备下载…")
-                            : t("下载文件")
-                        }
-                        aria-busy={downloading === file.id}
-                        disabled={busy}
-                        onClick={() => void downloadFile(file)}
-                      >
-                        {downloading === file.id ? (
-                          <LoaderCircle size={17} className="history-spinner" />
-                        ) : (
-                          <Download size={17} />
-                        )}
-                      </button>
-                      {!phone && <button
-                        className="icon-button large-file-delete"
-                        aria-label={t("删除 {{name}}", { name })}
-                        title={t("删除文件及对应消息")}
-                        disabled={busy}
-                        onClick={() => confirmDeletion([file])}
-                      >
-                        <Trash2 size={17} />
-                      </button>}
-                    </div>}
+                    {(!phone || !selecting) && <FileMenuActions message={file} storage={engine.storage} onNotice={onNotice}>{actions => (
+                      <div className="large-file-actions">
+                        <FileActionsMenu fileName={name} actions={actions} />
+                        <button
+                          className="icon-button large-file-download"
+                          aria-label={t("下载 {{name}}", { name })}
+                          title={
+                            downloading === file.id
+                              ? t("正在准备下载…")
+                              : t("下载文件")
+                          }
+                          aria-busy={downloading === file.id}
+                          disabled={busy}
+                          onClick={() => void downloadFile(file)}
+                        >
+                          {downloading === file.id ? (
+                            <LoaderCircle size={17} className="history-spinner" />
+                          ) : (
+                            <Download size={17} />
+                          )}
+                        </button>
+                        {!phone && <button
+                          className="icon-button large-file-delete"
+                          aria-label={t("删除 {{name}}", { name })}
+                          title={t("删除文件及对应消息")}
+                          disabled={busy}
+                          onClick={() => confirmDeletion([file])}
+                        >
+                          <Trash2 size={17} />
+                        </button>}
+                      </div>
+                    )}</FileMenuActions>}
                   </li>
                 );
               })}

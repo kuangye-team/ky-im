@@ -336,14 +336,14 @@ jobs:
           set -eu
           : "${ANDROID_KEY_SHA256:?Configure the release certificate SHA-256}"
           npm run android:build -- --ci
-          apk="app/android-dist/ky-im-${RELEASE_TAG#v}-android-arm.apk"
+          apk="app/android-dist/ky-im-${RELEASE_TAG#v}-android-universal.apk"
           python3 scripts/verify-android.py "$apk" "$RELEASE_TAG" --certificate "$ANDROID_KEY_SHA256"
       - uses: actions/upload-artifact@v7
         with:
-          name: android-arm
+          name: android-universal
           path: |
-            app/android-dist/*-android-arm.apk
-            app/android-dist/*-android-arm.apk.sha256
+            app/android-dist/*-android-universal.apk
+            app/android-dist/*-android-universal.apk.sha256
           if-no-files-found: error
           retention-days: 7
 
@@ -376,7 +376,7 @@ jobs:
           path: app/dist/
       - uses: actions/download-artifact@v8
         with:
-          name: android-arm
+          name: android-universal
           path: app/android-dist/
       - name: Package release
         env:
@@ -398,11 +398,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           archive="artifacts/ky-im-${RELEASE_TAG#v}-bin.tar.gz"
-          cp "app/android-dist/ky-im-${RELEASE_TAG#v}-android-arm.apk" app/android-dist/ky-im-android-arm.apk
+          apk="app/android-dist/ky-im-${RELEASE_TAG#v}-android-universal.apk"
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* app/android-dist/* --clobber
+            gh release upload "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* "$apk" "$apk.sha256" --clobber
           else
-            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* app/android-dist/* \
+            gh release create "$RELEASE_TAG" "$archive" "$archive.sha256" app/dist/* "$apk" "$apk.sha256" \
               --verify-tag --title "ky-im ${RELEASE_TAG#v}" --generate-notes --latest=false
           fi
       - name: Mark release as latest

@@ -15,7 +15,7 @@
 | 离线查看记录 | 记录和附件保存在浏览器中，容量受站点配额限制 | 记录保存在本机，附件可放在其他磁盘 |
 | 传输大文件和文件夹 | 边接收边写入，保持页面打开即可在短暂断线后续传 | 边接收边写入磁盘，保持应用运行即可在短暂断线后续传 |
 
-Android 客户端沿用同一套聊天引擎。一个 APK 同时包含 ARM64 和 ARMv7，收到的附件可保存到手机上选定的文件夹。[Android 构建与验收](docs/android.zh.md)
+三端的聊天列表都会显示已发现的设备。通过蜂鸟号找到的联系人会保存在本机，刷新后可继续聊天。Android 客户端沿用同一套聊天引擎。一个 APK 同时包含 ARM64 和 ARMv7，收到的附件可保存到手机上选定的文件夹。[Android 构建与验收](docs/android.zh.md)
 
 ## 架构原理
 
@@ -36,7 +36,7 @@ flowchart LR
 
 | 场景 | 入口 |
 | --- | --- |
-| 安装或更新 Android 客户端 | 首次安装可从发布页下载 `ky-im-<version>-android-arm.apk`。安装后可在「我的 → 关于蜂鸟」检查更新。 |
+| 安装或更新 Android 客户端 | 首次安装可从发布页下载 `ky-im-<version>-android-universal.apk`。安装后可在「我的 → 关于蜂鸟」检查更新，选择在应用内下载或用浏览器下载。 |
 | 安装桌面客户端 | 在 [GitHub Releases](https://github.com/kuangye-team/ky-im/releases) 下载 macOS 通用安装包或 Windows x64 安装包。 |
 | 自行托管网页与 API | 从同一发布页下载并解压 `ky-im-<version>-bin.tar.gz`，在解压后的 `release/` 目录运行对应平台的 `start_linux.sh`、`start_mac.sh` 或 `start_win.bat`。 |
 | 用 Docker 部署 | 按下方命令启动[预构建镜像](docker/compose.yml)。如需定制镜像，完成源码环境准备后，在仓库根目录运行 `npm run compose`。 |

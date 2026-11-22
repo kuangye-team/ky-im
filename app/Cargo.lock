@@ -2286,6 +2286,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "http-range-header"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9171a2ea8a68358193d15dd5d70c1c10a2afc3e7e4c5bc92bc9f025cebd7359c"
+
+[[package]]
 name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2297,8 +2303,11 @@ version = "0.1.0"
 dependencies = [
  "async-stream",
  "base64 0.22.1",
+ "dunce",
  "fs2",
  "futures",
+ "gtk",
+ "http-range-header",
  "if-addrs",
  "if-watch",
  "jni 0.22.4",

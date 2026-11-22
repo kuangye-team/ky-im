@@ -1,4 +1,7 @@
+import { useFileActions } from "./attachmentActions";
 import { PhoneActions } from "./PhoneActions";
+import { MessageText } from "./MessageText";
+import { copyText } from "./copyText";
 import { TRANSFER_CONFIG } from "../config";
 import { useTranslation } from "react-i18next";
 import { i18n } from "../i18n";
@@ -8,6 +11,7 @@ import {
   ArrowDownToLine,
   Check,
   CheckCheck,
+  Copy,
   FileText,
   FolderOpen,
   Forward,
@@ -41,7 +45,6 @@ export function MessageBubble({
   progress,
   recovering,
   onNotice,
-  onImage,
   onDelete,
   onForward,
 }: {
@@ -53,7 +56,6 @@ export function MessageBubble({
   progress?: number;
   recovering?: boolean;
   onNotice: (text: string) => void;
-  onImage: (image: { url: string; name: string }) => void;
   onDelete: () => void;
   onForward: () => void;
 }) {
@@ -65,7 +67,16 @@ export function MessageBubble({
   };
   useEffect(() => cancelHold, []);
   const [actions, setActions] = useState(false);
-  const [url, setUrl] = useState("");
+  const [image, setImage] = useState<{ url: string; blob: Blob }>();
+  const { preview, openActions, player } = useFileActions({ message, storage: engine.storage, onNotice }, image?.blob);
+  const copyMessage = () => {
+    void copyText(message.text ?? "").then(
+      () => onNotice(t("已复制")), () => onNotice(t("复制失败，请选中文字后手动复制")),
+    );
+  };
+  const messageActions = message.kind === "text"
+    ? [{ label: t("复制"), Icon: Copy, run: copyMessage }]
+    : openActions;
   const [choosing, setChoosing] = useState(false);
   const [savePhase, setSavePhase] = useState<"choosing" | "saving" | null>(null);
   const savingAs = savePhase !== null;
@@ -121,6 +132,7 @@ export function MessageBubble({
   };
   useEffect(() => {
     if (message.kind !== "image" || external) return;
+    setImage(undefined);
     let alive = true;
     let objectUrl = "";
     void engine
@@ -128,7 +140,7 @@ export function MessageBubble({
       .then((blob) => {
         if (blob && alive) {
           objectUrl = URL.createObjectURL(blob);
-          setUrl(objectUrl);
+          setImage({ url: objectUrl, blob });
         }
       })
       .catch(() => undefined);
@@ -148,7 +160,8 @@ export function MessageBubble({
     <div
       className={`message-row ${mine ? "mine" : ""}`}
       onPointerDown={phone ? event => {
-        if (event.pointerType !== "touch" || (event.target as HTMLElement).closest("button")) return;
+        if (event.pointerType !== "touch" || !event.currentTarget.contains(event.target as Node) ||
+            (event.target as Element).closest("button, .inline-media")) return;
         cancelHold();
         hold.current = { x: event.clientX, y: event.clientY, timer: window.setTimeout(() => {
           setActions(true);
@@ -159,30 +172,39 @@ export function MessageBubble({
       } : undefined}
       onPointerUp={phone ? cancelHold : undefined}
       onPointerCancel={phone ? cancelHold : undefined}
-      onContextMenu={phone ? event => { event.preventDefault(); setActions(true); } : undefined}
+      onContextMenu={phone ? event => {
+        if (!event.currentTarget.contains(event.target as Node) || (event.target as Element).closest(".inline-media")) return;
+        event.preventDefault(); setActions(true);
+      } : undefined}
       data-message-id={message.id}
     >
       <Avatar peer={peer} size="avatar-small" />
       <div className="message-content">
         {message.kind === "text" ? (
-          <div className="text-bubble">{message.text}</div>
+          <MessageText text={message.text ?? ""} onCopy={copyMessage} />
         ) : (
           <div
             className={`attachment-bubble ${message.kind === "image" ? "image-bubble" : ""}`}
           >
-            {message.kind === "image" && url ? (
+            {message.kind === "image" && image ? (
               <button
                 className="image-preview"
                 aria-label={t("预览 {{value}}", { value: message.fileName })}
-                onClick={() =>
-                  onImage({ url, name: message.fileName || t("图片") })
-                }
+                disabled={!preview}
+                onClick={preview?.run}
               >
                 <img
-                  src={url}
+                  src={image.url}
                   alt={message.fileName || t("收到的图片")}
                   loading="lazy"
                 />
+              </button>
+            ) : preview && message.kind !== "image" ? (
+              <button className="file-icon media-preview-button"
+                aria-label={player ? preview.label : t(preview.opensDialog ? "查看 {{value}}" : "播放 {{value}}", { value: message.fileName })}
+                title={preview.label} aria-haspopup={preview.opensDialog ? "dialog" : undefined}
+                aria-expanded={preview.opensDialog ? undefined : !!player} onClick={preview.run}>
+                <preview.Icon size={23} aria-hidden="true" />
               </button>
             ) : (
               <span className="file-icon">
@@ -220,6 +242,7 @@ export function MessageBubble({
                 <ArrowDownToLine size={18} />
               </button>
             )}
+            {player}
             {message.status === "sending" && progress !== undefined && (
               <div className="transfer-progress">
                 <i style={{ width: `${Math.min(100, progress)}%` }} />
@@ -285,8 +308,9 @@ export function MessageBubble({
                 {t("取消")}
               </button>
             )}
-          {!mine && !message.folder && !external && message.kind !== "text" && canSaveLargeFiles() &&
-            (awaiting || message.status === "sending") && (
+          {!mine && !message.folder && !external && message.kind !== "text" &&
+            (awaiting || message.status === "sending") &&
+            (engine.storage.createExternalFileDestination || canSaveLargeFiles()) && (
               <button className="message-forward-button" disabled={choosing || savingAs}
                 onClick={() => void saveAs()}>
                 {savingAs ? (
@@ -330,6 +354,9 @@ export function MessageBubble({
             </>
           )}
           {phone ? <button className="phone-message-more" aria-label={t("消息操作")} onClick={() => setActions(true)}><MoreHorizontal size={18} /></button> : <>
+          {messageActions.map(({ label, Icon, run }) => (
+            <button key={label} className="message-forward-button" onClick={run}><Icon size={12} />{label}</button>
+          ))}
           <button
             className="message-forward-button"
             aria-label={t("转发消息")}
@@ -364,6 +391,8 @@ export function MessageBubble({
             {t("删除")}
           </button></>}
           {phone && actions && <PhoneActions title={t("消息操作")} close={() => setActions(false)} actions={[
+            ...(preview?.opensDialog && message.kind === "file" ? [preview] : []),
+            ...messageActions,
             { label: t("转发消息"), Icon: Forward, run: onForward, disabled: message.status === "sending" || awaiting || external || !!message.folder || missingAttachment },
             { label: t("删除消息"), Icon: Trash2, run: onDelete, danger: true },
           ]} />}

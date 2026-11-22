@@ -9,6 +9,8 @@
   ],
   "permissions": [
     "core:default",
+    "apk-update:allow-download",
+    "apk-update:allow-choose-installer",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

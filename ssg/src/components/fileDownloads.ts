@@ -136,8 +136,15 @@ export async function downloadAttachment(
 }
 
 export async function download(blob: Blob, fileName: string) {
-  if (import.meta.env.VITE_DESKTOP) {
-    const file = await chooseFileDestination(fileName);
+  if (import.meta.env.VITE_DESKTOP || import.meta.env.VITE_ANDROID) {
+    let file: FileDestination;
+    if (import.meta.env.VITE_ANDROID) {
+      const { createDesktopStorage } = await import("../core/storage/desktop");
+      const storage = await createDesktopStorage();
+      file = await storage.chooseAndroidExport(fileName, blob.size);
+    } else {
+      file = await chooseFileDestination(fileName);
+    }
     try {
       await file.write(blob);
       await file.close();

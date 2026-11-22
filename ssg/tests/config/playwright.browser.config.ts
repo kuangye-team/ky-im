@@ -29,7 +29,7 @@ export default suiteConfig("browser", {
     {
       name: "mobile",
       use: { ...devices["iPhone 13"], defaultBrowserType: "chromium" },
-      testMatch: "**/mobile.spec.ts",
+      testMatch: ["**/mobile.spec.ts", "**/media-preview.spec.ts", "**/text-preview.spec.ts", "**/message-actions.spec.ts"],
     },
   ],
   webServer: [

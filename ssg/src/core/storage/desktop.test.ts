@@ -5,6 +5,7 @@ import {
   type StorageInvoke,
 } from "./desktop";
 import { newId } from "../protocol";
+import { download } from "../../components/fileDownloads";
 import { STORAGE_CONFIG } from "../../config";
 
 const nativeInvoke = vi.hoisted(() =>
@@ -47,6 +48,28 @@ describe("desktop adapter", () => {
       )).toEqual(["beginReceived", { base64: "AP8=" }, "begin"]);
     } finally {
       if (originalInvoke) nativeInvoke.mockImplementation(originalInvoke);
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("uses the Android save picker for file exports and stops when it is cancelled", async () => {
+    vi.stubEnv("VITE_ANDROID", "true");
+    try {
+      await createDesktopStorage();
+      const blob = new Blob(["abc"]);
+      nativeInvoke.mockClear();
+      nativeInvoke.mockResolvedValueOnce("export-token");
+      await download(blob, "history.json");
+      expect(nativeInvoke.mock.calls).toEqual([
+        ["android_export_writer", { id: expect.any(String), size: 3, name: "history.json" }],
+        ["storage_write", { base64: "YWJj" }, { headers: { "x-storage-token": "export-token" } }],
+        ["storage_request", { request: { op: "finish", token: "export-token" } }],
+      ]);
+      nativeInvoke.mockClear();
+      nativeInvoke.mockResolvedValueOnce(null);
+      await expect(download(blob, "history.json")).rejects.toMatchObject({ name: "AbortError" });
+      expect(nativeInvoke).toHaveBeenCalledTimes(1);
+    } finally {
       vi.unstubAllEnvs();
     }
   });

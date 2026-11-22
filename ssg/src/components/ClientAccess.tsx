@@ -99,7 +99,7 @@ function ClientDownload({ iconOnly }: { iconOnly: boolean }) {
         </div>}
         <div className="client-download-options">
           {platforms.map((system) => {
-            const url = release?.downloads[system] || (system === "android" ? CLIENT_CONFIG.androidApkUrl : undefined);
+            const url = release?.downloads[system];
             if (!url) return null;
             return <a key={system} href={url} target="_blank" rel="noopener noreferrer"
               className={`client-download-option${platform === system ? " recommended" : ""}`}>

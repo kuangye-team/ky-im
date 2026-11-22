@@ -65,18 +65,23 @@ export class ChatHistory {
     );
     return operation;
   }
-  async refreshPeer(peer: Profile) {
+  async refreshPeer(peer: Profile, remember = false) {
     await this.write(async () => {
       const conversation = this.host.snapshot.conversations.find(
         (c) => c.peer.id === peer.id,
       );
-      if (!conversation || (conversation.peer.revision ?? 0) > (peer.revision ?? 0)) return;
+      if (!conversation) {
+        if (!remember) return;
+        const next = { peer, updatedAt: Date.now(), lastDeliveredAt: 0, unread: 0 };
+        await this.storage.saveConversation(next);
+        this.host.patch({ conversations: [next, ...this.host.snapshot.conversations] });
+        return;
+      }
+      if ((conversation.peer.revision ?? 0) > (peer.revision ?? 0)) return;
       const next = { ...conversation, peer };
       await this.storage.saveConversation(next);
       this.host.patch({
-        conversations: this.host.snapshot.conversations.map((c) =>
-          c.peer.id === peer.id ? next : c,
-        ),
+        conversations: this.host.snapshot.conversations.map(c => c === conversation ? next : c),
       });
     });
   }

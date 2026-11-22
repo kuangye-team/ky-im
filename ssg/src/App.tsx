@@ -13,7 +13,7 @@ import { ThemeSelector } from "./components/ThemeSelector";
 import { useCompatibilityHelp } from "./components/CompatibilityHelp";
 import { translateError } from "./localizeError";
 import "./i18n.css";
-import { useLayoutEffect, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ArrowLeft,
   Menu,
@@ -21,6 +21,7 @@ import {
   ArrowUpRight,
   ChevronDown,
   CircleHelp,
+  ExternalLink,
   FileText,
   HardDrive,
   Info,
@@ -41,6 +42,9 @@ import {
 import type { ChatEngine } from "./core";
 import { isPeerOnline } from "./core/types";
 import type { Profile, Message } from "./core/types";
+import { AttachmentActionsContext, type AttachmentToOpen, type FilePreview } from "./components/attachmentActions";
+import { AttachmentPreview } from "./components/AttachmentPreview";
+import { TextAttachmentPreview } from "./components/TextAttachmentPreview";
 import { Modal } from "./components/Modal";
 import { RefreshGuard } from "./components/RefreshGuard";
 import { ContactActions } from "./components/ContactActions";
@@ -165,10 +169,9 @@ export function App({ engine }: { engine: ChatEngine }) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [forwardTarget, setForwardTarget] = useState<Message | null>(null);
-  const [lightbox, setLightbox] = useState<{
-    url: string;
-    name: string;
-  } | null>(null);
+  const [preview, setPreview] = useState<FilePreview | null>(null);
+  const [fileToOpen, requestOpen] = useState<AttachmentToOpen | null>(null);
+  const attachmentActions = useMemo(() => ({ preview, setPreview, requestOpen }), [preview]);
   const workspaceRef = useRef<HTMLElement>(null);
   useEffect(() => {
     setModal(null);
@@ -251,21 +254,13 @@ export function App({ engine }: { engine: ChatEngine }) {
     setModal("invite");
   };
   const onlinePeers = snap.peers.filter((peer) => isPeerOnline(snap, peer.id));
-  const peers =
-    listTab === "online"
-      ? onlinePeers
-      : [
-          ...snap.conversations.map(
-            (c) => snap.peers.find((p) => p.id === c.peer.id) || c.peer,
-          ),
-          ...snap.peers.filter(
-            (p) => !snap.conversations.some((c) => c.peer.id === p.id),
-          ),
-        ];
+  const chatPeers = new Map(snap.conversations.map(({ peer }) => [peer.id, peer]));
+  for (const peer of snap.peers) chatPeers.set(peer.id, peer);
+  const peers = !phone && listTab === "online" ? onlinePeers : [...chatPeers.values()];
   const visiblePeers = peers.filter((p) =>
     `${peerName(p, snap)} ${p.name} ${p.bio} ${deviceLabel(p)} ${p.numericId || ""}`
       .toLowerCase()
-      .includes(filter.toLowerCase()),
+      .includes(filter.trim().toLowerCase()),
   );
   const connected = snap.status === "connected";
   const unread = snap.conversations.reduce((sum, c) => sum + c.unread, 0);
@@ -273,6 +268,7 @@ export function App({ engine }: { engine: ChatEngine }) {
     document.title = `${pageTitle} · ${t("蜂鸟")}`;
   }, [t, pageTitle]);
   return (
+    <AttachmentActionsContext.Provider value={attachmentActions}>
     <div className={phone ? "phone-shell" : "app-shell"}
       onClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}
       onAuxClickCapture={(event) => handleExternalLinkClick(event, () => notify("链接暂时无法打开，请稍后重试。"))}>
@@ -417,7 +413,7 @@ export function App({ engine }: { engine: ChatEngine }) {
               onDelete={requestDelete} onForward={setForwardTarget} onNotice={notify} />
           </section>
           : phone && view === "me" ? <PhoneMe engine={engine} snap={snap} about={() => setModal("help")} notice={notify} />
-          : phone && view === "chat" && !chatId ? <PhoneMessages engine={engine} snap={snap} open={selectPeer} filter={filter} setFilter={setFilter} onInvite={() => openConnection()} onNotice={notify} />
+          : phone && view === "chat" && !chatId ? <PhoneMessages peers={visiblePeers} hasPeers={peers.length > 0} engine={engine} snap={snap} open={selectPeer} filter={filter} setFilter={setFilter} onInvite={() => openConnection()} onNotice={notify} />
           : phone && view === "nearby" ? <PhoneDevices engine={engine} snap={snap} open={selectPeer} invite={openConnection} onNotice={notify} />
           : view === "chat" || desktopProfile ? (
             <>
@@ -570,7 +566,6 @@ export function App({ engine }: { engine: ChatEngine }) {
                   onExport={() => run(exportConversation(engine, activePeer))}
                   onDeleteHistory={() => setModal("delete")}
                   onNotice={notify}
-                  onImage={setLightbox}
                   onDelete={requestDelete}
                   onForward={setForwardTarget}
                 />
@@ -955,20 +950,26 @@ export function App({ engine }: { engine: ChatEngine }) {
           </button>
         </div>
       </Modal>
-      <Modal
-        open={!!lightbox}
-        onClose={() => setLightbox(null)}
-        title={lightbox?.name || t("图片预览")}
-        wide
-      >
-        {lightbox && (
-          <img
-            className="lightbox-image"
-            src={lightbox.url}
-            alt={lightbox.name}
-          />
-        )}
-      </Modal>
+      {preview?.kind === "image" && <AttachmentPreview key={preview.id} file={preview} storage={engine.storage} close={() => setPreview(null)} />}
+      {preview?.kind === "text" && <TextAttachmentPreview key={preview.id} file={preview} storage={engine.storage} close={() => setPreview(null)} />}
+      {fileToOpen && <Modal open className="message-dialog" title={t("打开这个文件？")}
+        description={t("将使用此设备上的默认应用打开。")} onClose={() => requestOpen(null)}>
+        <p className="attachment-open-name" dir="auto">{fileToOpen.fileName || t("附件")}</p>
+        <div className="modal-actions">
+          <button type="button" className="secondary-button" onClick={() => requestOpen(null)}>
+            <X size={15} aria-hidden="true" />
+            {t("取消")}
+          </button>
+          <button type="button" className="primary-button" onClick={() => {
+            requestOpen(null);
+            void engine.storage.openAttachment?.(fileToOpen.id, false).catch(error =>
+              notify(error instanceof Error ? error.message : String(error)));
+          }}>
+            <ExternalLink size={15} aria-hidden="true" />
+            {t("打开")}
+          </button>
+        </div>
+      </Modal>}
       {forwardTarget && (
         <ForwardMessageModal
           message={forwardTarget}
@@ -1022,6 +1023,7 @@ export function App({ engine }: { engine: ChatEngine }) {
         </div>
       </Modal>
     </div>
+    </AttachmentActionsContext.Provider>
   );
 }
 

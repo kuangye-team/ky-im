@@ -33,7 +33,8 @@ input,
 textarea {
   -webkit-tap-highlight-color: transparent;
 }
-button {
+/* Player skins supply their own button layout, including compact controls. */
+button:not(:where(.media-skin *)) {
   cursor: pointer;
   border: 0;
   background: none;

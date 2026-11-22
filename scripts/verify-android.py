@@ -21,6 +21,10 @@ def verify(apk, version, tools, expected_certificate):
         if field not in badging:
             raise ValueError(f"Unexpected Android manifest, expected {field}")
 
+    permissions = set(re.findall(r"uses-permission: name='([^']+)'", badging))
+    if "android.permission.REQUEST_INSTALL_PACKAGES" not in permissions or "android.permission.INSTALL_PACKAGES" in permissions:
+        raise ValueError("Expected user-confirmed installation permissions")
+
     with zipfile.ZipFile(apk) as archive:
         libs = [entry for entry in archive.namelist() if entry.startswith("lib/") and entry.endswith(".so")]
         abis = {entry.split("/")[1] for entry in libs}

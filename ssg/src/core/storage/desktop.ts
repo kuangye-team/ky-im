@@ -1,7 +1,8 @@
+import { newId } from "../protocol";
 import { binaryPayload } from "../../native-ipc";
 import { fullProfile, publicProfile, storedProfile } from "../profile-wire";
 import { transferMetrics as metrics } from "../transferMetrics";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import type {
   AttachmentSource,
   Conversation,
@@ -152,12 +153,14 @@ export class DesktopStorageAdapter implements StorageAdapter {
       },
     };
   }
+  async chooseAndroidExport(name: string, size: number, id = newId()) {
+    const token = await invoke<string | null>("android_export_writer", { id, size, name });
+    if (!token) throw new DOMException("Cancelled", "AbortError");
+    return this.writer(token);
+  }
   async createExternalFileDestination(message: Message, path: string) {
-    if (import.meta.env.VITE_ANDROID) {
-      const token = await invoke<string | null>("android_export_writer", { id: message.id, size: message.size, name: message.fileName || "附件" });
-      if (!token) throw new DOMException("Cancelled", "AbortError");
-      return this.writer(token);
-    }
+    if (import.meta.env.VITE_ANDROID)
+      return this.chooseAndroidExport(message.fileName || "附件", message.size ?? 0, message.id);
     const token = await this.call<string>({ op: "beginExternal", id: message.id, size: message.size, destination: path });
     return this.writer(token);
   }
@@ -241,6 +244,12 @@ export class DesktopStorageAdapter implements StorageAdapter {
     for (let offset = 0; offset < source.size; offset += BLOCK)
       chunks.push(await source.slice(offset, offset + BLOCK).arrayBuffer());
     return new Blob(chunks, { type: source.type });
+  }
+  mediaPreviewUrl(id: string) {
+    return convertFileSrc(id, "ky-media");
+  }
+  async openAttachment(id: string, choose: boolean) {
+    await invoke("open_attachment", { id, choose });
   }
   async exportAttachment(message: Message, target?: FileDestination) {
     if (target) {
